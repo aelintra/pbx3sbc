@@ -58,9 +58,7 @@ If you prefer to install manually or need to customize the installation:
 sudo apt-get update
 sudo apt-get install -y \
     kamailio \
-    kamailio-mysql-modules \
     kamailio-sqlite-modules \
-    kamailio-tls-modules \
     sqlite3 \
     curl \
     wget \
@@ -178,14 +176,20 @@ sudo litestream databases
 
 ### 3. Test SIP Connectivity
 
-Use a SIP client to test:
+Use a SIP client tool to test (optional):
 
 ```bash
-# Install sip client (optional)
-sudo apt-get install sip-tester
+# Install a SIP testing tool (choose one):
+# Option 1: sipsak (recommended)
+sudo apt-get install sipsak
+sipsak -s sip:your-domain.com -H your-domain.com
 
-# Test registration
-sip_client -s sip:your-domain.com -u test
+# Option 2: sipp (for more advanced testing)
+sudo apt-get install sipp
+sipp -sf uac.xml your-domain.com
+
+# Option 3: sip-tester (if available in your repository)
+# sudo apt-get install sip-tester
 ```
 
 ## Firewall Configuration

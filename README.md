@@ -25,7 +25,7 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 ## Documentation
 
 - [Installation Guide](INSTALL.md) - Complete installation instructions
-- [Testing Guide](TESTING.md) - How to test the installation
+- [Testing Guide](docs/TESTING.md) - How to test the installation
 - [Overview Documentation](docs/01-overview.md) - Architecture and configuration details
 
 ## Project Structure

@@ -130,6 +130,12 @@ install_litestream() {
         return
     fi
     
+    # Check if jq is available (needed for version detection)
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required but not installed. Install it manually or run without --skip-deps"
+        exit 1
+    fi
+    
     # Detect architecture
     ARCH=$(uname -m)
     case $ARCH in
@@ -204,6 +210,18 @@ create_directories() {
     chown -R "${KAMAILIO_USER}:${KAMAILIO_GROUP}" /var/run/kamailio
     
     log_success "Directories created"
+}
+
+setup_helper_scripts() {
+    log_info "Setting up helper scripts..."
+    
+    # Ensure scripts are executable
+    if [[ -d "$SCRIPT_DIR" ]]; then
+        chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
+        log_success "Helper scripts are executable"
+    else
+        log_warn "Scripts directory not found: ${SCRIPT_DIR}"
+    fi
 }
 
 configure_firewall() {
@@ -749,8 +767,10 @@ verify_installation() {
     echo "   journalctl -u litestream -f"
     echo "   journalctl -u kamailio -f"
     echo
-    echo "4. Test SIP connectivity:"
-    echo "   sip_client -s sip:your-domain.com -u test"
+    echo "4. Test SIP connectivity (using a SIP client tool):"
+    echo "   # Install a SIP testing tool (e.g., sipsak, sipp, or sip-tester if available)"
+    echo "   # Example with sipsak:"
+    echo "   # sipsak -s sip:your-domain.com -H your-domain.com"
     echo
 }
 
@@ -772,6 +792,7 @@ main() {
     install_litestream
     create_user
     create_directories
+    setup_helper_scripts
     configure_firewall
     create_litestream_config
     create_litestream_service
