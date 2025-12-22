@@ -25,6 +25,7 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 ## Documentation
 
 - [Installation Guide](INSTALL.md) - Complete installation instructions
+- [Testing Guide](TESTING.md) - How to test the installation
 - [Overview Documentation](docs/01-overview.md) - Architecture and configuration details
 
 ## Project Structure
@@ -32,7 +33,9 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 ```
 PBX3sbc/
 ├── install.sh              # Main installation script
+├── test-installation.sh    # Automated test suite
 ├── INSTALL.md              # Installation guide
+├── TESTING.md              # Testing guide
 ├── scripts/                # Helper scripts
 │   ├── init-database.sh    # Initialize database
 │   ├── add-domain.sh       # Add domain to routing
@@ -72,6 +75,16 @@ sudo ./scripts/view-status.sh
 sudo ./scripts/restore-database.sh
 # Or restore to specific timestamp:
 sudo ./scripts/restore-database.sh "2024-01-15T10:30:00Z"
+```
+
+### Test Installation
+
+```bash
+# Run automated test suite
+sudo ./test-installation.sh
+
+# Or follow the manual testing guide
+# See TESTING.md for detailed testing procedures
 ```
 
 ## Requirements
