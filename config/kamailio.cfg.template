@@ -1,0 +1,168 @@
+#!KAMAILIO
+#
+# Kamailio SIP Edge Router Configuration Template
+# This file is used by install.sh if present, otherwise a default config is created
+#
+
+####### Global Parameters #########
+
+debug=2
+log_stderror=no
+fork=yes
+children=4
+
+listen=udp:0.0.0.0:5060
+
+####### Modules ########
+
+loadmodule "sl.so"
+loadmodule "tm.so"
+loadmodule "rr.so"
+loadmodule "pv.so"
+loadmodule "xlog.so"
+loadmodule "siputils.so"
+loadmodule "maxfwd.so"
+loadmodule "textops.so"
+loadmodule "sanity.so"
+loadmodule "dispatcher.so"
+loadmodule "sqlops.so"
+loadmodule "db_sqlite.so"
+
+####### Module Parameters ########
+
+# --- SQLite routing database ---
+modparam("sqlops", "sqlcon",
+    "cb=>sqlite:///var/lib/kamailio/routing.db")
+
+# --- Dispatcher (health checks via SIP OPTIONS) ---
+modparam("dispatcher", "db_url",
+    "sqlite:///var/lib/kamailio/routing.db")
+
+modparam("dispatcher", "ds_ping_method", "OPTIONS")
+modparam("dispatcher", "ds_ping_interval", 30)
+modparam("dispatcher", "ds_probing_threshold", 2)
+modparam("dispatcher", "ds_inactive_threshold", 2)
+modparam("dispatcher", "ds_ping_reply_codes", "200")
+
+# --- Transaction timers ---
+modparam("tm", "fr_timer", 5)
+modparam("tm", "fr_inv_timer", 30)
+
+####### Routing Logic ########
+
+request_route {
+
+    # ---- Basic hygiene ----
+    if (!mf_process_maxfwd_header("10")) {
+        sl_send_reply("483", "Too Many Hops");
+        exit;
+    }
+
+    if (!sanity_check("1511", "7")) {
+        xlog("L_WARN", "Malformed SIP from $si\n");
+        exit;
+    }
+
+    # ---- Drop known scanners ----
+    if ($ua =~ "(?i)sipvicious|friendly-scanner|sipcli|nmap") {
+        exit;
+    }
+
+    # ---- In-dialog requests ----
+    if (has_totag()) {
+        route(WITHINDLG);
+        exit;
+    }
+
+    # ---- Allowed methods only ----
+    if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS")) {
+        sl_send_reply("405", "Method Not Allowed");
+        exit;
+    }
+
+    route(DOMAIN_CHECK);
+}
+
+####### Domain validation / door-knocker protection ########
+
+route[DOMAIN_CHECK] {
+
+    $var(domain) = $rd;
+
+    if ($var(domain) == "") {
+        exit;
+    }
+
+    # Optional extra hardening: domain consistency
+    if ($rd != $td) {
+        xlog("L_WARN",
+             "R-URI / To mismatch domain=$rd src=$si\n");
+        exit;
+    }
+
+    # Lookup dispatcher set for this domain
+    if (!sql_query("cb",
+        "SELECT dispatcher_setid \
+         FROM sip_domains \
+         WHERE domain='$var(domain)' AND enabled=1")) {
+
+        xlog("L_NOTICE",
+             "Door-knock blocked: domain=$var(domain) src=$si\n");
+        exit;
+    }
+
+    sql_result("cb", "dispatcher_setid", "$var(setid)");
+
+    route(TO_DISPATCHER);
+}
+
+####### Health-aware routing ########
+
+route[TO_DISPATCHER] {
+
+    # Select a healthy Asterisk from the dispatcher set
+    if (!ds_select_dst($var(setid), "4")) {
+        xlog("L_ERR",
+             "No healthy Asterisk nodes for domain=$rd\n");
+        sl_send_reply("503", "Service Unavailable");
+        exit;
+    }
+
+    record_route();
+
+    if (!t_relay()) {
+        sl_reply_error();
+    }
+
+    exit;
+}
+
+####### In-dialog handling ########
+
+route[WITHINDLG] {
+
+    if (loose_route()) {
+        route(RELAY);
+        exit;
+    }
+
+    sl_send_reply("404", "Not Here");
+    exit;
+}
+
+route[RELAY] {
+    if (!t_relay()) {
+        sl_reply_error();
+    }
+    exit;
+}
+
+####### Dispatcher events (visibility) ########
+
+event_route[dispatcher:dst-up] {
+    xlog("L_INFO", "Asterisk UP: $du\n");
+}
+
+event_route[dispatcher:dst-down] {
+    xlog("L_WARN", "Asterisk DOWN: $du\n");
+}

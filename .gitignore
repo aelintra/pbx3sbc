@@ -1,0 +1,33 @@
+# Backup files
+*.backup
+*.bak
+*.old
+*.orig
+*.swp
+*.tmp
+
+# Database files (if accidentally committed)
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Temporary files
+/tmp/
+*.tar.gz
+
+# Local configuration (may contain secrets)
+litestream.local.yml
+kamailio.local.cfg
