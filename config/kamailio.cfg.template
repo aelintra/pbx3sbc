@@ -101,19 +101,23 @@ route[DOMAIN_CHECK] {
     }
 
     # Lookup dispatcher set for this domain
-    if (!sql_query("cb",
-        "SELECT dispatcher_setid \
-         FROM sip_domains \
-         WHERE domain='$var(domain)' AND enabled=1")) {
-
+    if (!sql_query("cb", "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)' AND enabled=1", "domain_result")) {
         xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si\n");
+             "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");
+        exit;
+    }
+    
+    # Check if domain was found
+    if ($dbr(domain_result=>rows) == 0) {
+        sql_result_free("domain_result");
+        xlog("L_NOTICE",
+             "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
         exit;
     }
 
-    # Get the dispatcher_setid from query result
-    sql_result_get("cb", "dispatcher_setid", "$avp(setid)");
-    $var(setid) = $avp(setid);
+    # Get the dispatcher_setid from query result (first row, first column)
+    $var(setid) = $dbr(domain_result=>[0,0]);
+    sql_result_free("domain_result");
 
     route(TO_DISPATCHER);
 }
