@@ -164,15 +164,12 @@ install_litestream() {
     
     # Download and install
     cd /tmp
-    wget -q "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${ARCH}.tar.gz" || {
+    wget -q "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${ARCH}.deb" || {
         log_error "Failed to download Litestream"
         exit 1
     }
-    
-    tar -xzf "litestream-v${LITESTREAM_VERSION}-linux-${ARCH}.tar.gz"
-    mv litestream /usr/local/bin/
-    chmod +x /usr/local/bin/litestream
-    rm -f "litestream-v${LITESTREAM_VERSION}-linux-${ARCH}.tar.gz"
+
+    chmod +x /usr/bin/litestream
     
     # Verify installation
     if command -v litestream &> /dev/null; then
@@ -358,7 +355,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=${KAMAILIO_USER}
-ExecStart=/usr/local/bin/litestream replicate -config ${LITESTREAM_CONFIG}
+ExecStart=/usr/bin/litestream replicate -config ${LITESTREAM_CONFIG}
 Restart=always
 RestartSec=5
 StandardOutput=journal

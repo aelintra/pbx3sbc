@@ -4,7 +4,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/PBX3sbc.git
+git clone hhttps://github.com/aelintra/pbx3sbc.git
 cd PBX3sbc
 
 # Run installer
