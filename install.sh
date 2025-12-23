@@ -150,6 +150,8 @@ install_litestream() {
             exit 1
             ;;
     esac
+
+    log_info "Installing Litestream for architecture ${ARCH}..."
     
     # Get latest version
     log_info "Fetching latest Litestream version..."
@@ -164,12 +166,22 @@ install_litestream() {
     
     # Download and install
     cd /tmp
-    wget -q "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${ARCH}.deb" || {
+    DEB_FILE="litestream-${LITESTREAM_VERSION}-linux-${ARCH}.deb"
+    wget -q "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/${DEB_FILE}" || {
         log_error "Failed to download Litestream"
         exit 1
     }
 
-    chmod +x /usr/bin/litestream
+    # Install the .deb package
+    log_info "Installing ${DEB_FILE}..."
+    dpkg -i "${DEB_FILE}" || {
+        log_error "Failed to install Litestream package"
+        rm -f "${DEB_FILE}"
+        exit 1
+    }
+    
+    # Clean up downloaded file
+    rm -f "${DEB_FILE}"
     
     # Verify installation
     if command -v litestream &> /dev/null; then

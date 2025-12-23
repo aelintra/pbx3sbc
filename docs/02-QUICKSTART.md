@@ -4,8 +4,8 @@
 
 ```bash
 # Clone the repository
-git clone hhttps://github.com/aelintra/pbx3sbc.git
-cd PBX3sbc
+git clone https://github.com/aelintra/pbx3sbc.git
+cd pbx3sbc
 
 # Run installer
 sudo ./install.sh
