@@ -616,6 +616,12 @@ PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA wal_autocheckpoint = 1000;
 
+-- Version table (required by Kamailio modules)
+CREATE TABLE version (
+    table_name VARCHAR(32) PRIMARY KEY,
+    table_version INTEGER DEFAULT 0 NOT NULL
+);
+
 -- Domain routing table
 CREATE TABLE sip_domains (
     domain TEXT PRIMARY KEY,
@@ -637,6 +643,9 @@ CREATE TABLE dispatcher (
 );
 
 CREATE INDEX idx_dispatcher_setid ON dispatcher(setid);
+
+-- Initialize version table with dispatcher module version
+INSERT INTO version (table_name, table_version) VALUES ('dispatcher', 4);
 
 -- Example data (replace with your actual data)
 -- INSERT INTO sip_domains (domain, dispatcher_setid, enabled, comment) 
