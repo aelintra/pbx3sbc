@@ -517,7 +517,9 @@ route[DOMAIN_CHECK] {
         exit;
     }
 
-    sql_result("cb", "dispatcher_setid", "$var(setid)");
+    # Get the dispatcher_setid from query result
+    sql_result_get("cb", "dispatcher_setid", "$avp(setid)");
+    $var(setid) = $avp(setid);
 
     route(TO_DISPATCHER);
 }

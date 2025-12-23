@@ -116,7 +116,9 @@ route[DOMAIN_CHECK] {
         exit;
     }
 
-    sql_result("cb", "dispatcher_setid", "$var(setid)");
+    # Get the dispatcher_setid from query result
+    sql_result_get("cb", "dispatcher_setid", "$avp(setid)");
+    $var(setid) = $avp(setid);
 
     route(TO_DISPATCHER);
 }
@@ -254,7 +256,8 @@ The `setid` (set ID) column is a grouping mechanism that groups multiple destina
 ```kamailio
 # Step 1: Look up the domain to get its setid
 sql_query("cb", "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)'")
-sql_result("cb", "dispatcher_setid", "$var(setid)")
+sql_result_get("cb", "dispatcher_setid", "$avp(setid)")
+$var(setid) = $avp(setid)
 
 # Step 2: Use that setid to select from the dispatcher table
 ds_select_dst($var(setid), "4")  # Selects from all destinations with this setid
