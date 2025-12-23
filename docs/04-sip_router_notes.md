@@ -1,4 +1,4 @@
-# Kamailio Configuration Notes
+# SIP Router Notes
 
 ## Complete Kamailio Configuration
 

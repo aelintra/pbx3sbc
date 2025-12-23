@@ -11,7 +11,7 @@
 5. **SIP Signaling** is routed to healthy Asterisk/PBX3 backend nodes
 6. **RTP Media** bypasses the SBC and flows directly between endpoints and Asterisk
 
-> **Quick Installation:** This system includes an automated installer script. See [INSTALL.md](../INSTALL.md) for installation instructions, or run `sudo ./install.sh` after cloning the repository.
+> **Quick Installation:** This system includes an automated installer script. See [03-Install_notes.md](03-Install_notes.md) for installation instructions, or run `sudo ./install.sh` after cloning the repository.
 
 ## What This Configuration Provides
 
@@ -26,7 +26,7 @@
 
 ### Installation
 
-For installation instructions, see [INSTALL.md](../INSTALL.md). The automated installer (`install.sh`) handles all setup including dependencies, configuration, and service startup.
+For installation instructions, see [03-Install_notes.md](03-Install_notes.md). The automated installer (`install.sh`) handles all setup including dependencies, configuration, and service startup.
 
 ### Target Use Cases
 
@@ -1200,9 +1200,9 @@ event_route[dispatcher:dst-down] {
 
 ### Installation and Setup
 
-- **[INSTALL.md](../INSTALL.md)** - Complete installation guide with manual and automated options
-- **[QUICKSTART.md](../QUICKSTART.md)** - Quick reference for common tasks
-- **[README.md](../README.md)** - Project overview and quick start
+- **[03-Install_notes.md](03-Install_notes.md)** - Complete installation guide with manual and automated options
+- **[02-QUICKSTART.md](02-QUICKSTART.md)** - Quick reference for common tasks
+
 
 ### Helper Scripts
 

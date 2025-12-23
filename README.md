@@ -10,7 +10,7 @@ cd PBX3sbc
 sudo ./install.sh
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+See [03-Install_notes.md](03-Install_notes.md) for detailed installation instructions.
 
 ## Features
 
@@ -24,7 +24,7 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
 ## Documentation
 
-- [Installation Guide](INSTALL.md) - Complete installation instructions
+- [Installation Guide](03-Install_notes.md) - Complete installation instructions
 - [Testing Guide](docs/TESTING.md) - How to test the installation
 - [Overview Documentation](docs/01-overview.md) - Architecture and configuration details
 
@@ -34,7 +34,7 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 PBX3sbc/
 ├── install.sh              # Main installation script
 ├── test-installation.sh    # Automated test suite
-├── INSTALL.md              # Installation guide
+├── 03-Install_notes.md              # Installation guide
 ├── TESTING.md              # Testing guide
 ├── scripts/                # Helper scripts
 │   ├── init-database.sh    # Initialize database

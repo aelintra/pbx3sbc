@@ -133,6 +133,6 @@ After installation, you should:
 
 ## Next Steps
 
-- See [INSTALL.md](INSTALL.md) for detailed installation instructions
+- See [03-Install_notes.md](03-Install_notes.md) for detailed installation instructions
 - See [docs/TESTING.md](docs/TESTING.md) for testing procedures
 - See [docs/01-overview.md](docs/01-overview.md) for architecture details

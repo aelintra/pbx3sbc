@@ -20,13 +20,13 @@ cd PBX3sbc
 sudo ./install.sh
 ```
 
-See [Installation Guide](INSTALL.md) for details.
+See [Installation Guide](03-Install_notes.md) for details.
 
 ## Documentation
 
 - **[SIP Edge Router Overview](01-overview.md)** - Complete architecture and configuration guide
-- **[Installation Guide](INSTALL.md)** - Step-by-step installation instructions
-- **[Quick Start Guide](QUICKSTART.md)** - Quick reference for common tasks
+- **[Installation Guide](03-Install_notes.md)** - Step-by-step installation instructions
+- **[Quick Start Guide](02-QUICKSTART.md)** - Quick reference for common tasks
 
 ## Architecture
 
