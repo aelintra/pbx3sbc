@@ -343,8 +343,8 @@ EOF
         fi
     fi
     
-    chmod 600 "$LITESTREAM_CONFIG"
-    chown root:root "$LITESTREAM_CONFIG"
+    chmod 640 "$LITESTREAM_CONFIG"
+    chown root:${KAMAILIO_GROUP} "$LITESTREAM_CONFIG"
     
     log_success "Litestream configuration created at ${LITESTREAM_CONFIG}"
     
@@ -535,14 +535,17 @@ route[TO_DISPATCHER] {
     # Select a healthy Asterisk from the dispatcher set
     if (!ds_select_dst($var(setid), "4")) {
         xlog("L_ERR",
-             "No healthy Asterisk nodes for domain=$rd\n");
+             "No healthy Asterisk nodes for domain=$rd setid=$var(setid)\n");
         sl_send_reply("503", "Service Unavailable");
         exit;
     }
 
+    xlog("L_INFO", "Routing to $du for domain=$rd setid=$var(setid) method=$rm\n");
+
     record_route();
 
     if (!t_relay()) {
+        xlog("L_ERR", "t_relay() failed for $du method=$rm\n");
         sl_reply_error();
     }
 
