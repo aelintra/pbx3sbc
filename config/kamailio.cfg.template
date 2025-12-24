@@ -80,6 +80,72 @@ request_route {
         exit;
     }
 
+    # ---- Handle OPTIONS from Asterisk backends (health checks to endpoints) ----
+    # Asterisk sends OPTIONS to registered endpoints for health checks and NAT keepalive
+    # These need to be routed back to the actual endpoint IP
+    if (is_method("OPTIONS")) {
+        # Check if this is coming from a known dispatcher destination (Asterisk backend)
+        if (ds_is_from_list("$si", "p")) {
+            # Extract endpoint identifier from To header (AoR)
+            $var(endpoint_aor) = $(tu{uri.user}) + "@" + $(tu{uri.host});
+            
+            # Look up endpoint location from database
+            if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor='$var(endpoint_aor)' AND expires > datetime('now')", "endpoint_result")) {
+                if ($dbr(endpoint_result=>rows) > 0) {
+                    $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
+                    $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
+                    sql_result_free("endpoint_result");
+                    
+                    if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
+                        $var(endpoint_port) = "5060";
+                    }
+                    
+                    $du = "sip:" + $(tu{uri.user}) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                    xlog("L_INFO", "Routing OPTIONS from Asterisk $si to endpoint $du (from database lookup)\n");
+                    route(RELAY);
+                    exit;
+                }
+                sql_result_free("endpoint_result");
+            }
+            
+            # Fallback: reply statelessly (health check works, but NAT pinhole won't stay open)
+            xlog("L_WARN", "OPTIONS from Asterisk $si to $var(endpoint_aor) - endpoint location not found in database\n");
+            sl_send_reply("200", "OK");
+            exit;
+        }
+    }
+    
+    # ---- Handle REGISTER to track endpoint locations ----
+    if (is_method("REGISTER")) {
+        # Extract endpoint location from Contact header and store in database
+        # This allows us to route OPTIONS from Asterisk back to endpoints
+        if ($(ct{uri.host}) != $null) {
+            # Extract AoR from To header (user@domain)
+            $var(endpoint_aor) = $(tu{uri.user}) + "@" + $(tu{uri.host});
+            $var(endpoint_ip) = $(ct{uri.host});
+            $var(endpoint_port) = $(ct{uri.port});
+            if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
+                $var(endpoint_port) = "5060";
+            }
+            
+            # Get expires from Expires header or Contact header
+            $var(expires) = $hdr(Expires);
+            if ($var(expires) == $null || $var(expires) == "") {
+                $var(expires) = "3600";  # Default 1 hour
+            }
+            
+            # Calculate expiration time (current time + expires seconds)
+            $var(expires_time) = $(time(s)) + $var(expires);
+            
+            # Store/update endpoint location in database
+            sql_query("cb", "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('$var(endpoint_aor)', '$var(endpoint_ip)', '$var(endpoint_port)', datetime($var(expires_time), 'unixepoch'))", "reg_result");
+            sql_result_free("reg_result");
+            
+            xlog("L_INFO", "Tracked endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires: $var(expires_time))\n");
+        }
+        # Continue to DOMAIN_CHECK to forward REGISTER to Asterisk
+    }
+
     route(DOMAIN_CHECK);
 }
 

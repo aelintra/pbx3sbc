@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS dispatcher (
 
 CREATE INDEX IF NOT EXISTS idx_dispatcher_setid ON dispatcher(setid);
 
+-- Endpoint locations table (for routing OPTIONS from Asterisk to endpoints)
+CREATE TABLE IF NOT EXISTS endpoint_locations (
+    aor TEXT PRIMARY KEY,
+    contact_ip TEXT NOT NULL,
+    contact_port TEXT NOT NULL,
+    expires TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
+
 -- Initialize version table with dispatcher module version
 INSERT OR IGNORE INTO version (table_name, table_version) VALUES ('dispatcher', 4);
 EOF
