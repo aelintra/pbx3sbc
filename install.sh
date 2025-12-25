@@ -117,7 +117,13 @@ install_dependencies() {
             exit 1
         }
     
-    log_success "Dependencies installed"
+    # Verify Kamailio installation and log version
+    if command -v kamailio &> /dev/null; then
+        KAMAILIO_VERSION=$(kamailio -V 2>&1 | head -n1 || echo "unknown")
+        log_success "Dependencies installed (Kamailio: ${KAMAILIO_VERSION})"
+    else
+        log_success "Dependencies installed"
+    fi
 }
 
 install_litestream() {
@@ -401,255 +407,15 @@ create_kamailio_config() {
         mv "$KAMAILIO_CFG" "${KAMAILIO_CFG}.backup.$(date +%Y%m%d_%H%M%S)"
     fi
     
-    # Copy template if it exists, otherwise create default
-    if [[ -f "${CONFIG_DIR}/kamailio.cfg.template" ]]; then
-        cp "${CONFIG_DIR}/kamailio.cfg.template" "$KAMAILIO_CFG"
-        log_info "Using template from ${CONFIG_DIR}/kamailio.cfg.template"
-    else
-        # Create default config from documentation
-        cat > "$KAMAILIO_CFG" <<'KAMAILIO_EOF'
-#!KAMAILIO
-
-####### Global Parameters #########
-
-debug=2
-log_stderror=no
-fork=yes
-children=4
-
-listen=udp:0.0.0.0:5060
-
-####### Modules ########
-
-loadmodule "sl.so"
-loadmodule "tm.so"
-loadmodule "rr.so"
-loadmodule "pv.so"
-loadmodule "xlog.so"
-loadmodule "siputils.so"
-loadmodule "maxfwd.so"
-loadmodule "textops.so"
-loadmodule "sanity.so"
-loadmodule "dispatcher.so"
-loadmodule "sqlops.so"
-loadmodule "db_sqlite.so"
-
-####### Module Parameters ########
-
-# --- SQLite routing database ---
-modparam("sqlops", "sqlcon",
-    "cb=>sqlite:///var/lib/kamailio/routing.db")
-
-# --- Dispatcher (health checks via SIP OPTIONS) ---
-modparam("dispatcher", "db_url",
-    "sqlite:///var/lib/kamailio/routing.db")
-
-modparam("dispatcher", "ds_ping_method", "OPTIONS")
-modparam("dispatcher", "ds_ping_interval", 30)
-modparam("dispatcher", "ds_probing_threshold", 2)
-modparam("dispatcher", "ds_inactive_threshold", 2)
-modparam("dispatcher", "ds_ping_reply_codes", "200")
-
-# --- Transaction timers ---
-modparam("tm", "fr_timer", 5)
-modparam("tm", "fr_inv_timer", 30)
-
-####### Routing Logic ########
-
-request_route {
-
-    # ---- Basic hygiene ----
-    if (!mf_process_maxfwd_header("10")) {
-        sl_send_reply("483", "Too Many Hops");
-        exit;
-    }
-
-    if (!sanity_check("1511", "7")) {
-        xlog("L_WARN", "Malformed SIP from $si\n");
-        exit;
-    }
-
-    # ---- Drop known scanners ----
-    if ($ua =~ "(?i)sipvicious|friendly-scanner|sipcli|nmap") {
-        exit;
-    }
-
-    # ---- In-dialog requests ----
-    if (has_totag()) {
-        route(WITHINDLG);
-        exit;
-    }
-
-    # ---- Allowed methods only ----
-    if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS")) {
-        sl_send_reply("405", "Method Not Allowed");
-        exit;
-    }
-
-    # ---- Handle OPTIONS from Asterisk backends (health checks to endpoints) ----
-    # Asterisk sends OPTIONS to registered endpoints for health checks and NAT keepalive
-    # These need to be routed back to the actual endpoint IP
-    if (is_method("OPTIONS")) {
-        # Check if this is coming from a known dispatcher destination (Asterisk backend)
-        if (ds_is_from_list("$si", "p")) {
-            # Extract endpoint identifier from To header (AoR)
-            $var(endpoint_aor) = $(tu{uri.user}) + "@" + $(tu{uri.host});
-            
-            # Look up endpoint location from database
-            if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor='$var(endpoint_aor)' AND expires > datetime('now')", "endpoint_result")) {
-                if ($dbr(endpoint_result=>rows) > 0) {
-                    $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
-                    $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
-                    sql_result_free("endpoint_result");
-                    
-                    if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
-                        $var(endpoint_port) = "5060";
-                    }
-                    
-                    $du = "sip:" + $(tu{uri.user}) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                    xlog("L_INFO", "Routing OPTIONS from Asterisk $si to endpoint $du (from database lookup)\n");
-                    route(RELAY);
-                    exit;
-                }
-                sql_result_free("endpoint_result");
-            }
-            
-            # Fallback: reply statelessly (health check works, but NAT pinhole won't stay open)
-            xlog("L_WARN", "OPTIONS from Asterisk $si to $var(endpoint_aor) - endpoint location not found in database\n");
-            sl_send_reply("200", "OK");
-            exit;
-        }
-    }
-    
-    # ---- Handle REGISTER to track endpoint locations ----
-    if (is_method("REGISTER")) {
-        # Extract endpoint location from Contact header and store in database
-        # This allows us to route OPTIONS from Asterisk back to endpoints
-        if ($(ct{uri.host}) != $null) {
-            # Extract AoR from To header (user@domain)
-            $var(endpoint_aor) = $(tu{uri.user}) + "@" + $(tu{uri.host});
-            $var(endpoint_ip) = $(ct{uri.host});
-            $var(endpoint_port) = $(ct{uri.port});
-            if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
-                $var(endpoint_port) = "5060";
-            }
-            
-            # Get expires from Expires header or Contact header
-            $var(expires) = $hdr(Expires);
-            if ($var(expires) == $null || $var(expires) == "") {
-                $var(expires) = "3600";  # Default 1 hour
-            }
-            
-            # Calculate expiration time (current time + expires seconds)
-            $var(expires_time) = $(time(s)) + $var(expires);
-            
-            # Store/update endpoint location in database
-            sql_query("cb", "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('$var(endpoint_aor)', '$var(endpoint_ip)', '$var(endpoint_port)', datetime($var(expires_time), 'unixepoch'))", "reg_result");
-            sql_result_free("reg_result");
-            
-            xlog("L_INFO", "Tracked endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires: $var(expires_time))\n");
-        }
-        # Continue to DOMAIN_CHECK to forward REGISTER to Asterisk
-    }
-
-    route(DOMAIN_CHECK);
-}
-
-####### Domain validation / door-knocker protection ########
-
-route[DOMAIN_CHECK] {
-
-    $var(domain) = $rd;
-
-    if ($var(domain) == "") {
-        exit;
-    }
-
-    # Optional extra hardening: domain consistency
-    if ($rd != $td) {
-        xlog("L_WARN",
-             "R-URI / To mismatch domain=$rd src=$si\n");
-        exit;
-    }
-
-    # Lookup dispatcher set for this domain
-    if (!sql_query("cb", "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)' AND enabled=1", "domain_result")) {
-        xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");
-        exit;
-    }
-    
-    # Check if domain was found
-    if ($dbr(domain_result=>rows) == 0) {
-        sql_result_free("domain_result");
-        xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
-        exit;
-    }
-
-    # Get the dispatcher_setid from query result (first row, first column)
-    $var(setid) = $dbr(domain_result=>[0,0]);
-    sql_result_free("domain_result");
-
-    route(TO_DISPATCHER);
-}
-
-####### Health-aware routing ########
-
-route[TO_DISPATCHER] {
-
-    # Select a healthy Asterisk from the dispatcher set
-    if (!ds_select_dst($var(setid), "4")) {
-        xlog("L_ERR",
-             "No healthy Asterisk nodes for domain=$rd setid=$var(setid)\n");
-        sl_send_reply("503", "Service Unavailable");
-        exit;
-    }
-
-    xlog("L_INFO", "Routing to $du for domain=$rd setid=$var(setid) method=$rm\n");
-
-    record_route();
-
-    if (!t_relay()) {
-        xlog("L_ERR", "t_relay() failed for $du method=$rm\n");
-        sl_reply_error();
-    }
-
-    exit;
-}
-
-####### In-dialog handling ########
-
-route[WITHINDLG] {
-
-    if (loose_route()) {
-        route(RELAY);
-        exit;
-    }
-
-    sl_send_reply("404", "Not Here");
-    exit;
-}
-
-route[RELAY] {
-    if (!t_relay()) {
-        sl_reply_error();
-    }
-    exit;
-}
-
-####### Dispatcher events (visibility) ########
-
-event_route[dispatcher:dst-up] {
-    xlog("L_INFO", "Asterisk UP: $du\n");
-}
-
-event_route[dispatcher:dst-down] {
-    xlog("L_WARN", "Asterisk DOWN: $du\n");
-}
-KAMAILIO_EOF
-        log_info "Created default Kamailio configuration"
+    # Copy template - it must exist
+    if [[ ! -f "${CONFIG_DIR}/kamailio.cfg.template" ]]; then
+        log_error "Kamailio template not found at ${CONFIG_DIR}/kamailio.cfg.template"
+        log_error "Please ensure the template file exists in the repository"
+        return 1
     fi
+    
+    cp "${CONFIG_DIR}/kamailio.cfg.template" "$KAMAILIO_CFG"
+    log_success "Copied Kamailio config from template: ${CONFIG_DIR}/kamailio.cfg.template"
     
     # Update database path if needed
     sed -i "s|/var/lib/kamailio/routing.db|${KAMAILIO_DATA_DIR}/routing.db|g" "$KAMAILIO_CFG"
@@ -672,7 +438,26 @@ initialize_database() {
         read -p "Reinitialize database? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Skipping database initialization"
+            log_info "Skipping full database reinitialization"
+            # Still ensure endpoint_locations table exists and WAL mode is set (migration)
+            log_info "Ensuring endpoint_locations table exists and WAL mode is enabled..."
+            sqlite3 "$DB_PATH" <<MIGRATION_EOF
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA wal_autocheckpoint = 1000;
+
+-- Endpoint locations table (for routing OPTIONS from Asterisk to endpoints)
+CREATE TABLE IF NOT EXISTS endpoint_locations (
+    aor TEXT PRIMARY KEY,
+    contact_ip TEXT NOT NULL,
+    contact_port TEXT NOT NULL,
+    expires TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
+MIGRATION_EOF
+            log_success "Database migration complete"
             return
         fi
         rm -f "$DB_PATH" "${DB_PATH}-wal" "${DB_PATH}-shm"
@@ -714,14 +499,14 @@ CREATE TABLE dispatcher (
 CREATE INDEX idx_dispatcher_setid ON dispatcher(setid);
 
 -- Endpoint locations table (for routing OPTIONS from Asterisk to endpoints)
-CREATE TABLE endpoint_locations (
+CREATE TABLE IF NOT EXISTS endpoint_locations (
     aor TEXT PRIMARY KEY,
     contact_ip TEXT NOT NULL,
     contact_port TEXT NOT NULL,
     expires TEXT NOT NULL
 );
 
-CREATE INDEX idx_endpoint_locations_expires ON endpoint_locations(expires);
+CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
 
 -- Initialize version table with dispatcher module version
 INSERT INTO version (table_name, table_version) VALUES ('dispatcher', 4);
