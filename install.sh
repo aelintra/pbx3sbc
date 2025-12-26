@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # OpenSIPS SIP Edge Router Installation Script
-# Installs and configures OpenSIPS with SQLite routing database and Litestream replication
+# Installs and configures OpenSIPS with SQLite routing database
 #
 # Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db]
 #
@@ -21,8 +21,6 @@ OPENSIPS_GROUP="opensips"
 OPENSIPS_DIR="/etc/opensips"
 OPENSIPS_DATA_DIR="/var/lib/opensips"
 OPENSIPS_LOG_DIR="/var/log/opensips"
-LITESTREAM_CONFIG="/etc/litestream.yml"
-LITESTREAM_SERVICE="/etc/systemd/system/litestream.service"
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="${INSTALL_DIR}/scripts"
 CONFIG_DIR="${INSTALL_DIR}/config"
@@ -149,7 +147,9 @@ install_dependencies() {
     fi
 }
 
-install_litestream() {
+# Litestream installation removed - only .deb packages available for arm64
+# Can be added back later when amd64 packages are available
+# install_litestream() {
     log_info "Installing Litestream..."
     
     # Check if already installed
@@ -297,8 +297,9 @@ configure_firewall() {
     log_warn "Firewall rules applied. Ensure SSH access is working before disconnecting!"
 }
 
-create_litestream_config() {
-    log_info "Creating Litestream configuration..."
+# Litestream configuration removed - can be added back later
+# create_litestream_config() {
+    # log_info "Creating Litestream configuration..."
     
     if [[ -f "$LITESTREAM_CONFIG" ]]; then
         log_warn "Litestream config already exists at ${LITESTREAM_CONFIG}"
@@ -384,16 +385,18 @@ EOF
     chmod 640 "$LITESTREAM_CONFIG"
     chown root:${OPENSIPS_GROUP} "$LITESTREAM_CONFIG"
     
-    log_success "Litestream configuration created at ${LITESTREAM_CONFIG}"
-    
-    if [[ "$REPLICA_TYPE" == "s3" && "$USE_IAM" == true ]]; then
-        log_info "Using IAM role for S3 access. Ensure EC2 instance has appropriate IAM role."
-    else
-        log_warn "Credentials stored in config file. Consider using IAM roles or environment variables."
-    fi
-}
+    # log_success "Litestream configuration created at ${LITESTREAM_CONFIG}"
+    # 
+    # if [[ "$REPLICA_TYPE" == "s3" && "$USE_IAM" == true ]]; then
+    #     log_info "Using IAM role for S3 access. Ensure EC2 instance has appropriate IAM role."
+    # else
+    #     log_warn "Credentials stored in config file. Consider using IAM roles or environment variables."
+    # fi
+# }
+# End of commented out create_litestream_config function
 
-create_litestream_service() {
+# Litestream service removed - can be added back later
+# create_litestream_service() {
     log_info "Creating Litestream systemd service..."
     
     cat > "$LITESTREAM_SERVICE" <<EOF
@@ -422,6 +425,7 @@ EOF
     systemctl daemon-reload
     log_success "Litestream service created"
 }
+# End of commented out create_litestream_service function
 
 create_opensips_config() {
     log_info "Creating OpenSIPS configuration..."
@@ -561,12 +565,6 @@ EOF
 enable_services() {
     log_info "Enabling services..."
     
-    # Enable Litestream
-    systemctl enable litestream || {
-        log_error "Failed to enable Litestream service"
-        exit 1
-    }
-    
     # Enable OpenSIPS
     systemctl enable opensips || {
         log_error "Failed to enable OpenSIPS service"
@@ -578,21 +576,6 @@ enable_services() {
 
 start_services() {
     log_info "Starting services..."
-    
-    # Start Litestream
-    systemctl start litestream || {
-        log_error "Failed to start Litestream"
-        exit 1
-    }
-    
-    sleep 2
-    
-    # Check Litestream status
-    if systemctl is-active --quiet litestream; then
-        log_success "Litestream started"
-    else
-        log_error "Litestream failed to start. Check logs: journalctl -u litestream"
-    fi
     
     # Start OpenSIPS
     systemctl start opensips || {
@@ -616,26 +599,6 @@ verify_installation() {
     echo
     echo "=== Installation Verification ==="
     echo
-    
-    # Check Litestream
-    if command -v litestream &> /dev/null; then
-        echo -e "${GREEN}✓${NC} Litestream installed: $(litestream version | head -n1)"
-    else
-        echo -e "${RED}✗${NC} Litestream not found"
-    fi
-    
-    # Check Litestream service
-    if systemctl is-enabled --quiet litestream 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} Litestream service enabled"
-    else
-        echo -e "${YELLOW}⚠${NC} Litestream service not enabled"
-    fi
-    
-    if systemctl is-active --quiet litestream 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} Litestream service running"
-    else
-        echo -e "${RED}✗${NC} Litestream service not running"
-    fi
     
     # Check database
     if [[ -f "${OPENSIPS_DATA_DIR}/routing.db" ]]; then
@@ -666,13 +629,6 @@ verify_installation() {
         echo -e "${RED}✗${NC} OpenSIPS service not running"
     fi
     
-    # Check replication
-    if systemctl is-active --quiet litestream 2>/dev/null; then
-        echo
-        echo "Litestream replication status:"
-        litestream databases 2>/dev/null || echo "  (Check logs if replication not working)"
-    fi
-    
     echo
     echo "=== Next Steps ==="
     echo
@@ -680,11 +636,9 @@ verify_installation() {
     echo "   sqlite3 ${OPENSIPS_DATA_DIR}/routing.db"
     echo
     echo "2. Check service status:"
-    echo "   systemctl status litestream"
     echo "   systemctl status opensips"
     echo
     echo "3. View logs:"
-    echo "   journalctl -u litestream -f"
     echo "   journalctl -u opensips -f"
     echo
     echo "4. Test SIP connectivity (using a SIP client tool):"
@@ -709,13 +663,10 @@ main() {
     echo
     
     install_dependencies
-    install_litestream
     create_user
     create_directories
     setup_helper_scripts
     configure_firewall
-    create_litestream_config
-    create_litestream_service
     create_opensips_config
     initialize_database
     enable_services
@@ -727,7 +678,6 @@ main() {
     echo
     log_info "Configuration files:"
     echo "  - OpenSIPS: ${OPENSIPS_DIR}/opensips.cfg"
-    echo "  - Litestream: ${LITESTREAM_CONFIG}"
     echo "  - Database: ${OPENSIPS_DATA_DIR}/routing.db"
     echo
 }
