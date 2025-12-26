@@ -12,7 +12,7 @@ if [[ $# -lt 2 ]]; then
     echo "Usage: $0 <setid> <destination> [priority] [weight] [socket] [description]"
     echo
     echo "Example:"
-    echo "  $0 10 sip:10.0.1.10:5060 0"
+    echo "  $0 10 sip:10.0.1.10:5060"
     echo "  $0 10 sip:10.0.1.10:5060 0 '1' 'udp:192.168.1.1:5060' 'Primary Asterisk'"
     exit 1
 fi
@@ -20,7 +20,7 @@ fi
 SETID="$1"
 DESTINATION="$2"
 PRIORITY="${3:-0}"
-WEIGHT="${4:-}"
+WEIGHT="${4:-1}"
 SOCKET="${5:-}"
 DESCRIPTION="${6:-}"
 
@@ -31,14 +31,10 @@ if [[ ! "$DESTINATION" =~ ^sip: ]]; then
 fi
 
 # Insert dispatcher entry (OpenSIPS 3.6 version 9 schema)
-# Build SQL with optional parameters
-SQL="INSERT INTO dispatcher (setid, destination, priority, state, probe_mode"
-VALUES="$SETID, '$DESTINATION', $PRIORITY, 0, 0"
-
-if [[ -n "$WEIGHT" ]]; then
-    SQL="$SQL, weight"
-    VALUES="$VALUES, '$WEIGHT'"
-fi
+# Column order: setid, destination, socket, state, probe_mode, weight, priority, attrs, description
+# Build SQL with optional parameters (socket, description are nullable)
+SQL="INSERT INTO dispatcher (setid, destination, state, probe_mode, weight, priority"
+VALUES="$SETID, '$DESTINATION', 0, 0, '$WEIGHT', $PRIORITY"
 
 if [[ -n "$SOCKET" ]]; then
     SQL="$SQL, socket"
