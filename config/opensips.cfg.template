@@ -10,8 +10,8 @@
 
 ####### Global Parameters #########
 
-debug=3
-log_stderror=no
+debug_mode=3
+log_stderr=no
 fork=yes
 children=4
 
