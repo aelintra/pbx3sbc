@@ -10,10 +10,9 @@
 
 ####### Global Parameters #########
 
-debug_mode=3
-log_stderr=no
-fork=yes
-children=4
+# OpenSIPS uses different parameter names than Kamailio
+# Debug level can be set via command line: opensips -D 3
+# Or via modparam for specific modules
 
 # Listen on all interfaces
 listen=udp:0.0.0.0:5060
