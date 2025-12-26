@@ -14,23 +14,6 @@ This document captures all learnings from the Kamailio to OpenSIPS migration, in
 
 ---
 
-## Critical Module Loading Order
-
-**CRITICAL:** Database modules MUST be loaded before modules that depend on them.
-
-```opensips
-# CORRECT ORDER:
-loadmodule "db_sqlite.so"      # Database module first
-loadmodule "dispatcher.so"      # Then modules that use it
-
-# WRONG ORDER (will cause "failed to load data from DB"):
-loadmodule "dispatcher.so"     # ❌ This will fail
-loadmodule "db_sqlite.so"
-```
-
-**Why:** The dispatcher module tries to connect to the database during initialization. If `db_sqlite.so` isn't loaded yet, it fails with a vague error: `ERROR:dispatcher:mod_init: failed to load data from DB`
-
----
 
 ## Database Schema Requirements
 
