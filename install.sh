@@ -98,13 +98,30 @@ install_dependencies() {
         return
     fi
     
+    log_info "Adding OpenSIPS APT repository..."
+    # Add OpenSIPS PPA repository (3.6 stable LTS)
+    # Check if repository already added
+    if ! grep -q "ppa:opensips/3.6" /etc/apt/sources.list.d/*.list 2>/dev/null; then
+        apt-get install -y software-properties-common || {
+            log_error "Failed to install software-properties-common (required for add-apt-repository)"
+            exit 1
+        }
+        add-apt-repository ppa:opensips/3.6 -y || {
+            log_error "Failed to add OpenSIPS repository"
+            exit 1
+        }
+    else
+        log_info "OpenSIPS repository already configured"
+    fi
+    
     log_info "Updating package lists..."
     apt-get update -qq
     
     log_info "Installing dependencies..."
     apt-get install -y \
         opensips \
-        opensips-sqlite-modules \
+        opensips-sqlite-module \
+        libsqlite3-dev \
         sqlite3 \
         curl \
         wget \
@@ -119,8 +136,16 @@ install_dependencies() {
     if command -v opensips &> /dev/null; then
         OPENSIPS_VERSION=$(opensips -V 2>&1 | head -n1 || echo "unknown")
         log_success "Dependencies installed (OpenSIPS: ${OPENSIPS_VERSION})"
+        
+        # Verify SQLite module is available
+        if opensips -m 2>/dev/null | grep -q sqlite; then
+            log_success "SQLite module is available"
+        else
+            log_warn "SQLite module not found - check OpenSIPS module installation"
+        fi
     else
-        log_success "Dependencies installed"
+        log_error "OpenSIPS installation failed - opensips command not found"
+        exit 1
     fi
 }
 
