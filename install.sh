@@ -154,7 +154,7 @@ install_litestream() {
     
     # Check if already installed
     if command -v litestream &> /dev/null; then
-        LITESTREAM_VERSION=$(litestream version | head -n1)
+        LITESTREAM_VERSION=$(litestream version 2>/dev/null | head -n1 || echo "unknown")
         log_info "Litestream already installed: ${LITESTREAM_VERSION}"
         return
     fi
@@ -182,7 +182,7 @@ install_litestream() {
 
     log_info "Installing Litestream for architecture ${ARCH}..."
     
-    # Get latest version
+    # Get latest version from GitHub releases
     log_info "Fetching latest Litestream version..."
     LITESTREAM_VERSION=$(curl -s https://api.github.com/repos/benbjohnson/litestream/releases/latest | jq -r '.tag_name' | sed 's/v//')
     
@@ -193,20 +193,28 @@ install_litestream() {
     
     log_info "Installing Litestream ${LITESTREAM_VERSION}..."
     
-    # Download and install
+    # Download and install .deb package
     cd /tmp
     DEB_FILE="litestream-${LITESTREAM_VERSION}-linux-${ARCH}.deb"
-    wget -q "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/${DEB_FILE}" || {
-        log_error "Failed to download Litestream"
+    DEB_URL="https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/${DEB_FILE}"
+    
+    log_info "Downloading ${DEB_FILE} from GitHub releases..."
+    wget -q "$DEB_URL" || {
+        log_error "Failed to download Litestream from ${DEB_URL}"
+        log_error "Please check the Litestream releases page for the correct version and URL"
         exit 1
     }
 
-    # Install the .deb package
+    # Install the .deb package using dpkg
     log_info "Installing ${DEB_FILE}..."
     dpkg -i "${DEB_FILE}" || {
         log_error "Failed to install Litestream package"
-        rm -f "${DEB_FILE}"
-        exit 1
+        log_info "Attempting to fix dependencies..."
+        apt-get install -f -y || {
+            log_error "Failed to fix package dependencies"
+            rm -f "${DEB_FILE}"
+            exit 1
+        }
     }
     
     # Clean up downloaded file
@@ -214,9 +222,10 @@ install_litestream() {
     
     # Verify installation
     if command -v litestream &> /dev/null; then
-        log_success "Litestream installed: $(litestream version | head -n1)"
+        LITESTREAM_VER=$(litestream version 2>/dev/null | head -n1 || echo "installed")
+        log_success "Litestream installed: ${LITESTREAM_VER}"
     else
-        log_error "Litestream installation failed"
+        log_error "Litestream installation failed - litestream command not found"
         exit 1
     fi
 }
