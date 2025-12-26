@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/kamailio/routing.db}"
+DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
 
 if [[ $# -lt 2 ]]; then
     echo "Usage: $0 <domain> <dispatcher_setid> [enabled] [comment]"

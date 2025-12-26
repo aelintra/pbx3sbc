@@ -1,20 +1,20 @@
 #!/bin/bash
 #
-# Initialize or reset the Kamailio routing database
+# Initialize or reset the OpenSIPS routing database
 #
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/kamailio/routing.db}"
-KAMAILIO_USER="${KAMAILIO_USER:-kamailio}"
-KAMAILIO_GROUP="${KAMAILIO_GROUP:-kamailio}"
+DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
+OPENSIPS_USER="${OPENSIPS_USER:-opensips}"
+OPENSIPS_GROUP="${OPENSIPS_GROUP:-opensips}"
 
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root (use sudo)"
     exit 1
 fi
 
-echo "Initializing Kamailio routing database at ${DB_PATH}..."
+echo "Initializing OpenSIPS routing database at ${DB_PATH}..."
 
 # Backup existing database if it exists
 if [[ -f "$DB_PATH" ]]; then
@@ -31,7 +31,7 @@ PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA wal_autocheckpoint = 1000;
 
--- Version table (required by Kamailio modules)
+-- Version table (required by OpenSIPS modules)
 CREATE TABLE IF NOT EXISTS version (
     table_name VARCHAR(32) PRIMARY KEY,
     table_version INTEGER DEFAULT 0 NOT NULL
@@ -74,7 +74,7 @@ INSERT OR IGNORE INTO version (table_name, table_version) VALUES ('dispatcher', 
 EOF
 
 # Set permissions
-chown "${KAMAILIO_USER}:${KAMAILIO_GROUP}" "$DB_PATH"
+chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$DB_PATH"
 chmod 644 "$DB_PATH"
 
 echo "Database initialized successfully!"

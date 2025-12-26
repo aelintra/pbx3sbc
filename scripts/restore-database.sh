@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/kamailio/routing.db}"
+DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
 LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-/etc/litestream.yml}"
 TIMESTAMP="${1:-}"
 
@@ -18,7 +18,7 @@ echo "Restoring database from Litestream backup..."
 
 # Stop services
 echo "Stopping services..."
-systemctl stop kamailio
+systemctl stop opensips
 systemctl stop litestream
 
 # Backup current database
@@ -42,14 +42,14 @@ if [[ $? -eq 0 ]]; then
     echo "Database restored successfully!"
     
     # Set permissions
-    chown kamailio:kamailio "$DB_PATH"
+    chown opensips:opensips "$DB_PATH"
     chmod 644 "$DB_PATH"
     
     # Start services
     echo "Starting services..."
     systemctl start litestream
     sleep 2
-    systemctl start kamailio
+    systemctl start opensips
     
     echo "Restore complete!"
 else

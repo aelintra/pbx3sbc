@@ -1,18 +1,18 @@
 #!/bin/bash
 #
-# View status of Kamailio and Litestream services
+# View status of OpenSIPS and Litestream services
 #
 
-DB_PATH="${DB_PATH:-/var/lib/kamailio/routing.db}"
+DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
 
-echo "=== Kamailio SIP Edge Router Status ==="
+echo "=== OpenSIPS SIP Edge Router Status ==="
 echo
 
-# Kamailio status
-echo "Kamailio Service:"
-if systemctl is-active --quiet kamailio 2>/dev/null; then
+# OpenSIPS status
+echo "OpenSIPS Service:"
+if systemctl is-active --quiet opensips 2>/dev/null; then
     echo "  Status: Running"
-    echo "  Version: $(kamailio -V 2>&1 | head -n1)"
+    echo "  Version: $(opensips -V 2>&1 | head -n1)"
 else
     echo "  Status: Not running"
 fi
@@ -47,8 +47,8 @@ echo
 
 # Recent logs
 echo "Recent Logs (last 5 lines):"
-echo "  Kamailio:"
-journalctl -u kamailio -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || echo "    (No logs)"
+echo "  OpenSIPS:"
+journalctl -u opensips -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || echo "    (No logs)"
 echo
 echo "  Litestream:"
 journalctl -u litestream -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || echo "    (No logs)"
