@@ -317,6 +317,8 @@ CREATE TABLE sip_domains (
 CREATE INDEX idx_sip_domains_enabled ON sip_domains(enabled);
 
 -- Dispatcher destinations table (OpenSIPS 3.6 version 9 schema)
+-- Drop and recreate to ensure correct schema
+DROP TABLE IF EXISTS dispatcher;
 CREATE TABLE dispatcher (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     setid INTEGER DEFAULT 0 NOT NULL,

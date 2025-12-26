@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS sip_domains (
 CREATE INDEX IF NOT EXISTS idx_sip_domains_enabled ON sip_domains(enabled);
 
 -- Dispatcher destinations table (OpenSIPS 3.6 version 9 schema)
-CREATE TABLE IF NOT EXISTS dispatcher (
+-- Drop and recreate to ensure correct schema
+DROP TABLE IF EXISTS dispatcher;
+CREATE TABLE dispatcher (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     setid INTEGER DEFAULT 0 NOT NULL,
     destination TEXT DEFAULT '' NOT NULL,
@@ -61,7 +63,7 @@ CREATE TABLE IF NOT EXISTS dispatcher (
     description TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_dispatcher_setid ON dispatcher(setid);
+CREATE INDEX idx_dispatcher_setid ON dispatcher(setid);
 
 -- Endpoint locations table (for routing OPTIONS from Asterisk to endpoints)
 CREATE TABLE IF NOT EXISTS endpoint_locations (
@@ -75,7 +77,12 @@ CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(
 
 -- Initialize version table with dispatcher module version
 -- OpenSIPS 3.6 expects version 9 for dispatcher table
-INSERT OR IGNORE INTO version (table_name, table_version) VALUES ('dispatcher', 9);
+INSERT OR REPLACE INTO version (table_name, table_version) VALUES ('dispatcher', 9);
+
+-- Add a test dispatcher entry (can be deleted later)
+-- OpenSIPS may require at least one row to validate the schema
+INSERT INTO dispatcher (setid, destination, state, probe_mode, weight, priority)
+VALUES (0, 'sip:127.0.0.1:5060', 0, 0, '1', 0);
 EOF
 
 # Set permissions

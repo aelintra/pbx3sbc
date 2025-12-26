@@ -2,6 +2,8 @@
 
 This document provides a quick reference for translating Kamailio syntax to OpenSIPS syntax, based on the configuration translation done for this project.
 
+**⚠️ IMPORTANT:** For comprehensive migration knowledge including all errors encountered and solutions, see **[OPENSIPS-MIGRATION-KNOWLEDGE.md](OPENSIPS-MIGRATION-KNOWLEDGE.md)**.
+
 ## Critical Syntax Differences
 
 ### Pseudo-Variables
@@ -9,10 +11,10 @@ This document provides a quick reference for translating Kamailio syntax to Open
 | Description | Kamailio | OpenSIPS | Notes |
 |-------------|----------|----------|-------|
 | To header username | `$(tu{uri.user})` | `$tU` | Capital U |
-| To header domain | `$td` | `$tD` | Capital D |
+| To header domain | `$td` | `$(tu{uri.domain})` | Use transformation, not $tD |
 | To header full URI | `$tu` | `$tu` | Same |
 | Request-URI username | `$(ru{uri.user})` | `$rU` | Capital U |
-| Request-URI domain | `$rd` | `$rD` | Capital D |
+| Request-URI domain | `$rd` | `$rd` | Same (not $rD) |
 | Request-URI full | `$ru` | `$ru` | Same |
 | From username | `$(fu{uri.user})` | `$fU` | Capital U |
 | From domain | `$fd` | `$fD` | Capital D |

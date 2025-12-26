@@ -37,8 +37,9 @@ loadmodule "maxfwd.so"
 loadmodule "textops.so"
 # Transport protocol - required for socket binding
 loadmodule "proto_udp.so"
-loadmodule "dispatcher.so"
+# Database module must be loaded before dispatcher
 loadmodule "db_sqlite.so"
+loadmodule "dispatcher.so"
 loadmodule "sipmsgops.so"
 
 ####### Module Parameters ########
