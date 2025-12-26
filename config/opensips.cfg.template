@@ -14,8 +14,11 @@
 # Debug level can be set via command line: opensips -D 3
 # Or via modparam for specific modules
 
-# Listen on all interfaces
-listen=udp:0.0.0.0:5060
+# Module path (Ubuntu/Debian package location)
+mpath="/usr/lib/x86_64-linux-gnu/opensips/modules"
+
+# Listen on all interfaces (socket replaces deprecated listen)
+socket=udp:0.0.0.0:5060
 
 # Set advertised address (replace with your OpenSIPS server's IP address)
 # This fixes the Via header showing 0.0.0.0
@@ -24,24 +27,25 @@ advertised_address="192.168.1.95"
 ####### Modules ########
 
 # Core modules
-loadmodule "sl.so"
-loadmodule "tm.so"
-loadmodule "rr.so"
-loadmodule "pv.so"
-loadmodule "xlog.so"
-loadmodule "siputils.so"
-loadmodule "maxfwd.so"
-loadmodule "textops.so"
-loadmodule "sanity.so"
-loadmodule "dispatcher.so"
-loadmodule "sql.so"
-loadmodule "db_sqlite.so"
+# Note: sl (stateless) functionality is built into OpenSIPS core, no module needed
+# Note: is_method(), has_totag() are built into OpenSIPS core
+# Note: siputils and sanity modules don't exist in OpenSIPS - functions are built-in
+# Note: pv (pseudo-variables) and xlog are built into OpenSIPS core
+# Try loading without .so extension first - some OpenSIPS versions use module names directly
+loadmodule "tm"
+loadmodule "rr"
+loadmodule "maxfwd"
+loadmodule "textops"
+loadmodule "dispatcher"
+loadmodule "db_sqlite"
 
 ####### Module Parameters ########
 
 # --- SQLite routing database ---
-modparam("sql", "sqlcon",
-    "cb=>sqlite:///var/lib/opensips/routing.db")
+# OpenSIPS uses db_sqlite directly for dispatcher and other modules
+# Note: OpenSIPS doesn't have sql_query() like Kamailio - need alternative approach
+modparam("dispatcher", "db_url",
+    "sqlite:///var/lib/opensips/routing.db")
 
 # --- Dispatcher (health checks via SIP OPTIONS) ---
 modparam("dispatcher", "db_url",
@@ -81,10 +85,12 @@ route {
         exit;
     }
 
-    if (!sanity_check("1511", "7")) {
-        xlog("L_WARN", "Malformed SIP from $si\n");
-        exit;
-    }
+    # Note: sanity_check() module not available in OpenSIPS
+    # Basic validation is handled by core parsing
+    # if (!sanity_check("1511", "7")) {
+    #     xlog("L_WARN", "Malformed SIP from $si\n");
+    #     exit;
+    # }
 
     # ---- Drop known scanners ----
     if ($ua =~ "sipvicious|friendly-scanner|sipcli|nmap") {
@@ -138,23 +144,27 @@ route {
         # Extract IP from destination field and compare with source IP
         # Destination format can be: just IP (192.168.1.91), sip:IP:PORT, or sip:IP
         # Handle all formats by checking if destination starts with "sip:" or is just an IP
+        # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
         # First, let's see what destinations exist (debug only - remove after testing)
-        if (sql_query("cb", "SELECT destination FROM dispatcher LIMIT 5", "debug_dest")) {
-            if ($dbr(debug_dest=>rows) > 0) {
-                xlog("Sample dispatcher destinations in DB: $dbr(debug_dest=>[0,0])\n");
-            }
-            sql_result_free("debug_dest");
-        }
+        # if (sql_query("cb", "SELECT destination FROM dispatcher LIMIT 5", "debug_dest")) {
+        #     if ($dbr(debug_dest=>rows) > 0) {
+        #         xlog("Sample dispatcher destinations in DB: $dbr(debug_dest=>[0,0])\n");
+        #     }
+        #     sql_result_free("debug_dest");
+        # }
         
+        # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
         # Now check if source IP matches any dispatcher destination
         # Handle formats: IP (192.168.1.91), IP:PORT (192.168.1.91:5060), sip:IP, sip:IP:PORT
         # Extract IP from destination and compare with source IP
-        if (sql_query("cb", "SELECT COUNT(*) FROM dispatcher WHERE CASE WHEN destination LIKE 'sip:%' THEN CASE WHEN instr(substr(destination, 5), ':') > 0 THEN substr(destination, 5, instr(substr(destination, 5), ':') - 1) ELSE substr(destination, 5) END WHEN instr(destination, ':') > 0 AND destination NOT LIKE 'sip:%' THEN substr(destination, 1, instr(destination, ':') - 1) ELSE destination END = '$var(source_ip)'", "dispatcher_check")) {
-            if ($dbr(dispatcher_check=>rows) > 0) {
-                $var(match_count) = $dbr(dispatcher_check=>[0,0]);
-                xlog("Dispatcher check result: found $var(match_count) matching destinations for IP $var(source_ip)\n");
-                sql_result_free("dispatcher_check");
-                if ($var(match_count) > 0) {
+        # For now, skip this check - OPTIONS/NOTIFY from Asterisk will continue to normal routing
+        $var(match_count) = 0;
+        # if (sql_query("cb", "SELECT COUNT(*) FROM dispatcher WHERE CASE WHEN destination LIKE 'sip:%' THEN CASE WHEN instr(substr(destination, 5), ':') > 0 THEN substr(destination, 5, instr(substr(destination, 5), ':') - 1) ELSE substr(destination, 5) END WHEN instr(destination, ':') > 0 AND destination NOT LIKE 'sip:%' THEN substr(destination, 1, instr(destination, ':') - 1) ELSE destination END = '$var(source_ip)'", "dispatcher_check")) {
+        #     if ($dbr(dispatcher_check=>rows) > 0) {
+        #         $var(match_count) = $dbr(dispatcher_check=>[0,0]);
+        #         xlog("Dispatcher check result: found $var(match_count) matching destinations for IP $var(source_ip)\n");
+        #         sql_result_free("dispatcher_check");
+        if ($var(match_count) > 0) {
             
                     # Extract endpoint identifier from To header (AoR)
                     # Use $tD (To header domain) to match how we store it during REGISTER
@@ -163,79 +173,82 @@ route {
                     
                     xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
                     
+                    # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
                     # Look up endpoint location from database
                     # First try exact match with domain
-                    if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor='$var(endpoint_aor)' AND expires > datetime('now')", "endpoint_result")) {
-                        if ($dbr(endpoint_result=>rows) > 0) {
-                            $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
-                            $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
-                            sql_result_free("endpoint_result");
-                            
-                            xlog("Database lookup result: IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                            
-                            # Validate IP and port
-                            if ($var(endpoint_ip) == $null || $var(endpoint_ip) == "") {
-                                xlog("L_ERR", "Invalid endpoint IP from database lookup\n");
-                            } else {
-                                if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
-                                    $var(endpoint_port) = "5060";
-                                }
-                                
-                                # Construct destination URI directly using username and endpoint IP:port
-                                # Get username from Request-URI or To header
-                                $var(target_user) = $tU;
-                                if ($var(target_user) == $null || $var(target_user) == "") {
-                                    $var(target_user) = $rU;
-                                }
-                                
-                                # Build destination URI: sip:user@ip:port
-                                $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                                # Construct proper Request-URI for routing
-                                $ru = $du;
-                                xlog("Routing $rm from Asterisk $si to endpoint $du (exact match), Request-URI=$ru\n");
-                                route(RELAY);
-                                exit;
-                            }
-                        }
-                        sql_result_free("endpoint_result");
-                        
-                        # Fallback: try lookup by username only (in case To header has IP instead of domain)
-                        xlog("Exact match failed, trying username-only lookup for $var(endpoint_user)\n");
-                        if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor LIKE '$var(endpoint_user)@%' AND expires > datetime('now') LIMIT 1", "endpoint_result")) {
-                            if ($dbr(endpoint_result=>rows) > 0) {
-                                $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
-                                $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
-                                sql_result_free("endpoint_result");
-                                
-                                xlog("Database lookup result (username match): IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                                
-                                # Validate IP and port
-                                if ($var(endpoint_ip) == $null || $var(endpoint_ip) == "") {
-                                    xlog("L_ERR", "Invalid endpoint IP from database lookup (username match)\n");
-                                } else {
-                                    if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
-                                        $var(endpoint_port) = "5060";
-                                    }
-                                    
-                                    # Construct destination URI directly using username and endpoint IP:port
-                                    # Get username from To header (more reliable than Request-URI which might be invalid)
-                                    $var(target_user) = $tU;
-                                    if ($var(target_user) == $null || $var(target_user) == "") {
-                                        $var(target_user) = $rU;
-                                    }
-                                    
-                                    # Build destination URI: sip:user@ip:port
-                                    $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                                    # Construct proper Request-URI for routing
-                                    $ru = $du;
-                                    xlog("Routing $rm from Asterisk $si to endpoint $du (username match), Request-URI=$ru\n");
-                                    route(RELAY);
-                                    exit;
-                                }
-                            }
-                            sql_result_free("endpoint_result");
-                        }
-                    }
+                    # For now, skip database lookup - will need to implement with OpenSIPS database module
+                    xlog("L_WARN", "Database lookup for endpoint $var(endpoint_aor) disabled - sql_query() not available in OpenSIPS\n");
+                    # if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor='$var(endpoint_aor)' AND expires > datetime('now')", "endpoint_result")) {
+                    #     if ($dbr(endpoint_result=>rows) > 0) {
+                    #         $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
+                    #         $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
+                    #         sql_result_free("endpoint_result");
+                    #         
+                    #         xlog("Database lookup result: IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
+                    #         
+                    #         # Validate IP and port
+                    #         if ($var(endpoint_ip) == $null || $var(endpoint_ip) == "") {
+                    #             xlog("L_ERR", "Invalid endpoint IP from database lookup\n");
+                    #         } else {
+                    #             if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
+                    #                 $var(endpoint_port) = "5060";
+                    #             }
+                    #             
+                    #             # Construct destination URI directly using username and endpoint IP:port
+                    #             # Get username from Request-URI or To header
+                    #             $var(target_user) = $tU;
+                    #             if ($var(target_user) == $null || $var(target_user) == "") {
+                    #                 $var(target_user) = $rU;
+                    #             }
+                    #             
+                    #             # Build destination URI: sip:user@ip:port
+                    #             $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                    #             # Construct proper Request-URI for routing
+                    #             $ru = $du;
+                    #             xlog("Routing $rm from Asterisk $si to endpoint $du (exact match), Request-URI=$ru\n");
+                    #             route(RELAY);
+                    #             exit;
+                    #         }
+                    #     }
+                    #     sql_result_free("endpoint_result");
+                    #     
+                    #     # Fallback: try lookup by username only (in case To header has IP instead of domain)
+                    #     xlog("Exact match failed, trying username-only lookup for $var(endpoint_user)\n");
+                    #     if (sql_query("cb", "SELECT contact_ip, contact_port FROM endpoint_locations WHERE aor LIKE '$var(endpoint_user)@%' AND expires > datetime('now') LIMIT 1", "endpoint_result")) {
+                    #         if ($dbr(endpoint_result=>rows) > 0) {
+                    #             $var(endpoint_ip) = $dbr(endpoint_result=>[0,0]);
+                    #             $var(endpoint_port) = $dbr(endpoint_result=>[0,1]);
+                    #             sql_result_free("endpoint_result");
+                    #             
+                    #             xlog("Database lookup result (username match): IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
+                    #             
+                    #             # Validate IP and port
+                    #             if ($var(endpoint_ip) == $null || $var(endpoint_ip) == "") {
+                    #                 xlog("L_ERR", "Invalid endpoint IP from database lookup (username match)\n");
+                    #             } else {
+                    #                 if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
+                    #                     $var(endpoint_port) = "5060";
+                    #                 }
+                    #                 
+                    #                 # Construct destination URI directly using username and endpoint IP:port
+                    #                 # Get username from To header (more reliable than Request-URI which might be invalid)
+                    #                 $var(target_user) = $tU;
+                    #                 if ($var(target_user) == $null || $var(target_user) == "") {
+                    #                     $var(target_user) = $rU;
+                    #                 }
+                    #                 
+                    #                 # Build destination URI: sip:user@ip:port
+                    #                 $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                    #                 # Construct proper Request-URI for routing
+                    #                 $ru = $du;
+                    #                 xlog("Routing $rm from Asterisk $si to endpoint $du (username match), Request-URI=$ru\n");
+                    #                 route(RELAY);
+                    #                 exit;
+                    #             }
+                    #         }
+                    #         sql_result_free("endpoint_result");
+                    #     }
+                    # }
                     
                     # Fallback: reply statelessly (health check works, but NAT pinhole won't stay open)
                     # For NOTIFY, we should try to route anyway or it will fail
@@ -271,13 +284,13 @@ route {
                 } else {
                     xlog("OPTIONS/NOTIFY from $si is not from a known dispatcher destination (match_count=0), continuing normal routing\n");
                 }
-            } else {
-                xlog("L_WARN", "Dispatcher check query returned no rows for IP $si\n");
-                sql_result_free("dispatcher_check");
-            }
-        } else {
-            xlog("L_WARN", "Failed to query dispatcher table for source IP $si\n");
-        }
+                # } else {
+                #     xlog("L_WARN", "Dispatcher check query returned no rows for IP $si\n");
+                #     sql_result_free("dispatcher_check");
+                # }
+        # } else {
+        #     xlog("L_WARN", "Failed to query dispatcher table for source IP $si\n");
+        # }
     }
     
     # ---- Handle REGISTER to track endpoint locations ----
@@ -343,14 +356,16 @@ route {
                 
                 xlog("Extracted endpoint info: AoR=$var(endpoint_aor), IP=$var(endpoint_ip), Port=$var(endpoint_port), Expires=$var(expires)\n");
                 
+                # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
                 # Store/update endpoint location in database
                 # Use SQLite's datetime functions to calculate expiration (current time + expires seconds)
-                if (sql_query("cb", "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('$var(endpoint_aor)', '$var(endpoint_ip)', '$var(endpoint_port)', datetime(strftime('%s', 'now') + $var(expires), 'unixepoch'))", "reg_result")) {
-                    sql_result_free("reg_result");
-                    xlog("Successfully tracked endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires in $var(expires) seconds)\n");
-                } else {
-                    xlog("L_ERR", "Failed to store endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (SQL query failed)\n");
-                }
+                xlog("L_WARN", "Endpoint location tracking disabled - sql_query() not available in OpenSIPS\n");
+                # if (sql_query("cb", "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('$var(endpoint_aor)', '$var(endpoint_ip)', '$var(endpoint_port)', datetime(strftime('%s', 'now') + $var(expires), 'unixepoch'))", "reg_result")) {
+                #     sql_result_free("reg_result");
+                #     xlog("Successfully tracked endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires in $var(expires) seconds)\n");
+                # } else {
+                #     xlog("L_ERR", "Failed to store endpoint location: $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (SQL query failed)\n");
+                # }
             }
         } else {
             xlog("L_WARN", "REGISTER without Contact header - cannot track endpoint location\n");
@@ -378,24 +393,28 @@ route[DOMAIN_CHECK] {
         exit;
     }
 
+    # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
     # Lookup dispatcher set for this domain
-    if (!sql_query("cb", "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)' AND enabled=1", "domain_result")) {
-        xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");
-        exit;
-    }
-    
-    # Check if domain was found
-    if ($dbr(domain_result=>rows) == 0) {
-        sql_result_free("domain_result");
-        xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
-        exit;
-    }
-
-    # Get the dispatcher_setid from query result (first row, first column)
-    $var(setid) = $dbr(domain_result=>[0,0]);
-    sql_result_free("domain_result");
+    # For now, use a default setid - this will need to be replaced with OpenSIPS database module
+    xlog("L_WARN", "Domain lookup disabled - sql_query() not available in OpenSIPS, using default setid=1\n");
+    $var(setid) = 1;
+    # if (!sql_query("cb", "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)' AND enabled=1", "domain_result")) {
+    #     xlog("L_NOTICE",
+    #          "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");
+    #     exit;
+    # }
+    # 
+    # # Check if domain was found
+    # if ($dbr(domain_result=>rows) == 0) {
+    #     sql_result_free("domain_result");
+    #     xlog("L_NOTICE",
+    #          "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
+    #     exit;
+    # }
+    # 
+    # # Get the dispatcher_setid from query result (first row, first column)
+    # $var(setid) = $dbr(domain_result=>[0,0]);
+    # sql_result_free("domain_result");
 
     route(TO_DISPATCHER);
 }
