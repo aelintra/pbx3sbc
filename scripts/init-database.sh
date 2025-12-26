@@ -47,14 +47,18 @@ CREATE TABLE IF NOT EXISTS sip_domains (
 
 CREATE INDEX IF NOT EXISTS idx_sip_domains_enabled ON sip_domains(enabled);
 
--- Dispatcher destinations table
+-- Dispatcher destinations table (OpenSIPS 3.6 version 9 schema)
 CREATE TABLE IF NOT EXISTS dispatcher (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    setid INTEGER NOT NULL,
-    destination TEXT NOT NULL,
-    flags INTEGER DEFAULT 0,
-    priority INTEGER DEFAULT 0,
-    attrs TEXT
+    setid INTEGER DEFAULT 0 NOT NULL,
+    destination TEXT DEFAULT '' NOT NULL,
+    socket TEXT,
+    state INTEGER DEFAULT 0 NOT NULL,
+    probe_mode INTEGER DEFAULT 0 NOT NULL,
+    weight TEXT DEFAULT '1' NOT NULL,
+    priority INTEGER DEFAULT 0 NOT NULL,
+    attrs TEXT,
+    description TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_dispatcher_setid ON dispatcher(setid);
@@ -70,7 +74,8 @@ CREATE TABLE IF NOT EXISTS endpoint_locations (
 CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
 
 -- Initialize version table with dispatcher module version
-INSERT OR IGNORE INTO version (table_name, table_version) VALUES ('dispatcher', 4);
+-- OpenSIPS 3.6 expects version 9 for dispatcher table
+INSERT OR IGNORE INTO version (table_name, table_version) VALUES ('dispatcher', 9);
 EOF
 
 # Set permissions
@@ -80,8 +85,13 @@ chmod 644 "$DB_PATH"
 echo "Database initialized successfully!"
 echo
 echo "Add domains and dispatcher entries:"
+echo "  Use the helper scripts:"
+echo "    ./scripts/add-domain.sh <domain> <setid>"
+echo "    ./scripts/add-dispatcher.sh <setid> <destination>"
+echo
+echo "Or use sqlite3 directly:"
 echo "  sqlite3 ${DB_PATH}"
 echo
 echo "Example:"
 echo "  INSERT INTO sip_domains (domain, dispatcher_setid, enabled) VALUES ('example.com', 10, 1);"
-echo "  INSERT INTO dispatcher (setid, destination) VALUES (10, 'sip:10.0.1.10:5060');"
+echo "  INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES (10, 'sip:10.0.1.10:5060', 0, 0, 0);"

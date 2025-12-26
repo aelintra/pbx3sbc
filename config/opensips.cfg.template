@@ -27,47 +27,45 @@ advertised_address="192.168.1.95"
 ####### Modules ########
 
 # Core modules
-# Note: sl (stateless) functionality is built into OpenSIPS core, no module needed
 # Note: is_method(), has_totag() are built into OpenSIPS core
 # Note: siputils and sanity modules don't exist in OpenSIPS - functions are built-in
 # Note: pv (pseudo-variables) and xlog are built into OpenSIPS core
-# Try loading without .so extension first - some OpenSIPS versions use module names directly
-loadmodule "tm"
-loadmodule "rr"
-loadmodule "maxfwd"
-loadmodule "textops"
-loadmodule "dispatcher"
-loadmodule "db_sqlite"
+loadmodule "sl.so"
+loadmodule "tm.so"
+loadmodule "rr.so"
+loadmodule "maxfwd.so"
+loadmodule "textops.so"
+# Transport protocol - required for socket binding
+loadmodule "proto_udp.so"
+loadmodule "dispatcher.so"
+loadmodule "db_sqlite.so"
+loadmodule "sipmsgops.so"
 
 ####### Module Parameters ########
 
-# --- SQLite routing database ---
-# OpenSIPS uses db_sqlite directly for dispatcher and other modules
-# Note: OpenSIPS doesn't have sql_query() like Kamailio - need alternative approach
-modparam("dispatcher", "db_url",
-    "sqlite:///var/lib/opensips/routing.db")
-
 # --- Dispatcher (health checks via SIP OPTIONS) ---
+# OpenSIPS uses db_sqlite directly for dispatcher
+# Note: OpenSIPS doesn't have sql_query() like Kamailio - need alternative approach
 modparam("dispatcher", "db_url",
     "sqlite:///var/lib/opensips/routing.db")
 
 modparam("dispatcher", "ds_ping_method", "OPTIONS")
 modparam("dispatcher", "ds_ping_interval", 30)
 modparam("dispatcher", "ds_probing_threshold", 2)
-modparam("dispatcher", "ds_inactive_threshold", 2)
-modparam("dispatcher", "ds_ping_reply_codes", "200")
+# Note: ds_inactive_threshold doesn't exist in OpenSIPS dispatcher module
+# Note: ds_ping_reply_codes is called options_reply_codes in OpenSIPS
+modparam("dispatcher", "options_reply_codes", "200")
 
 # --- Transaction timers ---
-# fr_timer: timeout for non-INVITE transactions (30 seconds)
-modparam("tm", "fr_timer", 30)
-# fr_inv_timer: timeout for INVITE transactions (30 seconds)
-modparam("tm", "fr_inv_timer", 30)
-# restart_fr_on_each_reply: reset fr_inv_timer on each provisional response
+# Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
+# restart_fr_on_each_reply: reset final response timer on each provisional response
 modparam("tm", "restart_fr_on_each_reply", 1)
-# retr_timer1: initial retransmission period (2 seconds)
-modparam("tm", "retr_timer1", 2000)
-# retr_timer2: maximum retransmission period (8 seconds)
-modparam("tm", "retr_timer2", 8000)
+# T1_timer: initial retransmission period (2 seconds = 2000ms)
+# Note: OpenSIPS uses T1_timer instead of retr_timer1
+modparam("tm", "T1_timer", 2000)
+# T2_timer: maximum retransmission period (8 seconds = 8000ms)
+# Note: OpenSIPS uses T2_timer instead of retr_timer2
+modparam("tm", "T2_timer", 8000)
 
 # --- Response handling ---
 # OpenSIPS handles responses differently - ensure proper forwarding
@@ -80,8 +78,8 @@ route {
     xlog("REQUEST: $rm from $si:$sp to $ru (Call-ID: $hdr(Call-ID))\n");
 
     # ---- Basic hygiene ----
-    if (!mf_process_maxfwd_header("10")) {
-        sl_send_reply("483", "Too Many Hops");
+    if (!mf_process_maxfwd_header(10)) {
+        sl_send_reply(483, "Too Many Hops");
         exit;
     }
 
@@ -98,6 +96,8 @@ route {
     }
 
     # ---- In-dialog requests ----
+    # Check if To tag exists (in-dialog request)
+    # OpenSIPS uses $to_tag pseudo-variable (equivalent to Kamailio's $tt)
     if (has_totag()) {
         route(WITHINDLG);
         exit;
@@ -105,7 +105,7 @@ route {
 
     # ---- Allowed methods only ----
     if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS|NOTIFY|SUBSCRIBE")) {
-        sl_send_reply("405", "Method Not Allowed");
+        sl_send_reply(405, "Method Not Allowed");
         exit;
     }
 
@@ -118,7 +118,7 @@ route {
             xlog("CANCEL matches existing transaction, forwarding to cancel INVITE\n");
         } else {
             xlog("L_WARN", "CANCEL received but no matching transaction found\n");
-            sl_send_reply("481", "Call/Transaction Does Not Exist");
+            sl_send_reply(481, "Call/Transaction Does Not Exist");
             exit;
         }
         # Forward CANCEL to cancel the INVITE transaction
@@ -167,8 +167,8 @@ route {
         if ($var(match_count) > 0) {
             
                     # Extract endpoint identifier from To header (AoR)
-                    # Use $tD (To header domain) to match how we store it during REGISTER
-                    $var(endpoint_aor) = $tU + "@" + $tD;
+                    # OpenSIPS: extract domain from To URI using $(tu{uri.domain})
+                    $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
                     $var(endpoint_user) = $tU;
                     
                     xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
@@ -254,7 +254,7 @@ route {
                     # For NOTIFY, we should try to route anyway or it will fail
                     xlog("L_WARN", "$rm from Asterisk $si to $var(endpoint_aor) - endpoint location not found in database (tried exact match and username match)\n");
                     if (is_method("OPTIONS")) {
-                        sl_send_reply("200", "OK");
+                        sl_send_reply(200, "OK");
                     } else {
                         # For NOTIFY, try to route based on Contact header if available
                         # Extract IP and port from Contact header using regex
@@ -267,9 +267,9 @@ route {
                             }
                         }
                         
-                        if ($var(notify_ip) != $null && $var(notify_ip) != "" && $var(notify_ip) != $si) {
+                        if ($var(notify_ip) != "" && $var(notify_ip) != $si) {
                             $du = "sip:" + $tU + "@" + $var(notify_ip);
-                            if ($var(notify_port) != $null && $var(notify_port) != "") {
+                            if ($var(notify_port) != "") {
                                 $du = $du + ":" + $var(notify_port);
                             } else {
                                 $du = $du + ":5060";
@@ -277,7 +277,7 @@ route {
                             xlog("Routing $rm to $du (fallback from Contact header)\n");
                             route(RELAY);
                         } else {
-                            sl_send_reply("404", "Not Found");
+                            sl_send_reply(404, "Not Found");
                         }
                     }
                     exit;
@@ -300,10 +300,10 @@ route {
         # Extract endpoint location from Contact header and store in database
         # This allows us to route OPTIONS from Asterisk back to endpoints
         # Check if Contact header exists and extract values
-        if ($hdr(Contact) != $null && $hdr(Contact) != "") {
+        if ($hdr(Contact) != "") {
             # Extract AoR from To header (user@domain)
-            # Use To header domain ($tD) instead of Request-URI domain
-            $var(endpoint_aor) = $tU + "@" + $tD;
+            # OpenSIPS: extract domain from To URI using $(tu{uri.domain})
+            $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
             
             # Extract IP and port from Contact header
             # Contact format: <sip:user@ip:port;params> or sip:user@ip:port
@@ -329,11 +329,11 @@ route {
             }
             
             # Use Contact header values if they're valid and different from source (NAT scenario)
-            if ($var(contact_ip) != $null && $var(contact_ip) != "" && $var(contact_ip) != "0" && $var(contact_ip) != $si) {
+            if ($var(contact_ip) != "" && $var(contact_ip) != "0" && $var(contact_ip) != $si) {
                 $var(endpoint_ip) = $var(contact_ip);
                 xlog("Using Contact header IP ($var(contact_ip)) instead of source IP ($si) - possible NAT scenario\n");
             }
-            if ($var(contact_port) != $null && $var(contact_port) != "" && $var(contact_port) != "0" && $var(contact_port) != $sp) {
+            if ($var(contact_port) != "" && $var(contact_port) != "0" && $var(contact_port) != $sp) {
                 $var(endpoint_port) = $var(contact_port);
                 xlog("Using Contact header port ($var(contact_port)) instead of source port ($sp)\n");
             }
@@ -341,16 +341,16 @@ route {
             xlog("Contact extraction: source IP=$si, source port=$sp, extracted IP=$var(contact_ip), extracted port=$var(contact_port), final IP=$var(endpoint_ip), Port=$var(endpoint_port), full Contact=$hdr(Contact)\n");
             
             # Validate extracted IP
-            if ($var(endpoint_ip) == $null || $var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
+            if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
                 xlog("L_ERR", "Failed to extract IP - source IP=$si, Contact: $hdr(Contact)\n");
             } else {
-                if ($var(endpoint_port) == $null || $var(endpoint_port) == "") {
+                if ($var(endpoint_port) == "") {
                     $var(endpoint_port) = "5060";
                 }
                 
                 # Get expires from Expires header or Contact header
                 $var(expires) = $hdr(Expires);
-                if ($var(expires) == $null || $var(expires) == "") {
+                if ($var(expires) == "") {
                     $var(expires) = "3600";  # Default 1 hour
                 }
                 
@@ -380,16 +380,17 @@ route {
 
 route[DOMAIN_CHECK] {
 
-    $var(domain) = $rD;
+    # OpenSIPS: Request-URI domain is $rd (lowercase), not $rD
+    $var(domain) = $rd;
 
     if ($var(domain) == "") {
         exit;
     }
 
     # Optional extra hardening: domain consistency
-    if ($rD != $tD) {
-        xlog("L_WARN",
-             "R-URI / To mismatch domain=$rD src=$si\n");
+    # OpenSIPS: extract domain from To URI using $(tu{uri.domain})
+    if ($rd != $(tu{uri.domain})) {
+        xlog("L_WARN", "R-URI / To mismatch domain=$rd src=$si\n");
         exit;
     }
 
@@ -424,22 +425,25 @@ route[DOMAIN_CHECK] {
 route[TO_DISPATCHER] {
 
     # Select a healthy Asterisk from the dispatcher set
-    if (!ds_select_dst($var(setid), "4")) {
-        xlog("L_ERR",
-             "No healthy Asterisk nodes for domain=$rD setid=$var(setid)\n");
-        sl_send_reply("503", "Service Unavailable");
+    if (!ds_select_dst($var(setid), 4)) {
+        xlog("L_ERR", "No healthy Asterisk nodes for domain=$rd setid=$var(setid)\n");
+        sl_send_reply(503, "Service Unavailable");
         exit;
     }
 
-    xlog("Routing to $du for domain=$rD setid=$var(setid) method=$rm Request-URI=$ru\n");
+    xlog("Routing to $du for domain=$rd setid=$var(setid) method=$rm Request-URI=$ru\n");
 
     record_route();
+
+    # Arm failure route to handle transaction failures
+    t_on_failure("1");
 
     # OpenSIPS transaction handling - this is where we expect better behavior
     # than Kamailio for INVITE transactions
     if (!t_relay()) {
         xlog("L_ERR", "t_relay() failed for $du method=$rm Request-URI=$ru\n");
-        sl_reply_error();
+        # Use sl_send_reply() since we're in request route, not reply route
+        sl_send_reply(500, "Internal Server Error");
         exit;
     }
 
@@ -462,13 +466,16 @@ route[WITHINDLG] {
         exit;
     }
 
-    sl_send_reply("404", "Not Here");
+    sl_send_reply(404, "Not Here");
     exit;
 }
 
 route[RELAY] {
+    # Arm failure route to handle transaction failures
+    t_on_failure("1");
     if (!t_relay()) {
-        sl_reply_error();
+        # Use sl_send_reply() since we're in request route, not reply route
+        sl_send_reply(500, "Internal Server Error");
     }
     exit;
 }
@@ -494,7 +501,7 @@ onreply_route {
     exit;
 }
 
-failure_route {
+failure_route[1] {
     xlog("L_ERR", "Transaction failure: method=$rm, Call-ID: $hdr(Call-ID), From=$fu, To=$tu, Response code=$rs, Reason=$rr\n");
     # Log more details about the failure
     if ($rs == 408) {
@@ -509,11 +516,12 @@ failure_route {
 # Note: Event route names may vary by OpenSIPS version
 # If these don't work, check your OpenSIPS version's event names
 # Common alternatives: dispatcher:dst-up, E_DISPATCHER_DST_UP, etc.
-event_route[dispatcher:dst-up] {
-    xlog("Asterisk UP: $du\n");
-}
-
-event_route[dispatcher:dst-down] {
-    xlog("L_WARN", "Asterisk DOWN: $du\n");
-}
+# Commented out - event route syntax may need adjustment for your OpenSIPS version
+# event_route[dispatcher:dst-up] {
+#     xlog("Asterisk UP: $du\n");
+# }
+# 
+# event_route[dispatcher:dst-down] {
+#     xlog("L_WARN", "Asterisk DOWN: $du\n");
+# }
 

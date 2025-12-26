@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # Add a dispatcher destination to the routing database
+# OpenSIPS 3.6 version 9 schema
 #
 
 set -euo pipefail
@@ -8,17 +9,20 @@ set -euo pipefail
 DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 <setid> <destination> [flags] [priority]"
+    echo "Usage: $0 <setid> <destination> [priority] [weight] [socket] [description]"
     echo
     echo "Example:"
-    echo "  $0 10 sip:10.0.1.10:5060 0 0"
+    echo "  $0 10 sip:10.0.1.10:5060 0"
+    echo "  $0 10 sip:10.0.1.10:5060 0 '1' 'udp:192.168.1.1:5060' 'Primary Asterisk'"
     exit 1
 fi
 
 SETID="$1"
 DESTINATION="$2"
-FLAGS="${3:-0}"
-PRIORITY="${4:-0}"
+PRIORITY="${3:-0}"
+WEIGHT="${4:-}"
+SOCKET="${5:-}"
+DESCRIPTION="${6:-}"
 
 # Validate destination format (basic SIP URI check)
 if [[ ! "$DESTINATION" =~ ^sip: ]]; then
@@ -26,11 +30,29 @@ if [[ ! "$DESTINATION" =~ ^sip: ]]; then
     exit 1
 fi
 
-# Insert dispatcher entry
-sqlite3 "$DB_PATH" <<EOF
-INSERT INTO dispatcher (setid, destination, flags, priority)
-VALUES ($SETID, '$DESTINATION', $FLAGS, $PRIORITY);
-EOF
+# Insert dispatcher entry (OpenSIPS 3.6 version 9 schema)
+# Build SQL with optional parameters
+SQL="INSERT INTO dispatcher (setid, destination, priority, state, probe_mode"
+VALUES="$SETID, '$DESTINATION', $PRIORITY, 0, 0"
+
+if [[ -n "$WEIGHT" ]]; then
+    SQL="$SQL, weight"
+    VALUES="$VALUES, '$WEIGHT'"
+fi
+
+if [[ -n "$SOCKET" ]]; then
+    SQL="$SQL, socket"
+    VALUES="$VALUES, '$SOCKET'"
+fi
+
+if [[ -n "$DESCRIPTION" ]]; then
+    SQL="$SQL, description"
+    VALUES="$VALUES, '$DESCRIPTION'"
+fi
+
+SQL="$SQL) VALUES ($VALUES);"
+
+sqlite3 "$DB_PATH" "$SQL"
 
 if [[ $? -eq 0 ]]; then
     echo "Dispatcher added: setid $SETID -> $DESTINATION"

@@ -316,14 +316,18 @@ CREATE TABLE sip_domains (
 
 CREATE INDEX idx_sip_domains_enabled ON sip_domains(enabled);
 
--- Dispatcher destinations table
+-- Dispatcher destinations table (OpenSIPS 3.6 version 9 schema)
 CREATE TABLE dispatcher (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    setid INTEGER NOT NULL,
-    destination TEXT NOT NULL,
-    flags INTEGER DEFAULT 0,
-    priority INTEGER DEFAULT 0,
-    attrs TEXT
+    setid INTEGER DEFAULT 0 NOT NULL,
+    destination TEXT DEFAULT '' NOT NULL,
+    socket TEXT,
+    state INTEGER DEFAULT 0 NOT NULL,
+    probe_mode INTEGER DEFAULT 0 NOT NULL,
+    weight TEXT DEFAULT '1' NOT NULL,
+    priority INTEGER DEFAULT 0 NOT NULL,
+    attrs TEXT,
+    description TEXT
 );
 
 CREATE INDEX idx_dispatcher_setid ON dispatcher(setid);
@@ -339,7 +343,8 @@ CREATE TABLE IF NOT EXISTS endpoint_locations (
 CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
 
 -- Initialize version table with dispatcher module version
-INSERT INTO version (table_name, table_version) VALUES ('dispatcher', 4);
+-- OpenSIPS 3.6 expects version 9 for dispatcher table
+INSERT INTO version (table_name, table_version) VALUES ('dispatcher', 9);
 
 -- Example data (replace with your actual data)
 -- INSERT INTO sip_domains (domain, dispatcher_setid, enabled, comment) 
