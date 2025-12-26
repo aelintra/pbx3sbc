@@ -293,20 +293,35 @@ onreply_route {
 
 ## Conclusion
 
-After extensive troubleshooting with multiple approaches, the issue persists. The 408 Request Timeout is being generated way too quickly (26ms) to be a timer issue, suggesting a transaction state problem or bug in Kamailio 5.5.4's transaction module.
+After extensive troubleshooting with multiple approaches, the issue persists across multiple Kamailio versions (5.5.4 and 5.7.4). The 408 Request Timeout is being generated way too quickly (26ms) to be a timer issue, suggesting a **fundamental architectural limitation or transaction state conflict** in Kamailio's transaction module.
 
-**Decision:** Upgrade to Kamailio 5.8.4 to see if the issue is resolved in a newer version. If the issue persists, consider:
-1. Checking for known bugs in the Kamailio issue tracker
-2. Posting to Kamailio mailing list or IRC with this specific scenario
-3. Considering alternative SIP proxy solutions (e.g., OpenSIPS)
+**Testing Results:**
+- **Kamailio 5.5.4:** Issue present
+- **Kamailio 5.7.4 (Ubuntu 24.04):** Issue persists - **NO CHANGE**
 
-## Testing After Upgrade
+**Root Cause Hypothesis:**
+This appears to be an architectural limitation in Kamailio's transaction module when handling the specific flow:
+1. `t_relay()` automatically sends 100 Trying to endpoint
+2. Upstream server (Asterisk) sends 100 Trying back
+3. Transaction module generates 408 before forwarding upstream 100 Trying
 
-When testing with Kamailio 5.8.4:
-1. Verify the same INVITE scenario works correctly
-2. Check if 408 errors still occur
-3. Review any deprecation warnings in logs
-4. Verify that 100 Trying from Asterisk is properly forwarded to endpoints
+The conflict between the automatic 100 Trying from `t_relay()` and the upstream 100 Trying may be causing a transaction state issue that cannot be resolved through configuration alone.
+
+**Recommendations:**
+1. **Try OpenSIPS:** OpenSIPS may handle this transaction flow differently and could resolve the issue
+2. **Post to Kamailio Community:** Document this as a potential architectural limitation on Kamailio mailing list/IRC
+3. **Consider Workarounds:** 
+   - Use stateless forwarding (loses transaction management benefits)
+   - Implement custom transaction handling (complex, may not work)
+4. **Document as Known Limitation:** If this use case is not supported by Kamailio, document it for future reference
+
+## Testing Results
+
+**Kamailio 5.7.4 (Ubuntu 24.04):**
+- Issue **PERSISTS** - No improvement
+- Same symptoms: 408 Request Timeout in ~26ms
+- 100 Trying from Asterisk still not forwarded to endpoint
+- **Conclusion:** This appears to be an architectural limitation, not a version-specific bug
 
 ## Related Files
 
@@ -315,9 +330,10 @@ When testing with Kamailio 5.8.4:
 
 ## Key Learnings from INVITE Issue
 
-1. Transaction timeouts can occur due to state issues, not just timer expiration
-2. The transaction module's internal state management is complex and can fail in edge cases
-3. Some issues may be version-specific bugs rather than configuration problems
-4. Extensive logging is essential for diagnosing transaction state issues
-5. When multiple configuration approaches fail, consider version upgrades or alternative solutions
+1. **Transaction timeouts can occur due to state issues, not just timer expiration** - The 408 happens in 26ms, way too fast for any timer
+2. **The transaction module's internal state management is complex and can fail in edge cases** - The conflict between automatic and upstream 100 Trying may be unresolvable
+3. **Some issues may be architectural limitations rather than bugs** - Persisting across versions (5.5.4 → 5.7.4) suggests a fundamental design issue
+4. **Extensive logging is essential for diagnosing transaction state issues** - But logging alone cannot fix architectural problems
+5. **When multiple configuration approaches fail across versions, consider alternative solutions** - OpenSIPS may handle this transaction flow differently
+6. **Not all SIP proxy use cases are supported by all proxies** - This specific flow (automatic 100 Trying + upstream 100 Trying) may not be supported by Kamailio
 
