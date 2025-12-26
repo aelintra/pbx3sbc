@@ -100,8 +100,8 @@ install_dependencies() {
     
     log_info "Adding OpenSIPS APT repository..."
     # Add OpenSIPS PPA repository (3.6 stable LTS)
-    # Check if repository already added
-    if ! grep -q "ppa:opensips/3.6" /etc/apt/sources.list.d/*.list 2>/dev/null; then
+    # Check if repository already added by checking if the file exists
+    if [[ ! -f /etc/apt/sources.list.d/opensips.list ]]; then
         apt-get install -y software-properties-common || {
             log_error "Failed to install software-properties-common (required for add-apt-repository)"
             exit 1
