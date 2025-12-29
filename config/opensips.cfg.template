@@ -26,7 +26,9 @@ socket=udp:0.0.0.0:5060
 
 # Set advertised address (replace with your OpenSIPS server's IP address)
 # This fixes the Via header showing 0.0.0.0
-advertised_address="192.168.1.95"
+# For cloud deployments, this MUST be your public IP address
+# Use --advertised-ip parameter during installation, or manually edit after installation
+advertised_address="CHANGE_ME"
 
 ####### Modules ########
 
@@ -660,36 +662,28 @@ onreply_route {
         
         xlog("200 OK with SDP: From=$var(from_user), To=$var(to_user), Source=$si\n");
         
-        # Check if this is from Asterisk (192.168.1.91)
-        if ($si == "192.168.1.91") {
-            xlog("200 OK from Asterisk - checking SDP and endpoint info\n");
-            
-            if ($var(to_user) != "") {
-                # Look up endpoint IP from database for the callee (To header)
-                $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                    if ($(avp(endpoint_ip)[0]) != "") {
-                        $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                        xlog("Callee endpoint IP should be: $var(endpoint_ip) (user=$var(to_user))\n");
-                        xlog("L_WARN", "Asterisk likely rewrote SDP to use 192.168.1.91 instead of $var(endpoint_ip)\n");
-                        xlog("L_WARN", "SDP modification disabled - this may cause RTP issues if Asterisk doesn't relay media\n");
-                    }
+        # Diagnostic logging: Check endpoint IPs for SDP troubleshooting
+        # This helps diagnose RTP issues regardless of whether call is from Asterisk or endpoint
+        if ($var(to_user) != "") {
+            # Look up endpoint IP from database for the callee (To header)
+            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > datetime('now') LIMIT 1";
+            if (sql_query($var(query), "$avp(endpoint_ip)")) {
+                if ($(avp(endpoint_ip)[0]) != "") {
+                    $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+                    xlog("Callee endpoint IP from database: $var(endpoint_ip) (user=$var(to_user))\n");
                 }
-                
-                # Also check the caller's endpoint IP
-                if ($var(from_user) != "") {
-                    $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                    if (sql_query($var(query), "$avp(caller_ip)")) {
-                        if ($(avp(caller_ip)[0]) != "") {
-                            $var(caller_ip) = $(avp(caller_ip)[0]);
-                            xlog("Caller endpoint IP: $var(caller_ip) (user=$var(from_user))\n");
-                        }
+            }
+            
+            # Also check the caller's endpoint IP
+            if ($var(from_user) != "") {
+                $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                if (sql_query($var(query), "$avp(caller_ip)")) {
+                    if ($(avp(caller_ip)[0]) != "") {
+                        $var(caller_ip) = $(avp(caller_ip)[0]);
+                        xlog("Caller endpoint IP from database: $var(caller_ip) (user=$var(from_user))\n");
                     }
                 }
             }
-        } else {
-            # This is from an endpoint directly (not through Asterisk)
-            xlog("200 OK directly from endpoint $si (user=$var(to_user)) - SDP should be correct\n");
         }
     }
     

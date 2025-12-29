@@ -3,7 +3,7 @@
 # OpenSIPS SIP Edge Router Installation Script
 # Installs and configures OpenSIPS with SQLite routing database
 #
-# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db]
+# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>]
 #
 
 set -euo pipefail
@@ -29,6 +29,7 @@ CONFIG_DIR="${INSTALL_DIR}/config"
 SKIP_DEPS=false
 SKIP_FIREWALL=false
 SKIP_DB=false
+ADVERTISED_IP=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,14 @@ while [[ $# -gt 0 ]]; do
         --skip-db)
             SKIP_DB=true
             shift
+            ;;
+        --advertised-ip)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}Error: --advertised-ip requires an IP address${NC}"
+                exit 1
+            fi
+            ADVERTISED_IP="$2"
+            shift 2
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
@@ -249,6 +258,15 @@ create_opensips_config() {
     
     # Update database path if needed
     sed -i "s|/var/lib/opensips/routing.db|${OPENSIPS_DATA_DIR}/routing.db|g" "$OPENSIPS_CFG"
+    
+    # Update advertised_address if provided
+    if [[ -n "$ADVERTISED_IP" ]]; then
+        sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${ADVERTISED_IP}\"|g" "$OPENSIPS_CFG"
+        log_success "Set advertised_address to ${ADVERTISED_IP}"
+    else
+        log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
+        log_warn "Set it to your server's public IP address for cloud deployments"
+    fi
     
     log_success "OpenSIPS configuration created at ${OPENSIPS_CFG}"
 }
