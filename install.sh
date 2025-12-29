@@ -106,17 +106,67 @@ install_dependencies() {
     fi
     
     log_info "Adding OpenSIPS APT repository..."
-    # Add OpenSIPS PPA repository (3.6 stable LTS)
+    # Add OpenSIPS official repository (apt.opensips.org)
     # Check if repository already added by checking if the file exists
     if [[ ! -f /etc/apt/sources.list.d/opensips.list ]]; then
-        apt-get install -y software-properties-common || {
-            log_error "Failed to install software-properties-common (required for add-apt-repository)"
+        # Detect OS and version for repository URL
+        source /etc/os-release
+        OS_CODENAME=""
+        
+        # Map Ubuntu/Debian versions to codenames
+        if [[ "$ID" == "ubuntu" ]]; then
+            case "$VERSION_ID" in
+                "24.04") OS_CODENAME="noble" ;;
+                "22.04") OS_CODENAME="jammy" ;;
+                "20.04") OS_CODENAME="focal" ;;
+                "18.04") OS_CODENAME="bionic" ;;
+                *)
+                    log_error "Unsupported Ubuntu version: ${VERSION_ID}"
+                    log_error "Supported versions: 18.04, 20.04, 22.04, 24.04"
+                    exit 1
+                    ;;
+            esac
+        elif [[ "$ID" == "debian" ]]; then
+            case "$VERSION_ID" in
+                "12") OS_CODENAME="bookworm" ;;
+                "11") OS_CODENAME="bullseye" ;;
+                "10") OS_CODENAME="buster" ;;
+                *)
+                    log_error "Unsupported Debian version: ${VERSION_ID}"
+                    log_error "Supported versions: 10, 11, 12"
+                    exit 1
+                    ;;
+            esac
+        else
+            log_error "Unsupported OS: ${ID}"
+            log_error "Supported OS: Ubuntu 18.04+, Debian 10+"
+            exit 1
+        fi
+        
+        log_info "Detected OS: ${ID} ${VERSION_ID} (${OS_CODENAME})"
+        
+        # Install prerequisites
+        apt-get update -qq
+        apt-get install -y curl gnupg2 ca-certificates || {
+            log_error "Failed to install prerequisites for repository setup"
             exit 1
         }
-        add-apt-repository ppa:opensips/3.6 -y || {
-            log_error "Failed to add OpenSIPS repository"
+        
+        # Add OpenSIPS GPG key
+        log_info "Adding OpenSIPS GPG key..."
+        curl -fsSL https://apt.opensips.org/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/opensips.gpg || {
+            log_error "Failed to add OpenSIPS GPG key"
             exit 1
         }
+        
+        # Add OpenSIPS repository
+        log_info "Adding OpenSIPS repository for ${OS_CODENAME}..."
+        echo "deb [signed-by=/usr/share/keyrings/opensips.gpg] https://apt.opensips.org ${OS_CODENAME} 3.6-releases" > /etc/apt/sources.list.d/opensips.list || {
+            log_error "Failed to create OpenSIPS repository file"
+            exit 1
+        }
+        
+        log_success "OpenSIPS repository added successfully"
     else
         log_info "OpenSIPS repository already configured"
     fi
