@@ -79,7 +79,6 @@ modparam("tm", "T2_timer", 8000)
 
 # --- Response handling ---
 # OpenSIPS handles responses differently - ensure proper forwarding
-# Note: onreply_avp_mode may not exist in all versions, remove if it causes issues
 
 ####### Routing Logic ########
 
@@ -102,10 +101,6 @@ route {
 
     # Note: sanity_check() module not available in OpenSIPS
     # Basic validation is handled by core parsing
-    # if (!sanity_check("1511", "7")) {
-    #     xlog("L_WARN", "Malformed SIP from $si\n");
-    #     exit;
-    # }
 
     # ---- Drop known scanners ----
     if ($ua =~ "sipvicious|friendly-scanner|sipcli|nmap") {
@@ -157,18 +152,6 @@ route {
         # Query database to see if source IP matches any dispatcher destination
         $var(source_ip) = $si;
         xlog("OPTIONS/NOTIFY received from $si, checking if from dispatcher\n");
-        
-        # Extract IP from destination field and compare with source IP
-        # Destination format can be: just IP (192.168.1.91), sip:IP:PORT, or sip:IP
-        # Handle all formats by checking if destination starts with "sip:" or is just an IP
-        # TODO: OpenSIPS doesn't have sql_query() - need to use OpenSIPS database module
-        # First, let's see what destinations exist (debug only - remove after testing)
-        # if (sql_query("cb", "SELECT destination FROM dispatcher LIMIT 5", "debug_dest")) {
-        #     if ($dbr(debug_dest=>rows) > 0) {
-        #         xlog("Sample dispatcher destinations in DB: $dbr(debug_dest=>[0,0])\n");
-        #     }
-        #     sql_result_free("debug_dest");
-        # }
         
         # Check if Request-URI looks like an endpoint (has username and IP address, not domain)
         # If so, try endpoint lookup regardless of dispatcher check
@@ -420,11 +403,6 @@ route {
                     $var(final_port) = "5060";
                 }
                 
-                # Ensure expires is a valid integer
-                if ($var(expires_int) == "" || $var(expires_int) == "0") {
-                    $var(expires_int) = "3600";
-                }
-                
                 xlog("Extracted endpoint info: AoR=$var(endpoint_aor), IP=$var(final_ip), Port=$var(final_port), Expires=$var(expires_int)\n");
                 
                 # Store/update endpoint location in database
@@ -528,7 +506,6 @@ route[DOMAIN_CHECK] {
                         xlog("Using AoR directly in Request-URI: $ru\n");
                         # Note: To header still contains IP from Asterisk, but Request-URI has domain
                         # Most endpoints check Request-URI for matching, not To header
-                        # If endpoint rejects due to To header, we may need to modify it using textops
                     } else if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
                         # Fallback: construct from extracted domain
                         $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
@@ -745,15 +722,7 @@ failure_route[1] {
 
 ####### Dispatcher events (visibility) ########
 
-# Note: Event route names may vary by OpenSIPS version
-# If these don't work, check your OpenSIPS version's event names
-# Common alternatives: dispatcher:dst-up, E_DISPATCHER_DST_UP, etc.
-# Commented out - event route syntax may need adjustment for your OpenSIPS version
-# event_route[dispatcher:dst-up] {
-#     xlog("Asterisk UP: $du\n");
-# }
-# 
-# event_route[dispatcher:dst-down] {
-#     xlog("L_WARN", "Asterisk DOWN: $du\n");
-# }
+# Note: Event routes for dispatcher module are not currently configured
+# Event route syntax varies by OpenSIPS version and may require specific module configuration
+# If needed, check OpenSIPS documentation for event route syntax for your version
 
