@@ -456,6 +456,53 @@ failure_route {
 
 ---
 
+### Error: sql_query() returns false for INSERT statements
+
+**Cause:** `sql_query()` in OpenSIPS `sqlops` module returns `false` for INSERT/UPDATE/DELETE statements because they don't return rows. This is expected behavior, not an error.
+
+**Solution:**
+```opensips
+# ✅ Correct - Execute INSERT without checking return value
+$var(query) = "INSERT OR REPLACE INTO endpoint_locations ...";
+sql_query($var(query), "$avp(result)");
+xlog("Stored endpoint location: ...\n");
+
+# ❌ Wrong - Treating false return as error
+if (sql_query($var(query), "$avp(result)")) {
+    xlog("Success\n");
+} else {
+    xlog("Failed\n");  # This will always execute for INSERT!
+}
+```
+
+**Note:** For SELECT queries, `sql_query()` returns `true` if rows are found, `false` if no rows. For INSERT/UPDATE/DELETE, it always returns `false` (no rows returned), but the query still executes successfully.
+
+**Database Connection:**
+- Use 3 slashes for `sqlops` module: `sqlite:///path/to/db` (matches `dispatcher` module format)
+- Both `sqlops` and `dispatcher` can use the same database file
+
+---
+
+### Error: SQL queries show literal variable names instead of values
+
+**Cause:** OpenSIPS does not interpolate variables inside SQL query strings. Using `'$var(domain)'` in a query string will search for the literal string `$var(domain)`, not the variable's value.
+
+**Solution:**
+```opensips
+# ✅ Correct - Use string concatenation to interpolate variables
+$var(query) = "SELECT dispatcher_setid FROM sip_domains WHERE domain='" + $var(domain) + "' AND enabled=1";
+if (sql_query($var(query), "$avp(domain_setid)")) {
+    # ...
+}
+
+# ❌ Wrong - Variable not interpolated, searches for literal '$var(domain)'
+$var(query) = "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domain)' AND enabled=1";
+```
+
+**Note:** Always use string concatenation (`+` operator) to build SQL queries with variable values. This applies to all SQL queries (SELECT, INSERT, UPDATE, DELETE).
+
+---
+
 ## Configuration Checklist
 
 When setting up OpenSIPS configuration, verify:
@@ -477,6 +524,7 @@ When setting up OpenSIPS configuration, verify:
 - [ ] `mf_process_maxfwd_header(10)` uses integer
 - [ ] `ds_select_dst($var(setid), 4)` uses integer flag
 - [ ] `has_totag()` available (requires `sipmsgops.so`)
+- [ ] `sql_query()` for INSERT/UPDATE/DELETE doesn't check return value (always false, but query succeeds)
 
 ### Pseudo-Variables
 - [ ] Use `$(tu{uri.domain})` instead of `$tD`
