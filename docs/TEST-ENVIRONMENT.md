@@ -5,44 +5,36 @@ This document describes the cloud-based test environment for OpenSIPS and Asteri
 
 ## Network Topology
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    On-Premises Network                      │
-│                    NAT Gateway: 203.0.113.1                 │
-│                                                             │
-│  ┌──────────────┐         ┌──────────────┐                  │
-│  │  Snom Phone  │         │ Yealink Phone│                  │
-│  │   Extension  │         │  Extension   │                  │
-│  │    40004     │         │    40005     │                  │
-│  └──────────────┘         └──────────────┘                  │
-│         │                          │                        │
-│         └──────────┬─────────────────┘                      │
-│                    │                                        │
-│              [NAT Router]                                   │
-│           203.0.113.1 (Public IP)                           │
-└────────────────────┼────────────────────────────────────────┘
-                     │
-                     │ Internet
-                     │
-┌────────────────────┼─────────────────────────────────────────┐
-│                    Cloud Environment                          │
-│                                                               │
-│  ┌──────────────────────────────────────────────┐            │
-│  │         OpenSIPS SBC Server                  │            │
-│  │  Hostname: sbc.example.com             │            │
-│  │  Public IP: 198.51.100.1                   │            │
-│  │  Port: 5060 (SIP UDP/TCP)                    │            │
-│  └──────────────────────────────────────────────┘            │
-│                    │                                          │
-│                    │                                          │
-│  ┌──────────────────────────────────────────────┐            │
-│  │         Asterisk PBX Server                   │            │
-│  │  Hostname: pbx.example.com                  │            │
-│  │  Public IP: 198.51.100.2                        │            │
-│  │  Private IP: 10.0.1.100                    │            │
-│  │  Port: 5060 (SIP UDP/TCP)                      │            │
-│  └──────────────────────────────────────────────┘            │
-└───────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph OnPrem["On-Premises Network"]
+        direction LR
+        Snom["Snom Phone<br/>Extension 40004"]
+        Yealink["Yealink Phone<br/>Extension 40005"]
+        NAT["NAT Router<br/>203.0.113.1<br/>(Public IP)"]
+        
+        Snom --> NAT
+        Yealink --> NAT
+    end
+    
+    Internet["Internet"]
+    
+    subgraph Cloud["Cloud Environment"]
+        direction TB
+        OpenSIPS["OpenSIPS SBC Server<br/>Hostname: sbc.example.com<br/>Public IP: 198.51.100.1<br/>Port: 5060 (SIP UDP/TCP)"]
+        Asterisk["Asterisk PBX Server<br/>Hostname: pbx.example.com<br/>Public IP: 198.51.100.2<br/>Private IP: 10.0.1.100<br/>Port: 5060 (SIP UDP/TCP)"]
+        
+        OpenSIPS --> Asterisk
+    end
+    
+    NAT --> Internet
+    Internet --> OpenSIPS
+    
+    style OnPrem fill:#E3F2FD
+    style Cloud fill:#F3E5F5
+    style NAT fill:#FFF9C4
+    style OpenSIPS fill:#C8E6C9
+    style Asterisk fill:#FFCCBC
 ```
 
 ## Component Details
@@ -74,7 +66,7 @@ This document describes the cloud-based test environment for OpenSIPS and Asteri
 - `advertised_address` must be set to: `198.51.100.1`
 - Listens on all interfaces (`0.0.0.0:5060`)
 - Routes SIP traffic between phones and Asterisk
-- Tracks endpoint locations for direct phone-to-phone routing
+- Tracks endpoint locations for routing Asterisk-to-phone calls (INVITE, OPTIONS, NOTIFY)
 
 **Installation:**
 ```bash
@@ -122,13 +114,14 @@ Phone (40004/40005) → NAT (203.0.113.1) → Internet → OpenSIPS (198.51.100.
 - Stores endpoint location in `endpoint_locations` table
 - Forwards REGISTER to Asterisk (if needed)
 
-### 2. Phone-to-Phone Call (Direct Routing)
+### 2. Phone-to-Phone Call (via Asterisk)
 ```
-Phone 40004 → OpenSIPS → Phone 40005
+Phone 40004 → OpenSIPS → Asterisk → OpenSIPS → Phone 40005
 ```
-- OpenSIPS looks up both endpoints in `endpoint_locations` table
-- Routes INVITE directly between phones (bypassing Asterisk)
-- RTP flows directly between phones through NAT
+- Phone sends INVITE with domain in Request-URI (e.g., `sip:40005@example.com`)
+- OpenSIPS routes to Asterisk via dispatcher (domain lookup)
+- Asterisk processes the call and routes back through OpenSIPS to destination phone
+- RTP flows through Asterisk (unless Asterisk is configured for direct media)
 
 ### 3. Phone-to-Asterisk Call
 ```
@@ -226,9 +219,10 @@ VALUES (10, 'sip:198.51.100.2:5060', 0, '1', 0, 'Asterisk PBX - Public IP');
 - Phone 40005 registers → Verify in `endpoint_locations` table
 - Check OpenSIPS logs for successful registration
 
-### 2. Direct Phone-to-Phone Call
+### 2. Phone-to-Phone Call
 - Call from 40004 to 40005
-- Verify OpenSIPS routes directly (bypasses Asterisk)
+- Verify OpenSIPS routes through Asterisk (dispatcher)
+- Verify Asterisk processes the call
 - Verify audio flows in both directions
 
 ### 3. Phone-to-Asterisk Call
