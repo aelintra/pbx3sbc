@@ -15,11 +15,11 @@ flowchart TD
     CheckToTag -->|Yes| RouteWithinDLG[route WITHINDLG]
     CheckToTag -->|No| CheckMethod{Method Allowed?}
     CheckMethod -->|No| Reply405[Reply 405 Method Not Allowed]
-    CheckMethod -->|Yes| CheckCancel{Method = CANCEL?}
+    CheckMethod -->|Yes| CheckCancel{"Method = CANCEL?"}
     CheckCancel -->|Yes| HandleCancel[Handle CANCEL]
-    CheckCancel -->|No| CheckOptNotify{Method = OPTIONS/NOTIFY?}
+    CheckCancel -->|No| CheckOptNotify{"Method = OPTIONS/NOTIFY?"}
     CheckOptNotify -->|Yes| HandleOptNotify[Handle OPTIONS/NOTIFY]
-    CheckOptNotify -->|No| CheckRegister{Method = REGISTER?}
+    CheckOptNotify -->|No| CheckRegister{"Method = REGISTER?"}
     CheckRegister -->|Yes| HandleRegister[Handle REGISTER]
     CheckRegister -->|No| RouteDomainCheck[route DOMAIN_CHECK]
     
@@ -42,7 +42,7 @@ flowchart TD
     StoreEndpoint --> RouteDomainCheck
     LogWarning --> RouteDomainCheck
     
-    RouteDomainCheck --> CheckEndpointIP{Request-URI Domain = IP?}
+    RouteDomainCheck --> CheckEndpointIP{"Request-URI Domain = IP?"}
     CheckEndpointIP -->|Yes| LookupEndpoint2[route ENDPOINT_LOOKUP]
     CheckEndpointIP -->|No| CheckDomainMatch{Domain Matches To?}
     CheckDomainMatch -->|No| Exit1[Exit]
@@ -162,9 +162,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([route WITHINDLG]) --> TryLooseRoute{loose_route() Succeeds?}
+    Start([route WITHINDLG]) --> TryLooseRoute{"loose_route() Succeeds?"}
     TryLooseRoute -->|Yes| Relay1[route RELAY]
-    TryLooseRoute -->|No| CheckBYE{Method = BYE?}
+    TryLooseRoute -->|No| CheckBYE{"Method = BYE?"}
     CheckBYE -->|Yes| CheckTrans{Transaction Exists?}
     CheckBYE -->|No| Reply404[Reply 404 Not Here]
     CheckTrans -->|Yes| Relay2[route RELAY]
@@ -220,11 +220,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([route TO_DISPATCHER]) --> SelectDst{ds_select_dst() Healthy Node?}
+    Start([route TO_DISPATCHER]) --> SelectDst{"ds_select_dst() Healthy Node?"}
     SelectDst -->|No| Reply503[Reply 503 Service Unavailable]
     SelectDst -->|Yes| RecordRoute[Add Record-Route Header]
     RecordRoute --> ArmFailure[t_on_failure]
-    ArmFailure --> Relay{t_relay() Succeeds?}
+    ArmFailure --> Relay{"t_relay() Succeeds?"}
     Relay -->|Yes| End1([Exit])
     Relay -->|No| Reply500[Reply 500 Internal Server Error]
     Reply503 --> End2([Exit])
@@ -241,7 +241,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([route RELAY]) --> ArmFailure[t_on_failure]
-    ArmFailure --> Relay{t_relay() Succeeds?}
+    ArmFailure --> Relay{"t_relay() Succeeds?"}
     Relay -->|Yes| End1([Exit])
     Relay -->|No| Reply500[Reply 500 Internal Server Error]
     Reply500 --> End2([Exit])
@@ -258,7 +258,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Response Received]) --> LogResponse[Log Response]
-    LogResponse --> Check200{Status = 200 OK with SDP?}
+    LogResponse --> Check200{"Status = 200 OK with SDP?"}
     Check200 -->|Yes| LogSDP[Log SDP Details]
     Check200 -->|No| CheckProvisional{100-199 Provisional?}
     CheckProvisional -->|Yes| Exit1[Exit - Let TM Handle]
@@ -282,7 +282,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Transaction Failure]) --> LogFailure[Log Failure Details]
-    LogFailure --> CheckTimeout{Status = 408 Timeout?}
+    LogFailure --> CheckTimeout{"Status = 408 Timeout?"}
     CheckTimeout -->|Yes| LogTimeout[Log Timeout Details]
     CheckTimeout -->|No| End([Exit])
     LogTimeout --> End
@@ -322,7 +322,7 @@ flowchart TD
     ExtractDomain --> LookupEndpoint[route ENDPOINT_LOOKUP]
     LookupEndpoint --> Found{Endpoint Found?}
     Found -->|Yes| BuildURI[route BUILD_ENDPOINT_URI]
-    Found -->|No| CheckMethod{Method = OPTIONS?}
+    Found -->|No| CheckMethod{"Method = OPTIONS?"}
     CheckMethod -->|Yes| Reply200[Reply 200 OK]
     CheckMethod -->|No| TryContact[Try Contact Header Fallback]
     TryContact --> ContactFound{Contact Valid?}
