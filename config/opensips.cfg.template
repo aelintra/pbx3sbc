@@ -198,48 +198,13 @@ route {
                     
                     xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
                     
-                    # Look up endpoint location from database
-                    $var(endpoint_ip) = "";
-                    $var(endpoint_port) = "";
+                    # Use helper route to look up endpoint location
+                    $var(lookup_user) = $var(endpoint_user);
+                    $var(lookup_aor) = $var(endpoint_aor);
+                    route(ENDPOINT_LOOKUP);
                     
-                    # First try exact AoR match (if AoR provided and not empty)
-                    if ($var(endpoint_aor) != "") {
-                        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
-                        if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                            if ($(avp(endpoint_ip)[0]) != "") {
-                                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                                # Get the port
-                                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
-                                if (sql_query($var(query), "$avp(endpoint_port)")) {
-                                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                                }
-                                xlog("Exact AoR match found - IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                            }
-                        }
-                    }
-                    
-                    # Fallback: try username-only lookup (if exact match failed or wasn't attempted)
-                    if ($var(endpoint_ip) == "") {
-                        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                        if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                            if ($(avp(endpoint_ip)[0]) != "") {
-                                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                                # Get the port
-                                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                                if (sql_query($var(query), "$avp(endpoint_port)")) {
-                                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                                }
-                                xlog("Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                            }
-                        }
-                    }
-                    
-                    # Validate and set defaults
-                    if ($var(endpoint_ip) != "") {
-                        if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-                            $var(endpoint_port) = "5060";
-                        }
-                        
+                    # Check if endpoint was found
+                    if ($var(lookup_success) == 1) {
                         # Get username from Request-URI or To header for destination URI
                         $var(target_user) = $tU;
                         if ($var(target_user) == "") {
@@ -424,89 +389,58 @@ route[DOMAIN_CHECK] {
         $var(endpoint_user) = $rU;
         xlog("Extracted endpoint username: $var(endpoint_user)\n");
         
-        # Try username-only lookup in endpoint_locations
-        # First get the full AoR to extract the domain
-        $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
-        xlog("Endpoint lookup query: $var(query)\n");
-        if (sql_query($var(query), "$avp(endpoint_aor)")) {
-            xlog("Endpoint AoR query returned result, checking if found\n");
-            if ($(avp(endpoint_aor)[0]) != "") {
-                $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
-                # The AoR already contains user@domain, so we can use it directly for Request-URI
-                # Just need to extract domain for validation
-                # Try regex - if it doesn't work, we'll use the AoR directly
-                $var(endpoint_domain) = "";
-                if ($var(endpoint_aor) =~ "@(.+)") {
-                    $var(endpoint_domain) = $re;
-                }
-                
-                # If regex failed, try to get domain from To header as fallback
-                if ($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                    $var(to_domain) = $(tu{uri.domain});
-                    if ($var(to_domain) != "" && $var(to_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        $var(endpoint_domain) = $var(to_domain);
-                        xlog("Using domain from To header: $var(endpoint_domain)\n");
-                    }
-                }
-                
-                xlog("AoR=$var(endpoint_aor), extracted domain=$var(endpoint_domain)\n");
-                
-                # Now get the IP
-                $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
-                if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                    if ($(avp(endpoint_ip)[0]) != "") {
-                        $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                        # Get the port
-                        $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
-                        if (sql_query($var(query), "$avp(endpoint_port)")) {
-                            $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                        }
-                        
-                        xlog("Endpoint lookup result: AoR=$var(endpoint_aor), Domain=$var(endpoint_domain), IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                        
-                        # Validate IP and port
-                        if ($var(endpoint_ip) != "") {
-                            if ($var(endpoint_port) == "") {
-                                $var(endpoint_port) = "5060";
-                            }
-                            
-                            # Build destination URI with IP:port for routing (NAT traversal)
-                    $du = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                    # Construct Request-URI using the AoR directly (it already has user@domain format)
-                    # This is simpler and more reliable than trying to extract domain
-                    if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        # AoR has domain (not IP), use it directly
-                        $ru = "sip:" + $var(endpoint_aor);
-                        xlog("Using AoR directly in Request-URI: $ru\n");
-                        # Note: To header still contains IP from Asterisk, but Request-URI has domain
-                        # Most endpoints check Request-URI for matching, not To header
-                    } else if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        # Fallback: construct from extracted domain
-                        $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
-                        xlog("Using extracted domain in Request-URI: $ru\n");
-                    } else {
-                        # Last resort: use IP if domain not found
-                        xlog("L_WARN", "Cannot determine domain, using IP in Request-URI: $du\n");
-                        $ru = $du;
-                    }
-                            xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru (endpoint lookup)\n");
-                            route(RELAY);
-                            exit;
-                        }
-                    }
-                } else {
-                    xlog("L_WARN", "Endpoint AoR query returned empty result for user=$var(endpoint_user)\n");
-                }
-            } else {
-                xlog("L_WARN", "Endpoint AoR query failed or returned no rows for user=$var(endpoint_user)\n");
+        # Use helper route to look up endpoint location (AoR, IP, and port)
+        $var(lookup_user) = $var(endpoint_user);
+        $var(lookup_aor) = "";  # Start with username-only lookup
+        route(ENDPOINT_LOOKUP);
+        
+        # Check if endpoint was found
+        if ($var(lookup_success) == 1) {
+            # Extract domain from AoR for Request-URI construction
+            $var(endpoint_domain) = "";
+            if ($var(endpoint_aor) =~ "@(.+)") {
+                $var(endpoint_domain) = $re;
             }
-        } else {
-            xlog("L_WARN", "Endpoint AoR query execution failed for user=$var(endpoint_user)\n");
+            
+            # If regex failed, try to get domain from To header as fallback
+            if ($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                $var(to_domain) = $(tu{uri.domain});
+                if ($var(to_domain) != "" && $var(to_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    $var(endpoint_domain) = $var(to_domain);
+                    xlog("Using domain from To header: $var(endpoint_domain)\n");
+                }
+            }
+            
+            xlog("Endpoint lookup result: AoR=$var(endpoint_aor), Domain=$var(endpoint_domain), IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
+            
+            # Build destination URI with IP:port for routing (NAT traversal)
+            $du = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+            
+            # Construct Request-URI using the AoR directly (it already has user@domain format)
+            # This is simpler and more reliable than trying to extract domain
+            if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                # AoR has domain (not IP), use it directly
+                $ru = "sip:" + $var(endpoint_aor);
+                xlog("Using AoR directly in Request-URI: $ru\n");
+                # Note: To header still contains IP from Asterisk, but Request-URI has domain
+                # Most endpoints check Request-URI for matching, not To header
+            } else if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                # Fallback: construct from extracted domain
+                $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
+                xlog("Using extracted domain in Request-URI: $ru\n");
+            } else {
+                # Last resort: use IP if domain not found
+                xlog("L_WARN", "Cannot determine domain, using IP in Request-URI: $du\n");
+                $ru = $du;
+            }
+            
+            xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru (endpoint lookup)\n");
+            route(RELAY);
+            exit;
         }
         
         # If endpoint lookup failed, log and send 404
-        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in database or lookup query failed\n");
-        # Send 404 since we can't route to endpoint
+        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in database\n");
         sl_send_reply(404, "Endpoint Not Found");
         exit;
     }
