@@ -28,7 +28,7 @@ socket=udp:0.0.0.0:5060
 # This fixes the Via header showing 0.0.0.0
 # For cloud deployments, this MUST be your public IP address
 # Use --advertised-ip parameter during installation, or manually edit after installation
-advertised_address="CHANGE_ME"
+advertised_address="34.205.252.186"
 
 ####### Modules ########
 
@@ -199,92 +199,64 @@ route {
                     xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
                     
                     # Look up endpoint location from database
-                    $var(found_endpoint) = 0;
+                    $var(endpoint_ip) = "";
+                    $var(endpoint_port) = "";
                     
-                    # First try exact match with domain (if we have a domain, not IP)
+                    # First try exact AoR match (if AoR provided and not empty)
                     if ($var(endpoint_aor) != "") {
-                        # Use string concatenation to interpolate variables into SQL query
                         $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
                         if (sql_query($var(query), "$avp(endpoint_ip)")) {
                             if ($(avp(endpoint_ip)[0]) != "") {
                                 $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                                # Now get the port
+                                # Get the port
                                 $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(endpoint_aor) + "' AND expires > datetime('now')";
                                 if (sql_query($var(query), "$avp(endpoint_port)")) {
                                     $var(endpoint_port) = $(avp(endpoint_port)[0]);
                                 }
-                                
-                                xlog("Database lookup result: IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                                
-                                # Validate IP and port
-                                if ($var(endpoint_ip) != "") {
-                                    if ($var(endpoint_port) == "") {
-                                        $var(endpoint_port) = "5060";
-                                    }
-                                    
-                                    # Construct destination URI directly using username and endpoint IP:port
-                                    # Get username from Request-URI or To header
-                                    $var(target_user) = $tU;
-                                    if ($var(target_user) == "") {
-                                        $var(target_user) = $rU;
-                                    }
-                                    
-                                    # Build destination URI: sip:user@ip:port
-                                    $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                                    # Construct proper Request-URI for routing
-                                    $ru = $du;
-                                    xlog("Routing $rm from Asterisk $si to endpoint $du (exact match), Request-URI=$ru\n");
-                                    route(RELAY);
-                                    exit;
-                                }
+                                xlog("Exact AoR match found - IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
                             }
                         }
                     }
                     
-                    # Fallback: try lookup by username only (in case To header has IP instead of domain, or exact match failed)
-                    xlog("Exact match failed or not attempted, trying username-only lookup for $var(endpoint_user)\n");
-                    # Use string concatenation to interpolate variables into SQL query
-                    $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                    if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                        if ($(avp(endpoint_ip)[0]) != "") {
-                            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                            # Get the port
-                            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                            if (sql_query($var(query), "$avp(endpoint_port)")) {
-                                $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                            }
-                            
-                            xlog("Database lookup result (username match): IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
-                            
-                            # Validate IP and port
-                            if ($var(endpoint_ip) == "") {
-                                xlog("L_ERR", "Invalid endpoint IP from database lookup (username match)\n");
-                            } else {
-                                if ($var(endpoint_port) == "") {
-                                    $var(endpoint_port) = "5060";
+                    # Fallback: try username-only lookup (if exact match failed or wasn't attempted)
+                    if ($var(endpoint_ip) == "") {
+                        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                        if (sql_query($var(query), "$avp(endpoint_ip)")) {
+                            if ($(avp(endpoint_ip)[0]) != "") {
+                                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+                                # Get the port
+                                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(endpoint_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                                if (sql_query($var(query), "$avp(endpoint_port)")) {
+                                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
                                 }
-                                
-                                # Construct destination URI directly using username and endpoint IP:port
-                                # Get username from To header (more reliable than Request-URI which might be invalid)
-                                $var(target_user) = $tU;
-                                if ($var(target_user) == "") {
-                                    $var(target_user) = $rU;
-                                }
-                                
-                                # Build destination URI: sip:user@ip:port
-                                $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                                # Construct proper Request-URI for routing
-                                $ru = $du;
-                                xlog("Routing $rm from Asterisk $si to endpoint $du (username match), Request-URI=$ru\n");
-                                route(RELAY);
-                                exit;
+                                xlog("Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
                             }
                         }
                     }
                     
-                    # Fallback: reply statelessly (health check works, but NAT pinhole won't stay open)
-                    # For NOTIFY, we should try to route anyway or it will fail
-                    xlog("L_WARN", "$rm from Asterisk $si to $var(endpoint_aor) - endpoint location not found in database (tried exact match and username match)\n");
+                    # Validate and set defaults
+                    if ($var(endpoint_ip) != "") {
+                        if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
+                            $var(endpoint_port) = "5060";
+                        }
+                        
+                        # Get username from Request-URI or To header for destination URI
+                        $var(target_user) = $tU;
+                        if ($var(target_user) == "") {
+                            $var(target_user) = $rU;
+                        }
+                        
+                        # Build destination URI: sip:user@ip:port
+                        $du = "sip:" + $var(target_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                        # Construct proper Request-URI for routing
+                        $ru = $du;
+                        xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru\n");
+                        route(RELAY);
+                        exit;
+                    }
+                    
+                    # Endpoint lookup failed - handle fallback
+                    xlog("L_WARN", "$rm from Asterisk $si to $var(endpoint_aor) - endpoint location not found in database\n");
                     if (is_method("OPTIONS")) {
                         sl_send_reply(200, "OK");
                     } else {
@@ -635,6 +607,98 @@ route[WITHINDLG] {
 
     xlog("L_WARN", "In-dialog request $rm - loose_route() failed and no transaction match\n");
     sl_send_reply(404, "Not Here");
+    exit;
+}
+
+####### Helper Routes ########
+
+# Endpoint lookup helper route
+# Looks up endpoint location from database by username and/or AoR
+# 
+# Input variables:
+#   $var(lookup_user) - Username to look up (required)
+#   $var(lookup_aor)  - Optional AoR for exact match (e.g., "user@domain.com")
+#
+# Output variables:
+#   $var(endpoint_ip)   - Endpoint IP address if found
+#   $var(endpoint_port) - Endpoint port if found (defaults to 5060)
+#   $var(endpoint_aor)  - Full AoR if found (e.g., "user@domain.com")
+#   $var(lookup_success) - 1 if endpoint found, 0 if not found
+#
+# Usage:
+#   $var(lookup_user) = "40004";
+#   $var(lookup_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
+#   route(ENDPOINT_LOOKUP);
+#   if ($var(lookup_success) == 1) {
+#       # Use $var(endpoint_ip), $var(endpoint_port), $var(endpoint_aor)
+#   }
+route[ENDPOINT_LOOKUP] {
+    xlog("ENDPOINT_LOOKUP: Looking up user=$var(lookup_user), AoR=$var(lookup_aor)\n");
+    
+    # Initialize output variables
+    $var(endpoint_ip) = "";
+    $var(endpoint_port) = "";
+    $var(endpoint_aor) = "";
+    $var(lookup_success) = 0;
+    
+    # Validate input
+    if ($var(lookup_user) == "") {
+        xlog("L_ERR", "ENDPOINT_LOOKUP: lookup_user is empty\n");
+        exit;
+    }
+    
+    # First try exact AoR match (if AoR provided and not empty)
+    if ($var(lookup_aor) != "") {
+        xlog("ENDPOINT_LOOKUP: Trying exact AoR match for $var(lookup_aor)\n");
+        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > datetime('now')";
+        if (sql_query($var(query), "$avp(endpoint_ip)")) {
+            if ($(avp(endpoint_ip)[0]) != "") {
+                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+                # Get the port
+                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > datetime('now')";
+                if (sql_query($var(query), "$avp(endpoint_port)")) {
+                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
+                }
+                $var(endpoint_aor) = $var(lookup_aor);
+                xlog("ENDPOINT_LOOKUP: Exact match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+            }
+        }
+    }
+    
+    # Fallback: try username-only lookup (if exact match failed or wasn't attempted)
+    if ($var(endpoint_ip) == "") {
+        xlog("ENDPOINT_LOOKUP: Trying username-only match for $var(lookup_user)\n");
+        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+        if (sql_query($var(query), "$avp(endpoint_ip)")) {
+            if ($(avp(endpoint_ip)[0]) != "") {
+                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+                # Get the port
+                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                if (sql_query($var(query), "$avp(endpoint_port)")) {
+                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
+                }
+                # Get the full AoR
+                $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                if (sql_query($var(query), "$avp(endpoint_aor)")) {
+                    $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
+                }
+                xlog("ENDPOINT_LOOKUP: Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+            }
+        }
+    }
+    
+    # Validate and set defaults
+    if ($var(endpoint_ip) != "") {
+        if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
+            $var(endpoint_port) = "5060";
+        }
+        $var(lookup_success) = 1;
+        xlog("ENDPOINT_LOOKUP: Success - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+    } else {
+        xlog("ENDPOINT_LOOKUP: Failed - no endpoint found for user=$var(lookup_user)\n");
+        $var(lookup_success) = 0;
+    }
+    
     exit;
 }
 

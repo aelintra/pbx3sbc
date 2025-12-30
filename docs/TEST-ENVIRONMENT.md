@@ -163,12 +163,48 @@ VALUES ('vcloudpbx.com', 10, 1, 'Cloud PBX domain');
 ```
 
 ### Dispatcher Configuration
+
+**Format Requirements:**
+- OpenSIPS dispatcher module **requires** destinations in SIP URI format: `sip:hostname:port` or `sip:ip:port`
+- The `sip:` prefix is mandatory - destinations without it will not be loaded by the dispatcher module
+- Port number should be included (default is 5060 if omitted)
+
+**Hostname vs IP Address:**
+
+**Using Hostnames (Recommended for Production):**
 ```sql
 INSERT INTO dispatcher (setid, destination, state, weight, priority, description) 
-VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
+VALUES (10, 'sip:ael.vcloudpbx.com:5060', 0, '1', 0, 'Asterisk PBX - Hostname');
 ```
 
-**Note:** Use private IP (`172.31.20.123`) for dispatcher since OpenSIPS and Asterisk are in the same cloud network.
+**Advantages:**
+- Easier maintenance - change IP in DNS instead of database
+- More flexible for IP changes, failover, or load balancing
+- Better for documentation and clarity
+
+**Considerations:**
+- OpenSIPS must be able to resolve the hostname via DNS
+- DNS resolution is cached - restart/reload may be needed if IP changes
+- Health checks will use the resolved IP address
+
+**Using IP Addresses:**
+```sql
+INSERT INTO dispatcher (setid, destination, state, weight, priority, description) 
+VALUES (10, 'sip:3.93.253.1:5060', 0, '1', 0, 'Asterisk PBX - Public IP');
+```
+
+**Advantages:**
+- No DNS dependency
+- Faster (no DNS lookup required)
+- Works even if DNS is unavailable
+
+**Considerations:**
+- Requires database update if IP changes
+- Less flexible for IP changes or failover scenarios
+
+**Current Test Environment:**
+- Using hostname: `sip:ael.vcloudpbx.com:5060` (resolves to `3.93.253.1`)
+- Both OpenSIPS and Asterisk are in cloud, using public IPs for communication
 
 ## NAT Considerations
 
