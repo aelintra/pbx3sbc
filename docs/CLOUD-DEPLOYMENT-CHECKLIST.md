@@ -9,14 +9,14 @@ This document identifies issues and recommendations for deploying OpenSIPS and A
 
 #### Critical: `advertised_address` in `opensips.cfg.template`
 - **Location:** Line 29
-- **Current:** `advertised_address="192.168.1.95"`
+- **Current:** `advertised_address="198.51.100.1"`
 - **Issue:** Hardcoded private IP address will not work in cloud
 - **Impact:** Via headers will show incorrect address, causing routing issues
 - **Fix Required:** Must be set to the cloud server's public IP address
 
 #### Critical: Asterisk IP Check in `opensips.cfg.template`
 - **Location:** Lines 663-674
-- **Current:** Hardcoded check `if ($si == "192.168.1.91")`
+- **Current:** Hardcoded check `if ($si == "10.0.1.100")`
 - **Issue:** Will fail when Asterisk is in cloud with different IP
 - **Impact:** SDP logging and diagnostics for Asterisk-originated calls will not work
 - **Fix Required:** Make configurable or use domain-based detection
@@ -50,14 +50,14 @@ This document identifies issues and recommendations for deploying OpenSIPS and A
 ### Priority 1: Must Fix Before Cloud Deployment
 
 1. **Update `advertised_address` in `opensips.cfg.template`**
-   - Change from hardcoded `192.168.1.95` to configurable value
+   - Change from hardcoded `198.51.100.1` to configurable value
    - Options:
      a. Use environment variable substitution in install.sh
      b. Add post-install configuration step
      c. Document manual edit requirement
 
 2. **Make Asterisk IP check configurable**
-   - Remove hardcoded `192.168.1.91` check
+   - Remove hardcoded `10.0.1.100` check
    - Options:
      a. Use domain-based detection (check if source is from dispatcher)
      b. Make it configurable via modparam or variable

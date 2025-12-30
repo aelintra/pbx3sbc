@@ -1,6 +1,6 @@
 # Testing Setup Guide
 
-Quick guide for testing PBX3sbc installation with MinIO at `192.168.1.173`.
+Quick guide for testing PBX3sbc installation with MinIO at `10.0.1.173`.
 
 ## Pre-Installation Checklist
 
@@ -8,13 +8,13 @@ Quick guide for testing PBX3sbc installation with MinIO at `192.168.1.173`.
 
 ```bash
 # Test connectivity
-ping -c 3 192.168.1.173
+ping -c 3 10.0.1.173
 
 # Test port (if nc is installed)
-nc -zv 192.168.1.173 9000
+nc -zv 10.0.1.173 9000
 
 # Or test with curl
-curl -I http://192.168.1.173:9000
+curl -I http://10.0.1.173:9000
 ```
 
 ### 2. Prepare MinIO Bucket
@@ -31,7 +31,7 @@ chmod +x mc
 sudo mv mc /usr/local/bin/
 
 # Configure and create bucket
-mc alias set myminio http://192.168.1.173:9000 YOUR_ACCESS_KEY YOUR_SECRET_KEY
+mc alias set myminio http://10.0.1.173:9000 YOUR_ACCESS_KEY YOUR_SECRET_KEY
 mc mb myminio/sip-routing
 ```
 
@@ -54,7 +54,7 @@ sudo ./install.sh
 - Replica type: `minio`
 - Bucket name: `sip-routing` (or your preferred name)
 - Path: `routing.db`
-- Endpoint: `http://192.168.1.173:9000`
+- Endpoint: `http://10.0.1.173:9000`
 - Access Key ID: (your MinIO access key)
 - Secret Access Key: (your MinIO secret key)
 - Skip TLS verify: `y` (for HTTP)
@@ -127,13 +127,13 @@ sudo ./scripts/restore-database.sh
 
 ```bash
 # Verify network connectivity
-ping 192.168.1.173
+ping 10.0.1.173
 
 # Check firewall (if applicable)
 sudo ufw status | grep 9000
 
 # Test MinIO endpoint
-curl -v http://192.168.1.173:9000
+curl -v http://10.0.1.173:9000
 ```
 
 ### Litestream Not Replicating

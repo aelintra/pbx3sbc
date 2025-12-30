@@ -152,10 +152,10 @@ t_relay() to Asterisk
 **Problem:** Destinations stored in various formats make matching difficult.
 
 **Solution:** SQL query that handles all formats:
-- `IP` (e.g., `192.168.1.91`)
-- `IP:PORT` (e.g., `192.168.1.91:5060`)
-- `sip:IP` (e.g., `sip:192.168.1.91`)
-- `sip:IP:PORT` (e.g., `sip:192.168.1.91:5060`)
+- `IP` (e.g., `10.0.1.100`)
+- `IP:PORT` (e.g., `10.0.1.100:5060`)
+- `sip:IP` (e.g., `sip:10.0.1.100`)
+- `sip:IP:PORT` (e.g., `sip:10.0.1.100:5060`)
 
 ### 3. Request-URI Construction
 
@@ -218,9 +218,9 @@ $ru = $du;  // Set Request-URI to match destination
 
 **Log Format Example:**
 ```
-INFO: REQUEST: INVITE from 192.168.1.138:58396 to sip:402@domain.com (Call-ID: xxx)
-INFO: Routing to sip:192.168.1.91 for domain=domain.com setid=10 method=INVITE
-INFO: Response received: 100 Trying from 192.168.1.91
+INFO: REQUEST: INVITE from 10.0.1.200:58396 to sip:402@domain.com (Call-ID: xxx)
+INFO: Routing to sip:10.0.1.100 for domain=domain.com setid=10 method=INVITE
+INFO: Response received: 100 Trying from 10.0.1.100
 ```
 
 ## Database Queries
@@ -228,7 +228,7 @@ INFO: Response received: 100 Trying from 192.168.1.91
 ### Endpoint Location Storage (REGISTER)
 ```sql
 INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires)
-VALUES ('user@domain', '192.168.1.138', '58396', datetime(strftime('%s', 'now') + 3600, 'unixepoch'))
+VALUES ('user@domain', '10.0.1.200', '58396', datetime(strftime('%s', 'now') + 3600, 'unixepoch'))
 ```
 
 ### Endpoint Location Lookup (OPTIONS/NOTIFY)
@@ -245,10 +245,10 @@ WHERE aor LIKE 'user@%' AND expires > datetime('now') LIMIT 1
 ### Dispatcher Check (OPTIONS/NOTIFY)
 ```sql
 SELECT COUNT(*) FROM dispatcher WHERE
-    (destination = '192.168.1.91') OR
-    (destination LIKE '192.168.1.91:%') OR
-    (destination LIKE 'sip:192.168.1.91') OR
-    (destination LIKE 'sip:192.168.1.91:%')
+    (destination = '10.0.1.100') OR
+    (destination LIKE '10.0.1.100:%') OR
+    (destination LIKE 'sip:10.0.1.100') OR
+    (destination LIKE 'sip:10.0.1.100:%')
 ```
 
 ### Domain Validation

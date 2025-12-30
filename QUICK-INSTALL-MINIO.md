@@ -1,12 +1,12 @@
 # Quick Installation with MinIO
 
-This guide helps you quickly install PBX3sbc with your MinIO server at `192.168.1.173`.
+This guide helps you quickly install PBX3sbc with your MinIO server at `10.0.1.173`.
 
 ## Prerequisites
 
 - Ubuntu 20.04+ system
 - Root/sudo access
-- Network access to MinIO server at `192.168.1.173`
+- Network access to MinIO server at `10.0.1.173`
 - MinIO access credentials
 
 ## Quick Installation Steps
@@ -29,7 +29,7 @@ When prompted for Litestream configuration:
 - **Replica type**: `minio`
 - **Bucket name**: (your bucket name, e.g., `sip-routing`)
 - **Path in bucket**: `routing.db` (or your preferred path)
-- **MinIO endpoint**: `http://192.168.1.173:9000` (or `https://192.168.1.173:9000` if using HTTPS)
+- **MinIO endpoint**: `http://10.0.1.173:9000` (or `https://10.0.1.173:9000` if using HTTPS)
 - **Access Key ID**: (your MinIO access key)
 - **Secret Access Key**: (your MinIO secret key)
 - **Skip TLS verify**: `y` (if using HTTP) or `n` (if using HTTPS with valid cert)
@@ -69,11 +69,11 @@ If you want to pre-create the bucket in MinIO:
 
 ```bash
 # Using MinIO client (mc)
-mc alias set myminio http://192.168.1.173:9000 ACCESS_KEY SECRET_KEY
+mc alias set myminio http://10.0.1.173:9000 ACCESS_KEY SECRET_KEY
 mc mb myminio/sip-routing
 
 # Or using curl
-curl -X PUT "http://192.168.1.173:9000/sip-routing" \
+curl -X PUT "http://10.0.1.173:9000/sip-routing" \
   -H "Authorization: AWS ACCESS_KEY:SECRET_KEY"
 ```
 
@@ -81,10 +81,10 @@ curl -X PUT "http://192.168.1.173:9000/sip-routing" \
 
 ```bash
 # Test connectivity
-curl -I http://192.168.1.173:9000
+curl -I http://10.0.1.173:9000
 
 # Test with credentials (if you have them)
-curl -X GET "http://192.168.1.173:9000" \
+curl -X GET "http://10.0.1.173:9000" \
   -H "Authorization: AWS ACCESS_KEY:SECRET_KEY"
 ```
 
@@ -94,12 +94,12 @@ curl -X GET "http://192.168.1.173:9000" \
 
 ```bash
 # Check network connectivity
-ping -c 3 192.168.1.173
+ping -c 3 10.0.1.173
 
 # Test port access
-telnet 192.168.1.173 9000
+telnet 10.0.1.173 9000
 # Or
-nc -zv 192.168.1.173 9000
+nc -zv 10.0.1.173 9000
 ```
 
 ### Litestream Not Replicating

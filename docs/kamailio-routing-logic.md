@@ -119,8 +119,8 @@ CREATE INDEX idx_endpoint_locations_expires ON endpoint_locations(expires);
 
 **Example data:**
 ```
-aor: H5CCvFpY@pdhlocal.vcloudpbx.com
-contact_ip: 192.168.1.138
+aor: H5CCvFpY@example.com
+contact_ip: 10.0.1.200
 contact_port: 45891
 expires: 2024-12-23 21:45:00
 ```
@@ -131,12 +131,12 @@ expires: 2024-12-23 21:45:00
 
 ```
 1. Endpoint sends REGISTER
-   Contact: sip:user@192.168.1.138:45891
-   To: sip:user@pdhlocal.vcloudpbx.com
+   Contact: sip:user@10.0.1.200:45891
+   To: sip:user@example.com
    ↓
 2. Kamailio extracts endpoint info
-   - AoR: user@pdhlocal.vcloudpbx.com
-   - IP: 192.168.1.138
+   - AoR: user@example.com
+   - IP: 10.0.1.200
    - Port: 45891
    ↓
 3. Kamailio stores in endpoint_locations table
@@ -154,20 +154,20 @@ expires: 2024-12-23 21:45:00
 
 ```
 1. Asterisk sends OPTIONS to endpoint
-   From: Asterisk (192.168.1.205:5060)
-   To: sip:user@pdhlocal.vcloudpbx.com
+   From: Asterisk (10.0.1.100:5060)
+   To: sip:user@example.com
    ↓
 2. Kamailio receives OPTIONS
    - Detects source is dispatcher destination (Asterisk)
    ↓
 3. Kamailio extracts AoR from To header
-   - AoR: user@pdhlocal.vcloudpbx.com
+   - AoR: user@example.com
    ↓
 4. Kamailio looks up endpoint location in database
-   - Finds: 192.168.1.138:45891
+   - Finds: 10.0.1.200:45891
    ↓
 5. Kamailio routes OPTIONS to endpoint
-   $du = sip:user@192.168.1.138:45891
+   $du = sip:user@10.0.1.200:45891
    ↓
 6. Endpoint receives OPTIONS
    ↓

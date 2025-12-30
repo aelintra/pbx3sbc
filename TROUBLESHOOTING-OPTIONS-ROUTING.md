@@ -13,7 +13,7 @@ OPTIONS packets sent from Asterisk backends to registered endpoints were not bei
 
 **Symptoms:**
 ```
-ERROR: pv [pv_trans.c:1496]: tr_eval_uri(): invalid uri [<sip:H5CCvFpY@192.168.1.138:45891;line=zlpcjjt4>;reg-id=1;q=1.0;+sip.instance="<urn:uuid:...>";audio;m>
+ERROR: pv [pv_trans.c:1496]: tr_eval_uri(): invalid uri [<sip:H5CCvFpY@10.0.1.200:45891;line=zlpcjjt4>;reg-id=1;q=1.0;+sip.instance="<urn:uuid:...>";audio;m>
 ERROR: <core> [core/lvalue.c:346]: lval_pvar_assign(): non existing right pvar
 ERROR: <core> [core/lvalue.c:404]: lval_assign(): assignment failed at pos: (214,32-214,46)
 ```
@@ -46,19 +46,19 @@ if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
 
 **Symptoms:**
 ```
-INFO: <script>: OPTIONS/NOTIFY from 192.168.1.91 is not from a known dispatcher destination, continuing normal routing
-NOTICE: <script>: Door-knock blocked: domain=192.168.1.138 src=192.168.1.91 (not found)
+INFO: <script>: OPTIONS/NOTIFY from 10.0.1.100 is not from a known dispatcher destination, continuing normal routing
+NOTICE: <script>: Door-knock blocked: domain=10.0.1.200 src=10.0.1.100 (not found)
 ```
 
 **Root Cause:**  
-The SQL query to check if an OPTIONS request came from a known Asterisk backend was using LIKE patterns that assumed destinations were stored as `sip:IP:PORT` or `sip:IP`. However, the actual database stored destinations as just `IP` (e.g., `192.168.1.91`).
+The SQL query to check if an OPTIONS request came from a known Asterisk backend was using LIKE patterns that assumed destinations were stored as `sip:IP:PORT` or `sip:IP`. However, the actual database stored destinations as just `IP` (e.g., `10.0.1.100`).
 
 **Solution:**  
 Updated the SQL query to extract the IP from the destination field regardless of format, handling:
-- Just IP: `192.168.1.91`
-- IP:PORT: `192.168.1.91:5060`
-- sip:IP: `sip:192.168.1.91`
-- sip:IP:PORT: `sip:192.168.1.91:5060`
+- Just IP: `10.0.1.100`
+- IP:PORT: `10.0.1.100:5060`
+- sip:IP: `sip:10.0.1.100`
+- sip:IP:PORT: `sip:10.0.1.100:5060`
 
 **Location:** `config/kamailio.cfg.template` lines 87-106
 
@@ -77,7 +77,7 @@ if (sql_query("cb", "SELECT COUNT(*) FROM dispatcher WHERE CASE WHEN destination
 ERROR: pv [pv_core.c:269]: pv_get_ruri(): failed to parse the R-URI
 ERROR: tm [t_lookup.c:1285]: new_t(): uri invalid
 ERROR: tm [t_lookup.c:1438]: t_newtran(): new_t failed
-INFO: <script>: Routing OPTIONS from Asterisk 192.168.1.91 to endpoint sip:401@192.168.1.138:58396 (username match), Request-URI=<null>
+INFO: <script>: Routing OPTIONS from Asterisk 10.0.1.100 to endpoint sip:401@10.0.1.200:58396 (username match), Request-URI=<null>
 ```
 
 **Root Cause:**  
@@ -106,11 +106,11 @@ route(RELAY);
 After all fixes, the logs show successful routing:
 
 ```
-INFO: <script>: OPTIONS/NOTIFY received from 192.168.1.91, checking if from dispatcher
-INFO: <script>: Dispatcher check result: found 1 matching destinations for IP 192.168.1.91
-INFO: <script>: OPTIONS/NOTIFY from Asterisk 192.168.1.91, looking up endpoint AoR: 401@192.168.1.138 (user: 401)
-INFO: <script>: Database lookup result (username match): IP=192.168.1.138, Port=58396
-INFO: <script>: Routing OPTIONS from Asterisk 192.168.1.91 to endpoint sip:401@192.168.1.138:58396 (username match), Request-URI=sip:401@192.168.1.138:58396
+INFO: <script>: OPTIONS/NOTIFY received from 10.0.1.100, checking if from dispatcher
+INFO: <script>: Dispatcher check result: found 1 matching destinations for IP 10.0.1.100
+INFO: <script>: OPTIONS/NOTIFY from Asterisk 10.0.1.100, looking up endpoint AoR: 401@10.0.1.200 (user: 401)
+INFO: <script>: Database lookup result (username match): IP=10.0.1.200, Port=58396
+INFO: <script>: Routing OPTIONS from Asterisk 10.0.1.100 to endpoint sip:401@10.0.1.200:58396 (username match), Request-URI=sip:401@10.0.1.200:58396
 ```
 
 ## Debug Logging
@@ -170,13 +170,13 @@ After fixing the OPTIONS routing issue, a new problem emerged: INVITE requests f
 
 **From Kamailio Logs:**
 ```
-INFO: <script>: INVITE received from 192.168.1.138:58396
-INFO: <script>: Routing to sip:192.168.1.91 for domain=pdhlocal.vcloudpbx.com
-INFO: <script>: t_relay() succeeded for sip:192.168.1.91 method=INVITE
-INFO: <script>: Response received: 100 Trying from 192.168.1.91
+INFO: <script>: INVITE received from 10.0.1.200:58396
+INFO: <script>: Routing to sip:10.0.1.100 for domain=example.com
+INFO: <script>: t_relay() succeeded for sip:10.0.1.100 method=INVITE
+INFO: <script>: Response received: 100 Trying from 10.0.1.100
 INFO: <script>: Provisional response 100 received, transaction should remain active
-INFO: <script>: Response received: 487 Request Terminated from 192.168.1.91
-INFO: <script>: Response received: 200 OK from 192.168.1.91 (method=CANCEL)
+INFO: <script>: Response received: 487 Request Terminated from 10.0.1.100
+INFO: <script>: Response received: 200 OK from 10.0.1.100 (method=CANCEL)
 ```
 
 **Key Observations:**
@@ -222,7 +222,7 @@ The 408 Request Timeout is being generated internally by Kamailio's transaction 
 ### 3. Advertised Address Configuration
 
 **Attempted:**
-- Added `advertised_address="192.168.1.95"` to fix `0.0.0.0` in Via headers
+- Added `advertised_address="198.51.100.1"` to fix `0.0.0.0` in Via headers
 
 **Result:** No change - issue persisted
 
@@ -277,7 +277,7 @@ modparam("tm", "retr_timer1", 2000)
 modparam("tm", "retr_timer2", 8000)
 
 # Global parameters
-advertised_address="192.168.1.95"
+advertised_address="198.51.100.1"
 
 # onreply_route with explicit handling
 onreply_route {
