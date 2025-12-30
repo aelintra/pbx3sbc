@@ -1,8 +1,7 @@
 #!opensips
 #
 # OpenSIPS SIP Edge Router Configuration Template
-# This configuration replicates the functionality from Kamailio while
-# addressing the INVITE transaction handling issues encountered with Kamailio
+# This configuration provides SIP edge routing functionality for Asterisk PBX backends
 #
 # Based on requirements in REQUIREMENTS-FOR-OPENSIPS.md
 # Troubleshooting notes in TROUBLESHOOTING-OPTIONS-ROUTING.md
@@ -14,7 +13,7 @@
 # it here for lower levels of visibility 
 #log_level=4
 
-# OpenSIPS uses different parameter names than Kamailio
+# OpenSIPS parameter configuration
 # Debug level can be set via command line: opensips -D 3
 # Or via modparam for specific modules
 
@@ -111,7 +110,7 @@ route {
 
     # ---- In-dialog requests ----
     # Check if To tag exists (in-dialog request)
-    # OpenSIPS uses $to_tag pseudo-variable (equivalent to Kamailio's $tt)
+    # OpenSIPS uses $to_tag pseudo-variable for To header tag
     if (has_totag()) {
         route(WITHINDLG);
         exit;
@@ -138,11 +137,6 @@ route {
         # Forward CANCEL to cancel the INVITE transaction
         route(RELAY);
         exit;
-    }
-
-    # ---- Log INVITE requests for debugging ----
-    if (is_method("INVITE")) {
-        xlog("INVITE received from $si:$sp to $ru (From: $fu, To: $tu)\n");
     }
 
     # ---- Handle OPTIONS and NOTIFY from Asterisk backends (to endpoints) ----
@@ -318,8 +312,6 @@ route {
                 }
             }
             
-            xlog("Contact extraction: source IP=$si, source port=$sp, extracted IP=$var(contact_ip), extracted port=$var(contact_port), final IP=$var(endpoint_ip), Port=$var(endpoint_port), full Contact=$hdr(Contact)\n");
-            
             # Validate extracted IP and port before storing
             if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
                 xlog("L_ERR", "Failed to extract IP - source IP=$si, Contact: $hdr(Contact), endpoint_ip=$var(endpoint_ip)\n");
@@ -353,7 +345,6 @@ route {
                 # Note: sql_query() returns false for INSERT statements (no rows returned),
                 # but the INSERT still succeeds. We execute it and log the attempt.
                 $var(query) = "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', datetime('now', '+" + $var(expires_int) + " seconds'))";
-                xlog("SQL query: $var(query)\n");
                 # Execute INSERT - return value is false for INSERT (no rows), but query succeeds
                 sql_query($var(query), "$avp(reg_result)");
                 xlog("Stored endpoint location: $var(endpoint_aor) -> $var(final_ip):$var(final_port) (expires in $var(expires_int) seconds)\n");
@@ -383,14 +374,12 @@ route[DOMAIN_CHECK] {
     # Note: $rd might include port (e.g., 192.168.1.138:56931), so we check just the IP part
     # Extract just the IP address part (before any colon)
     $var(request_domain) = $rd;
-    xlog("DEBUG: Checking endpoint detection - rU=$rU, rd=$rd, request_domain=$var(request_domain), full URI=$ru\n");
     if ($var(request_domain) =~ "^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
         $var(request_ip) = $re;
-        xlog("INVITE Request-URI looks like endpoint: $rU@$var(request_domain) (IP=$var(request_ip)), attempting endpoint lookup\n");
+        xlog("INVITE Request-URI looks like endpoint: $rU@$var(request_domain), attempting endpoint lookup\n");
         
         # Extract username from Request-URI
         $var(endpoint_user) = $rU;
-        xlog("Extracted endpoint username: $var(endpoint_user)\n");
         
         # Use helper route to look up endpoint location (AoR, IP, and port)
         $var(lookup_user) = $var(endpoint_user);
@@ -462,8 +451,7 @@ route[TO_DISPATCHER] {
     # Arm failure route to handle transaction failures
     t_on_failure("1");
 
-    # OpenSIPS transaction handling - this is where we expect better behavior
-    # than Kamailio for INVITE transactions
+    # OpenSIPS transaction handling for reliable INVITE transaction management
     if (!t_relay()) {
         xlog("L_ERR", "t_relay() failed for $du method=$rm Request-URI=$ru\n");
         # Use sl_send_reply() since we're in request route, not reply route
