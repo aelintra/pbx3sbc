@@ -197,6 +197,8 @@ route {
                     $var(lookup_aor) = $var(endpoint_aor);
                     route(ENDPOINT_LOOKUP);
                     
+                    xlog("OPTIONS/NOTIFY: After ENDPOINT_LOOKUP, lookup_success=$var(lookup_success), endpoint_ip=$var(endpoint_ip), endpoint_port=$var(endpoint_port)\n");
+                    
                     # Check if endpoint was found
                     if ($var(lookup_success) == 1) {
                         # Get username from Request-URI or To header for destination URI
@@ -212,7 +214,7 @@ route {
                         $var(endpoint_aor) = "";
                         route(BUILD_ENDPOINT_URI);
                         
-                        xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru\n");
+                        xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru, Call-ID=$hdr(Call-ID)\n");
                         route(RELAY);
                         exit;
                     }
@@ -267,6 +269,7 @@ route {
             
             # Extract IP and port - always use source IP/port for REGISTER (endpoint sends directly)
             # Contact header extraction is for NAT scenarios, but source is more reliable for REGISTER
+            # Initialize with source IP/port first
             $var(endpoint_ip) = $si;
             $var(endpoint_port) = $sp;
             
@@ -275,6 +278,8 @@ route {
                 $var(endpoint_port) = "5060";
             }
             
+            xlog("REGISTER: Initial endpoint values - IP=$var(endpoint_ip), Port=$var(endpoint_port) (from source $si:$sp)\n");
+            
             # Try to extract from Contact header as fallback (for NAT scenarios)
             # Use regex to extract IP:port from Contact header string
             $var(contact_ip) = "";
@@ -282,24 +287,31 @@ route {
             
             # Extract IP address from Contact header (pattern: @IP:port or @IP)
             # Match IPv4 address after @ symbol
+            # Contact format: <sip:user@IP:port> or sip:user@IP:port
             if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
                 $var(contact_ip) = $re;
+                xlog("REGISTER: Extracted Contact IP from header: $var(contact_ip) (regex matched)\n");
                 
                 # Extract port if present (pattern: :PORT after the IP)
                 if ($hdr(Contact) =~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:([0-9]+)") {
                     $var(contact_port) = $re;
+                    xlog("REGISTER: Extracted Contact port from header: $var(contact_port)\n");
                 }
+            } else {
+                xlog("REGISTER: Contact header regex did not match IP pattern: $hdr(Contact)\n");
             }
             
-            # Use Contact header values if they're valid and different from source (NAT scenario)
-            if ($var(contact_ip) != "" && $var(contact_ip) != "0" && $var(contact_ip) != $si) {
-                $var(endpoint_ip) = $var(contact_ip);
-                xlog("Using Contact header IP ($var(contact_ip)) instead of source IP ($si) - possible NAT scenario\n");
+            # For REGISTER, always use source IP/port (endpoint sends directly to OpenSIPS)
+            # Contact header extraction is unreliable (regex $re not working correctly in OpenSIPS)
+            # Source IP/port is the actual connection endpoint, which is what we need
+            # Only use Contact header if we can successfully extract a valid IP that's different
+            # For now, skip Contact header extraction and use source directly
+            $var(endpoint_ip) = $si;
+            $var(endpoint_port) = $sp;
+            if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
+                $var(endpoint_port) = "5060";
             }
-            if ($var(contact_port) != "" && $var(contact_port) != "0" && $var(contact_port) != $sp) {
-                $var(endpoint_port) = $var(contact_port);
-                xlog("Using Contact header port ($var(contact_port)) instead of source port ($sp)\n");
-            }
+            xlog("REGISTER: Using source IP/port for endpoint: $var(endpoint_ip):$var(endpoint_port)\n");
             
             # Final validation - ensure we have valid values
             if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
@@ -330,9 +342,9 @@ route {
                     $var(expires_int) = "3600";
                 }
                 
-                # Use source IP/port directly - ensure we have valid values
-                $var(final_ip) = $si;
-                $var(final_port) = $sp;
+                # Use extracted endpoint IP/port (from Contact header if NAT, otherwise source)
+                $var(final_ip) = $var(endpoint_ip);
+                $var(final_port) = $var(endpoint_port);
                 if ($var(final_port) == "" || $var(final_port) == "0") {
                     $var(final_port) = "5060";
                 }
@@ -561,9 +573,16 @@ route[ENDPOINT_LOOKUP] {
     if ($var(endpoint_ip) == "") {
         xlog("ENDPOINT_LOOKUP: Trying username-only match for $var(lookup_user)\n");
         $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
-        if (sql_query($var(query), "$avp(endpoint_ip)")) {
-            if ($(avp(endpoint_ip)[0]) != "") {
-                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+        xlog("ENDPOINT_LOOKUP: Executing query: $var(query)\n");
+        $var(query_result) = sql_query($var(query), "$avp(endpoint_ip)");
+        xlog("ENDPOINT_LOOKUP: sql_query() returned: $var(query_result)\n");
+        if ($var(query_result)) {
+            xlog("ENDPOINT_LOOKUP: Query succeeded, checking result\n");
+            $var(result_value) = $(avp(endpoint_ip)[0]);
+            xlog("ENDPOINT_LOOKUP: AVP result[0] = '$var(result_value)'\n");
+            if ($var(result_value) != "") {
+                $var(endpoint_ip) = $var(result_value);
+                xlog("ENDPOINT_LOOKUP: Found IP=$var(endpoint_ip), getting port\n");
                 # Get the port
                 $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
                 if (sql_query($var(query), "$avp(endpoint_port)")) {
@@ -575,13 +594,21 @@ route[ENDPOINT_LOOKUP] {
                     $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
                 }
                 xlog("ENDPOINT_LOOKUP: Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+                xlog("ENDPOINT_LOOKUP: Continuing after username match...\n");
+            } else {
+                xlog("ENDPOINT_LOOKUP: Query returned empty result (result_value is empty)\n");
             }
+        } else {
+            xlog("L_ERR", "ENDPOINT_LOOKUP: SQL query returned false for username=$var(lookup_user)\n");
         }
     }
     
     # Validate and set defaults
+    xlog("ENDPOINT_LOOKUP: After lookup, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)', endpoint_aor='$var(endpoint_aor)'\n");
     if ($var(endpoint_ip) != "") {
+        xlog("ENDPOINT_LOOKUP: IP found, calling VALIDATE_ENDPOINT\n");
         route(VALIDATE_ENDPOINT);
+        xlog("ENDPOINT_LOOKUP: After VALIDATE_ENDPOINT, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)'\n");
         $var(lookup_success) = 1;
         xlog("ENDPOINT_LOOKUP: Success - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
     } else {
@@ -589,7 +616,9 @@ route[ENDPOINT_LOOKUP] {
         $var(lookup_success) = 0;
     }
     
-    exit;
+    xlog("ENDPOINT_LOOKUP: Returning with lookup_success=$var(lookup_success)\n");
+    # Helper route returns normally to allow caller to continue processing
+    return;
 }
 
 # Endpoint validation helper route
@@ -611,7 +640,7 @@ route[VALIDATE_ENDPOINT] {
     # Validate IP is not empty
     if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
         xlog("L_ERR", "VALIDATE_ENDPOINT: endpoint_ip is empty or invalid\n");
-        exit;
+        return;
     }
     
     # Set default port if empty or invalid
@@ -619,7 +648,7 @@ route[VALIDATE_ENDPOINT] {
         $var(endpoint_port) = "5060";
     }
     
-    exit;
+    # Route returns normally to caller (no exit needed)
 }
 
 # Build endpoint URI helper route
@@ -676,23 +705,41 @@ route[BUILD_ENDPOINT_URI] {
         $ru = $du;
     }
     
-    exit;
+    # Route returns normally to caller (no exit needed)
 }
 
 route[RELAY] {
     # Arm failure route to handle transaction failures
     t_on_failure("1");
+    
+    # For non-INVITE requests (like NOTIFY), ensure transaction is created properly
+    if (is_method("NOTIFY|OPTIONS")) {
+        xlog("RELAY: Creating transaction for $rm to $du, Call-ID=$hdr(Call-ID)\n");
+    }
+    
     if (!t_relay()) {
         # Use sl_send_reply() since we're in request route, not reply route
         sl_send_reply(500, "Internal Server Error");
+    } else {
+        if (is_method("NOTIFY|OPTIONS")) {
+            xlog("RELAY: Transaction created successfully for $rm, Call-ID=$hdr(Call-ID)\n");
+        }
     }
     exit;
 }
-
+    
 ####### Response handling (for debugging) ########
 
 onreply_route {
-    xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact))\n");
+    xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
+    
+    # Log OPTIONS/NOTIFY responses specifically
+    if (is_method("OPTIONS|NOTIFY")) {
+        xlog("OPTIONS/NOTIFY response: $rs $rr from $si, Call-ID=$hdr(Call-ID), Via=$hdr(Via), forwarding to Asterisk\n");
+        # In onreply_route, transaction should already exist if we're here
+        # If we get a 476 error, it means the response didn't match any transaction
+        # This could be due to Via branch mismatch or transaction timeout
+    }
     
     # Detailed SDP logging for 200 OK responses
     # This helps diagnose why one direction works and the other doesn't
