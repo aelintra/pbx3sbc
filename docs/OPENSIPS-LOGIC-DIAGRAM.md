@@ -107,12 +107,13 @@ flowchart TD
     FoundUsername -->|Yes| SetSuccess
     FoundUsername -->|No| SetFailure[Set lookup_success=0]
     SetSuccess --> ValidateEndpoint[route VALIDATE_ENDPOINT]
-    ValidateEndpoint --> End([Exit])
-    SetFailure --> End
-    LogError --> End
+    ValidateEndpoint --> Return1([Return])
+    SetFailure --> Return1
+    LogError --> Exit1([Exit])
     
     style Start fill:#90EE90
-    style End fill:#FFB6C1
+    style Return1 fill:#87CEEB
+    style Exit1 fill:#FFB6C1
 ```
 
 ### VALIDATE_ENDPOINT
@@ -120,15 +121,15 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([route VALIDATE_ENDPOINT]) --> CheckIP{endpoint_ip Valid?}
-    CheckIP -->|No| LogError[Log Error & Exit]
+    CheckIP -->|No| LogError[Log Error & Return]
     CheckIP -->|Yes| CheckPort{endpoint_port Empty/Invalid?}
     CheckPort -->|Yes| SetDefaultPort[Set port = 5060]
-    CheckPort -->|No| End([Exit])
-    SetDefaultPort --> End
-    LogError --> End
+    CheckPort -->|No| Return1([Return])
+    SetDefaultPort --> Return1
+    LogError --> Return1
     
     style Start fill:#90EE90
-    style End fill:#FFB6C1
+    style Return1 fill:#87CEEB
 ```
 
 ### BUILD_ENDPOINT_URI
@@ -139,21 +140,21 @@ flowchart TD
     BuildDU --> ExtractDomain{Extract Domain from AoR}
     ExtractDomain --> DomainValid{Domain Valid & Not IP?}
     DomainValid -->|No| TryToHeader[Try To Header Domain]
-    DomainValid -->|Yes| CheckAoRFormat{AoR Has Domain?}
-    TryToHeader --> ToDomainValid{To Domain Valid?}
-    ToDomainValid -->|Yes| UseToDomain[Use To Domain]
-    ToDomainValid -->|No| UseIP[Use IP in Request-URI]
+    DomainValid -->|Yes| CheckAoRFormat{AoR Has Domain & Not IP?}
+    TryToHeader --> ToDomainValid{To Domain Valid & Not IP?}
+    ToDomainValid -->|Yes| UseToDomain[Set endpoint_domain from To]
+    ToDomainValid -->|No| UseIP[Use IP in Request-URI: $ru = $du]
     CheckAoRFormat -->|Yes| UseAoR["Use AoR in Request-URI: $ru = sip:AoR"]
-    CheckAoRFormat -->|No| CheckExtractedDomain{Extracted Domain Valid?}
+    CheckAoRFormat -->|No| CheckExtractedDomain{Extracted Domain Valid & Not IP?}
     CheckExtractedDomain -->|Yes| UseExtractedDomain["Use Extracted Domain: $ru = sip:user@domain"]
     CheckExtractedDomain -->|No| UseIP
-    UseAoR --> End([Exit])
-    UseExtractedDomain --> End
+    UseAoR --> Return1([Return])
+    UseExtractedDomain --> Return1
     UseToDomain --> CheckAoRFormat
-    UseIP --> End
+    UseIP --> Return1
     
     style Start fill:#90EE90
-    style End fill:#FFB6C1
+    style Return1 fill:#87CEEB
 ```
 
 ## Route Details
@@ -258,8 +259,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Response Received]) --> LogResponse[Log Response]
-    LogResponse --> Check200{"Status = 200 OK with SDP?"}
-    Check200 -->|Yes| LogSDP[Log SDP Details]
+    LogResponse --> CheckOptNotify{"Method = OPTIONS/NOTIFY?"}
+    CheckOptNotify -->|Yes| LogOptNotify[Log OPTIONS/NOTIFY Response]
+    CheckOptNotify -->|No| Check200{"Status = 200 OK with SDP?"}
+    LogOptNotify --> Check200
+    Check200 -->|Yes| LogSDP[Log SDP Details & Endpoint IPs]
     Check200 -->|No| CheckProvisional{100-199 Provisional?}
     CheckProvisional -->|Yes| Exit1[Exit - Let TM Handle]
     CheckProvisional -->|No| CheckSuccess{200-299 Success?}
