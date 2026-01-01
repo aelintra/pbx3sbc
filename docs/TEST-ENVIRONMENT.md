@@ -5,44 +5,36 @@ This document describes the cloud-based test environment for OpenSIPS and Asteri
 
 ## Network Topology
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    On-Premises Network                        │
-│                    NAT Gateway: 74.83.23.44                  │
-│                                                               │
-│  ┌──────────────┐         ┌──────────────┐                 │
-│  │  Snom Phone  │         │ Yealink Phone│                 │
-│  │   Extension  │         │  Extension   │                 │
-│  │    40004     │         │    40005     │                 │
-│  └──────────────┘         └──────────────┘                 │
-│         │                          │                         │
-│         └──────────┬─────────────────┘                       │
-│                    │                                         │
-│              [NAT Router]                                    │
-│           74.83.23.44 (Public IP)                            │
-└────────────────────┼─────────────────────────────────────────┘
-                     │
-                     │ Internet
-                     │
-┌────────────────────┼─────────────────────────────────────────┐
-│                    Cloud Environment                          │
-│                                                               │
-│  ┌──────────────────────────────────────────────┐            │
-│  │         OpenSIPS SBC Server                  │            │
-│  │  Hostname: pbx3sbc.vcloudpbx.com             │            │
-│  │  Public IP: 34.205.252.186                   │            │
-│  │  Port: 5060 (SIP UDP/TCP)                    │            │
-│  └──────────────────────────────────────────────┘            │
-│                    │                                          │
-│                    │                                          │
-│  ┌──────────────────────────────────────────────┐            │
-│  │         Asterisk PBX Server                   │            │
-│  │  Hostname: ael.vcloudpbx.com                  │            │
-│  │  Public IP: 3.93.253.1                        │            │
-│  │  Private IP: 172.31.20.123                    │            │
-│  │  Port: 5060 (SIP UDP/TCP)                      │            │
-│  └──────────────────────────────────────────────┘            │
-└───────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph OnPrem["On-Premises Network"]
+        direction LR
+        Snom["Snom Phone<br/>Extension 40004"]
+        Yealink["Yealink Phone<br/>Extension 40005"]
+        NAT["NAT Router<br/>203.0.113.1<br/>(Public IP)"]
+        
+        Snom --> NAT
+        Yealink --> NAT
+    end
+    
+    Internet["Internet"]
+    
+    subgraph Cloud["Cloud Environment"]
+        direction TB
+        OpenSIPS["OpenSIPS SBC Server<br/>Hostname: sbc.example.com<br/>Public IP: 198.51.100.1<br/>Port: 5060 (SIP UDP/TCP)"]
+        Asterisk["Asterisk PBX Server<br/>Hostname: pbx.example.com<br/>Public IP: 198.51.100.2<br/>Private IP: 10.0.1.100<br/>Port: 5060 (SIP UDP/TCP)"]
+        
+        OpenSIPS --> Asterisk
+    end
+    
+    NAT --> Internet
+    Internet --> OpenSIPS
+    
+    style OnPrem fill:#E3F2FD
+    style Cloud fill:#F3E5F5
+    style NAT fill:#FFF9C4
+    style OpenSIPS fill:#C8E6C9
+    style Asterisk fill:#FFCCBC
 ```
 
 ## Component Details
@@ -51,12 +43,12 @@ This document describes the cloud-based test environment for OpenSIPS and Asteri
 
 | Component | Extension | Type | Location | NAT Gateway |
 |-----------|-----------|------|----------|-------------|
-| Phone 1 | 40004 | Snom | On-Premises | 74.83.23.44 |
-| Phone 2 | 40005 | Yealink | On-Premises | 74.83.23.44 |
+| Phone 1 | 40004 | Snom | On-Premises | 203.0.113.1 |
+| Phone 2 | 40005 | Yealink | On-Premises | 203.0.113.1 |
 
 **Network Configuration:**
 - Both phones are behind the same NAT gateway
-- Public NAT IP: `74.83.23.44`
+- Public NAT IP: `203.0.113.1`
 - Phones register with OpenSIPS using their private IPs
 - OpenSIPS tracks endpoint locations for routing
 
@@ -64,75 +56,76 @@ This document describes the cloud-based test environment for OpenSIPS and Asteri
 
 | Property | Value |
 |----------|-------|
-| Hostname | `pbx3sbc.vcloudpbx.com` |
-| Public IP | `34.205.252.186` |
+| Hostname | `sbc.example.com` |
+| Public IP | `198.51.100.1` |
 | Service | OpenSIPS SIP Edge Router |
 | Ports | 5060 (SIP UDP/TCP), 5061 (SIP TLS) |
 | Database | SQLite at `/var/lib/opensips/routing.db` |
 
 **Configuration:**
-- `advertised_address` must be set to: `34.205.252.186`
+- `advertised_address` must be set to: `198.51.100.1`
 - Listens on all interfaces (`0.0.0.0:5060`)
 - Routes SIP traffic between phones and Asterisk
-- Tracks endpoint locations for direct phone-to-phone routing
+- Tracks endpoint locations for routing Asterisk-to-phone calls (INVITE, OPTIONS, NOTIFY)
 
 **Installation:**
 ```bash
-sudo ./install.sh --advertised-ip 34.205.252.186
+sudo ./install.sh --advertised-ip 198.51.100.1
 ```
 
 ### Asterisk PBX Server (Cloud)
 
 | Property | Value |
 |----------|-------|
-| Hostname | `ael.vcloudpbx.com` |
-| Public IP | `3.93.253.1` |
-| Private IP | `172.31.20.123` |
+| Hostname | `pbx.example.com` |
+| Public IP | `198.51.100.2` |
+| Private IP | `10.0.1.100` |
 | Service | Asterisk PBX |
 | Port | 5060 (SIP UDP/TCP) |
 
 **Network Configuration:**
 - Has both public and private IP addresses
-- Public IP: `3.93.253.1` (for external access)
-- Private IP: `172.31.20.123` (for internal cloud network)
+- Public IP: `198.51.100.2` (for external access)
+- Private IP: `10.0.1.100` (for internal cloud network)
 - OpenSIPS dispatcher should use the private IP for routing within cloud
 
 **Dispatcher Configuration:**
 The dispatcher entry in OpenSIPS database should use the private IP:
 ```sql
 INSERT INTO dispatcher (setid, destination, state, weight, priority) 
-VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0);
+VALUES (10, 'sip:10.0.1.100:5060', 0, '1', 0);
 ```
 
 **Asterisk NAT Configuration:**
 As documented in `docs/ASTERISK-NAT-WITH-PROXY.md`, Asterisk should use:
 ```
 nat=force_rport
-localnet=172.31.0.0/16
+localnet=10.0.0.0/16
 ```
 
 ## Traffic Flows
 
 ### 1. Phone Registration (REGISTER)
 ```
-Phone (40004/40005) → NAT (74.83.23.44) → Internet → OpenSIPS (34.205.252.186)
+Phone (40004/40005) → NAT (203.0.113.1) → Internet → OpenSIPS (198.51.100.1)
 ```
 - Phone sends REGISTER to OpenSIPS
 - OpenSIPS extracts Contact header and source IP
 - Stores endpoint location in `endpoint_locations` table
 - Forwards REGISTER to Asterisk (if needed)
 
-### 2. Phone-to-Phone Call (Direct Routing)
+### 2. Phone-to-Phone Call (via Asterisk)
 ```
-Phone 40004 → OpenSIPS → Phone 40005
+Phone 40004 → OpenSIPS → Asterisk → OpenSIPS → Phone 40005
 ```
-- OpenSIPS looks up both endpoints in `endpoint_locations` table
-- Routes INVITE directly between phones (bypassing Asterisk)
-- RTP flows directly between phones through NAT
+- Phone sends INVITE with domain in Request-URI (e.g., `sip:40005@example.com`)
+- OpenSIPS routes to Asterisk via dispatcher (domain lookup)
+- Asterisk processes the call and routes back through OpenSIPS to destination phone
+- RTP flows through Asterisk (unless Asterisk is configured for direct media)
 
 ### 3. Phone-to-Asterisk Call
 ```
-Phone (40004/40005) → OpenSIPS → Asterisk (172.31.20.123)
+Phone (40004/40005) → OpenSIPS → Asterisk (10.0.1.100)
 ```
 - Phone sends INVITE to OpenSIPS
 - OpenSIPS routes to Asterisk using dispatcher
@@ -140,15 +133,15 @@ Phone (40004/40005) → OpenSIPS → Asterisk (172.31.20.123)
 
 ### 4. Asterisk-to-Phone Call
 ```
-Asterisk (172.31.20.123) → OpenSIPS → Phone (40004/40005)
+Asterisk (10.0.1.100) → OpenSIPS → Phone (40004/40005)
 ```
 - Asterisk sends INVITE to OpenSIPS
 - OpenSIPS looks up endpoint location in database
-- Routes to phone's registered IP (behind NAT at 74.83.23.44)
+- Routes to phone's registered IP (behind NAT at 203.0.113.1)
 
 ### 5. OPTIONS/NOTIFY from Asterisk
 ```
-Asterisk (172.31.20.123) → OpenSIPS → Phone (40004/40005)
+Asterisk (10.0.1.100) → OpenSIPS → Phone (40004/40005)
 ```
 - Asterisk sends OPTIONS for health checks
 - OpenSIPS detects Request-URI contains endpoint identifier
@@ -159,20 +152,56 @@ Asterisk (172.31.20.123) → OpenSIPS → Phone (40004/40005)
 ### Domain Configuration
 ```sql
 INSERT INTO sip_domains (domain, dispatcher_setid, enabled, comment) 
-VALUES ('vcloudpbx.com', 10, 1, 'Cloud PBX domain');
+VALUES ('example.com', 10, 1, 'Cloud PBX domain');
 ```
 
 ### Dispatcher Configuration
+
+**Format Requirements:**
+- OpenSIPS dispatcher module **requires** destinations in SIP URI format: `sip:hostname:port` or `sip:ip:port`
+- The `sip:` prefix is mandatory - destinations without it will not be loaded by the dispatcher module
+- Port number should be included (default is 5060 if omitted)
+
+**Hostname vs IP Address:**
+
+**Using Hostnames (Recommended for Production):**
 ```sql
 INSERT INTO dispatcher (setid, destination, state, weight, priority, description) 
-VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
+VALUES (10, 'sip:pbx.example.com:5060', 0, '1', 0, 'Asterisk PBX - Hostname');
 ```
 
-**Note:** Use private IP (`172.31.20.123`) for dispatcher since OpenSIPS and Asterisk are in the same cloud network.
+**Advantages:**
+- Easier maintenance - change IP in DNS instead of database
+- More flexible for IP changes, failover, or load balancing
+- Better for documentation and clarity
+
+**Considerations:**
+- OpenSIPS must be able to resolve the hostname via DNS
+- DNS resolution is cached - restart/reload may be needed if IP changes
+- Health checks will use the resolved IP address
+
+**Using IP Addresses:**
+```sql
+INSERT INTO dispatcher (setid, destination, state, weight, priority, description) 
+VALUES (10, 'sip:198.51.100.2:5060', 0, '1', 0, 'Asterisk PBX - Public IP');
+```
+
+**Advantages:**
+- No DNS dependency
+- Faster (no DNS lookup required)
+- Works even if DNS is unavailable
+
+**Considerations:**
+- Requires database update if IP changes
+- Less flexible for IP changes or failover scenarios
+
+**Current Test Environment:**
+- Using hostname: `sip:pbx.example.com:5060` (resolves to `198.51.100.2`)
+- Both OpenSIPS and Asterisk are in cloud, using public IPs for communication
 
 ## NAT Considerations
 
-### Phone NAT (74.83.23.44)
+### Phone NAT (203.0.113.1)
 - Phones are behind NAT, so Contact headers may contain private IPs
 - OpenSIPS uses source IP (`$si`) as primary, Contact header as fallback
 - RTP must traverse NAT - phones need proper NAT traversal configuration
@@ -190,9 +219,10 @@ VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
 - Phone 40005 registers → Verify in `endpoint_locations` table
 - Check OpenSIPS logs for successful registration
 
-### 2. Direct Phone-to-Phone Call
+### 2. Phone-to-Phone Call
 - Call from 40004 to 40005
-- Verify OpenSIPS routes directly (bypasses Asterisk)
+- Verify OpenSIPS routes through Asterisk (dispatcher)
+- Verify Asterisk processes the call
 - Verify audio flows in both directions
 
 ### 3. Phone-to-Asterisk Call
@@ -216,7 +246,7 @@ VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
 
 1. **Registration Fails**
    - Check firewall rules (port 5060 UDP)
-   - Verify `advertised_address` is set to `34.205.252.186`
+   - Verify `advertised_address` is set to `198.51.100.1`
    - Check OpenSIPS logs: `journalctl -u opensips -f`
 
 2. **No Audio (One Direction)**
@@ -225,7 +255,7 @@ VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
    - Check phone NAT settings (see `docs/SNOM-AUDIO-TROUBLESHOOTING.md`)
 
 3. **Asterisk Not Reachable**
-   - Verify dispatcher entry uses correct IP (`172.31.20.123`)
+   - Verify dispatcher entry uses correct IP (`10.0.1.100`)
    - Check cloud security groups allow traffic between OpenSIPS and Asterisk
    - Verify Asterisk is listening on port 5060
 
@@ -238,15 +268,15 @@ VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
 
 ### Firewall Rules Required
 
-**OpenSIPS Server (34.205.252.186):**
+**OpenSIPS Server (198.51.100.1):**
 - Inbound: 22/tcp (SSH), 5060/udp (SIP), 5060/tcp (SIP), 5061/tcp (SIP TLS)
 - Outbound: All (for routing)
 
-**Asterisk Server (3.93.253.1 / 172.31.20.123):**
+**Asterisk Server (198.51.100.2 / 10.0.1.100):**
 - Inbound: 22/tcp (SSH), 5060/udp (SIP), 5060/tcp (SIP)
-- Cloud Security Group: Allow traffic from OpenSIPS (34.205.252.186)
+- Cloud Security Group: Allow traffic from OpenSIPS (198.51.100.1)
 
-**Phone NAT (74.83.23.44):**
+**Phone NAT (203.0.113.1):**
 - Outbound: 5060/udp (SIP), 10000-20000/udp (RTP)
 - NAT must allow return traffic
 
@@ -254,10 +284,10 @@ VALUES (10, 'sip:172.31.20.123:5060', 0, '1', 0, 'Asterisk PBX - Private IP');
 
 | Hostname | IP Address | Purpose |
 |----------|------------|---------|
-| `pbx3sbc.vcloudpbx.com` | 34.205.252.186 | OpenSIPS SBC |
-| `ael.vcloudpbx.com` | 3.93.253.1 | Asterisk PBX (public) |
+| `sbc.example.com` | 198.51.100.1 | OpenSIPS SBC |
+| `pbx.example.com` | 198.51.100.2 | Asterisk PBX (public) |
 
-**Note:** Phones should register to `pbx3sbc.vcloudpbx.com` or `34.205.252.186`
+**Note:** Phones should register to `sbc.example.com` or `198.51.100.1`
 
 ## References
 

@@ -68,7 +68,7 @@ sudo chown opensips:opensips /var/lib/opensips /var/log/opensips /var/run/opensi
 sudo cp config/opensips.cfg.template /etc/opensips/opensips.cfg
 
 # Update the advertised_address in the config file
-sudo sed -i 's/advertised_address="192.168.1.95"/advertised_address="YOUR_IP_ADDRESS"/' /etc/opensips/opensips.cfg
+sudo sed -i 's/advertised_address="198.51.100.1"/advertised_address="YOUR_IP_ADDRESS"/' /etc/opensips/opensips.cfg
 ```
 
 ### 4. Initialize Database

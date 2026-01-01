@@ -10,33 +10,33 @@ Comparing the two call traces reveals the issue:
 
 ### Failing Call (Snom→Yealink):
 1. **Snom sends correct SDP:**
-   - `c=IN IP4 74.83.23.44` (Snom's NAT public IP)
+   - `c=IN IP4 203.0.113.1` (Snom's NAT public IP)
    - `m=audio 60010`
 
 2. **Asterisk rewrites SDP incorrectly:**
-   - To Yealink: `c=IN IP4 3.93.253.1` (Asterisk's public IP) ❌
-   - To Snom (200 OK): `c=IN IP4 3.93.253.1` (Asterisk's public IP) ❌
+   - To Yealink: `c=IN IP4 198.51.100.2` (Asterisk's public IP) ❌
+   - To Snom (200 OK): `c=IN IP4 198.51.100.2` (Asterisk's public IP) ❌
 
 3. **Yealink sends correct SDP:**
-   - `c=IN IP4 74.83.23.44` (Yealink's NAT public IP)
+   - `c=IN IP4 203.0.113.1` (Yealink's NAT public IP)
    - `m=audio 12262`
 
 4. **Result:**
-   - Both phones send RTP to `3.93.253.1` (Asterisk)
+   - Both phones send RTP to `198.51.100.2` (Asterisk)
    - Asterisk doesn't relay RTP
    - No audio flows: Snom sent 61 packets, received 0
 
 ### Working Call (Yealink→Snom):
 1. **Yealink sends correct SDP:**
-   - `c=IN IP4 74.83.23.44` (Yealink's NAT public IP)
+   - `c=IN IP4 203.0.113.1` (Yealink's NAT public IP)
    - `m=audio 12264`
 
 2. **Asterisk rewrites SDP (same issue):**
-   - To Snom: `c=IN IP4 3.93.253.1` (Asterisk's public IP) ❌
-   - To Yealink (200 OK): `c=IN IP4 3.93.253.1` (Asterisk's public IP) ❌
+   - To Snom: `c=IN IP4 198.51.100.2` (Asterisk's public IP) ❌
+   - To Yealink (200 OK): `c=IN IP4 198.51.100.2` (Asterisk's public IP) ❌
 
 3. **Snom sends correct SDP:**
-   - `c=IN IP4 74.83.23.44` (Snom's NAT public IP)
+   - `c=IN IP4 203.0.113.1` (Snom's NAT public IP)
    - `m=audio 53726`
 
 4. **Result:**
@@ -60,7 +60,7 @@ In `sip.conf` or `pjsip.conf`:
 ```ini
 [general]
 nat=route
-localnet=172.31.0.0/255.255.0.0
+localnet=10.0.0.0/16
 ```
 
 **Why this works:**
@@ -71,7 +71,7 @@ localnet=172.31.0.0/255.255.0.0
 
 **Result:**
 - Audio flows correctly in both directions
-- SDP contains correct endpoint IPs (`74.83.23.44`)
+- SDP contains correct endpoint IPs (`203.0.113.1`)
 - Direct RTP established between phones
 
 ## Verification
@@ -92,8 +92,8 @@ After changing Asterisk configuration:
 3. Or preserve endpoint IPs from the start if configured correctly
 
 **Ideal SDP:**
-- To Yealink: `c=IN IP4 74.83.23.44` (Snom's IP) ✅
-- To Snom: `c=IN IP4 74.83.23.44` (Yealink's IP) ✅
+- To Yealink: `c=IN IP4 203.0.113.1` (Snom's IP) ✅
+- To Snom: `c=IN IP4 203.0.113.1` (Yealink's IP) ✅
 
 This allows direct RTP between phones through NAT.
 
@@ -125,7 +125,7 @@ Calls were terminating at exactly 32 seconds due to a missed ACK that the Snom p
 
 ## Network Considerations
 
-Since both phones are behind the same NAT (`74.83.23.44`), they should be able to establish direct RTP. The NAT should handle hairpinning (internal-to-internal traffic).
+Since both phones are behind the same NAT (`203.0.113.1`), they should be able to establish direct RTP. The NAT should handle hairpinning (internal-to-internal traffic).
 
 If direct RTP still fails due to NAT, consider:
 - Enabling SIP ALG on NAT router
