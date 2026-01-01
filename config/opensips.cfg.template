@@ -27,7 +27,8 @@ socket=udp:0.0.0.0:5060
 # This fixes the Via header showing 0.0.0.0
 # For cloud deployments, this MUST be your public IP address
 # Use --advertised-ip parameter during installation, or manually edit after installation
-advertised_address="34.205.252.186"
+# The install.sh script will replace CHANGE_ME with the provided IP address
+advertised_address="CHANGE_ME"
 
 ####### Modules ########
 
@@ -493,40 +494,27 @@ route[WITHINDLG] {
     }
 
     # If loose_route() fails, try to route based on transaction state
-    # ACK is special - it's part of INVITE transaction but must be relayed
-    if (is_method("ACK")) {
-        xlog("ACK request - loose_route() failed, checking transaction state\n");
+    # ACK and BYE need special handling - they're part of existing transactions
+    if (is_method("ACK|BYE")) {
+        xlog("$rm request - loose_route() failed, checking transaction state\n");
         # Check if there's a matching transaction
         if (t_check_trans()) {
-            xlog("ACK matches existing transaction, relaying\n");
-            # For ACKs, use t_relay() which will use transaction state
-            # The transaction state should contain the correct destination from the 200 OK response
-            if (!t_relay()) {
-                xlog("L_ERR", "t_relay() failed for ACK, trying stateless forward\n");
-                # Fallback: try stateless forwarding using Request-URI
+            xlog("$rm matches existing transaction, relaying\n");
+            # For ACKs, try t_relay() first (uses transaction state), fallback to RELAY route
+            if (is_method("ACK")) {
+                if (!t_relay()) {
+                    xlog("L_ERR", "t_relay() failed for ACK, trying stateless forward\n");
+                    route(RELAY);
+                }
+            } else {
+                # For BYE, use RELAY route directly
                 route(RELAY);
             }
             exit;
         } else {
-            xlog("L_WARN", "ACK received but no matching transaction found, trying to relay anyway\n");
-            # ACK must be forwarded even without transaction match (stateless forwarding)
-            # This ensures ACK reaches the destination even if transaction expired
-            route(RELAY);
-            exit;
-        }
-    }
-
-    # For BYE, we need to find the original transaction
-    if (is_method("BYE")) {
-        xlog("BYE request - loose_route() failed, checking transaction state\n");
-        # Check if there's a matching transaction
-        if (t_check_trans()) {
-            xlog("BYE matches existing transaction, relaying\n");
-            route(RELAY);
-            exit;
-        } else {
-            xlog("L_WARN", "BYE received but no matching transaction found, trying to relay anyway\n");
-            # Try to relay even without transaction match
+            xlog("L_WARN", "$rm received but no matching transaction found, trying to relay anyway\n");
+            # Must be forwarded even without transaction match (stateless forwarding)
+            # This ensures message reaches the destination even if transaction expired
             route(RELAY);
             exit;
         }
@@ -731,6 +719,25 @@ route[BUILD_ENDPOINT_URI] {
     # Route returns normally to caller (no exit needed)
 }
 
+# Check if IP address is private (RFC 1918)
+# Input: $var(check_ip) - IP address to check
+# Output: $var(is_private) - 1 if private, 0 if public
+route[CHECK_PRIVATE_IP] {
+    $var(is_private) = 0;
+    if ($var(check_ip) =~ "^192\\.168\\.") {
+        $var(is_private) = 1;
+    } else if ($var(check_ip) =~ "^10\\.") {
+        $var(is_private) = 1;
+    } else if ($var(check_ip) =~ "^172\\.1[6-9]\\.") {
+        $var(is_private) = 1;
+    } else if ($var(check_ip) =~ "^172\\.2[0-9]\\.") {
+        $var(is_private) = 1;
+    } else if ($var(check_ip) =~ "^172\\.3[01]\\.") {
+        $var(is_private) = 1;
+    }
+    return;
+}
+
 route[RELAY] {
     # Add Record-Route for INVITE requests so ACKs can follow the same path
     # This is critical for ACK handling when routing from Asterisk to endpoints
@@ -744,49 +751,29 @@ route[RELAY] {
     # Public IPs or domains (Asterisk) should not be modified
     if (is_method("ACK|BYE")) {
         # Check if Request-URI domain is a private IP address (endpoint behind NAT)
-        $var(msg_domain) = $rd;
-        # Match private IP ranges: 192.168.x.x, 10.x.x.x, 172.16-31.x.x
-        # Use simpler pattern matching to avoid complex nested regex
-        $var(is_private_ip) = 0;
-        if ($var(msg_domain) =~ "^192\\.168\\.") {
-            $var(is_private_ip) = 1;
-        } else if ($var(msg_domain) =~ "^10\\.") {
-            $var(is_private_ip) = 1;
-        } else if ($var(msg_domain) =~ "^172\\.1[6-9]\\.") {
-            $var(is_private_ip) = 1;
-        } else if ($var(msg_domain) =~ "^172\\.2[0-9]\\.") {
-            $var(is_private_ip) = 1;
-        } else if ($var(msg_domain) =~ "^172\\.3[01]\\.") {
-            $var(is_private_ip) = 1;
-        }
+        $var(check_ip) = $rd;
+        route(CHECK_PRIVATE_IP);
         
-        if ($var(is_private_ip) == 1) {
+        if ($var(is_private) == 1) {
             # Request-URI contains private IP - this is an endpoint behind NAT, need to fix to public NAT IP
             $var(msg_user) = $rU;
             if ($var(msg_user) != "") {
-                # Look up endpoint NAT IP from database
-                $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(msg_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                if (sql_query($var(query), "$avp(msg_ip)")) {
-                    $var(msg_ip) = $(avp(msg_ip)[0]);
-                    if ($var(msg_ip) != "" && $var(msg_ip) != "0") {
-                        # Get the port
-                        $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(msg_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                        $var(msg_port) = "5060";  # Default port
-                        if (sql_query($var(query), "$avp(msg_port)")) {
-                            $var(msg_port) = $(avp(msg_port)[0]);
-                            if ($var(msg_port) == "" || $var(msg_port) == "0") {
-                                $var(msg_port) = "5060";
-                            }
-                        }
-                        # Set destination URI to use NAT IP from database
-                        $du = "sip:" + $var(msg_user) + "@" + $var(msg_ip) + ":" + $var(msg_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
-                    }
+                # Use existing ENDPOINT_LOOKUP helper route instead of duplicating database queries
+                $var(lookup_user) = $var(msg_user);
+                $var(lookup_aor) = "";  # Username-only lookup
+                route(ENDPOINT_LOOKUP);
+                
+                if ($var(lookup_success) == 1) {
+                    # Set destination URI to use NAT IP from database
+                    $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                    xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
+                } else {
+                    xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed for user=$var(msg_user), using original Request-URI\n");
                 }
             }
         } else {
             # Request-URI contains public IP or domain (Asterisk) - don't modify, let t_relay() use transaction state
-            xlog("RELAY: $rm - Request-URI has public IP/domain ($var(msg_domain)), not modifying destination\n");
+            xlog("RELAY: $rm - Request-URI has public IP/domain ($var(check_ip)), not modifying destination\n");
         }
     }
     
