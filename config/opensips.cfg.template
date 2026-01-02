@@ -746,10 +746,11 @@ route[RELAY] {
         xlog("RELAY: Added Record-Route for INVITE to $du, Call-ID=$hdr(Call-ID)\n");
     }
     
-    # For ACKs and BYEs, fix destination URI to use NAT IP from endpoint database (handles NAT correctly)
+    # For ACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database (handles NAT correctly)
     # Only do this if the Request-URI contains a private IP address (endpoint behind NAT)
     # Public IPs or domains (Asterisk) should not be modified
-    if (is_method("ACK|BYE")) {
+    # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
+    if (is_method("ACK|BYE|NOTIFY")) {
         # Check if Request-URI domain is a private IP address (endpoint behind NAT)
         $var(check_ip) = $rd;
         route(CHECK_PRIVATE_IP);

@@ -503,6 +503,55 @@ $var(query) = "SELECT dispatcher_setid FROM sip_domains WHERE domain='$var(domai
 
 ---
 
+### Error: NOTIFY requests failing with null destination URI
+
+**Problem:** NOTIFY requests from Asterisk to endpoints behind NAT fail because `$du` (destination URI) is `<null>`, causing `t_relay()` to fail. Logs show:
+```
+RELAY: Creating transaction for NOTIFY to <null>
+```
+
+**Root Cause:** 
+- NOTIFY requests are in-dialog (have To-tag) and go through `route[WITHINDLG]` → `loose_route()` → `route[RELAY]`
+- When NOTIFY has a private IP in Request-URI (e.g., `sip:40005@192.168.1.232:5060`), it needs to be routed to the endpoint's public NAT IP
+- The NAT IP fix in `route[RELAY]` was only applied to ACK and BYE methods, not NOTIFY
+
+**Solution:**
+Include NOTIFY in the NAT IP fix in `route[RELAY]`:
+
+```opensips
+# ✅ Correct - Include NOTIFY with ACK and BYE
+if (is_method("ACK|BYE|NOTIFY")) {
+    # Check if Request-URI domain is a private IP address
+    $var(check_ip) = $rd;
+    route(CHECK_PRIVATE_IP);
+    
+    if ($var(is_private) == 1) {
+        # Look up endpoint's NAT IP from database
+        $var(msg_user) = $rU;
+        if ($var(msg_user) != "") {
+            $var(lookup_user) = $var(msg_user);
+            $var(lookup_aor) = "";
+            route(ENDPOINT_LOOKUP);
+            
+            if ($var(lookup_success) == 1) {
+                # Set destination URI to NAT IP
+                $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+            }
+        }
+    }
+}
+```
+
+**Why NOTIFY needs this:**
+- Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
+- NOTIFY is in-dialog and follows Record-Route
+- Without NAT IP fix, `$du` remains unset and `t_relay()` fails
+- NOTIFY retransmissions occur because no response is received
+
+**Related:** This same pattern applies to any in-dialog request that needs NAT traversal (ACK, BYE, NOTIFY, UPDATE, etc.)
+
+---
+
 ## Configuration Checklist
 
 When setting up OpenSIPS configuration, verify:
@@ -593,10 +642,10 @@ sqlite3 /var/lib/opensips/routing.db "SELECT * FROM dispatcher;"
 This knowledge base is based on:
 - **OpenSIPS Version:** 3.6.x
 - **Dispatcher Table Version:** 9
-- **Migration Date:** December 2024
+- **Migration Date:** December 2025
 - **Source:** Kamailio 5.5.4 → OpenSIPS 3.6
 
 ---
 
-*Last Updated: December 2024*
+*Last Updated: January 2026*
 
