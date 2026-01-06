@@ -55,12 +55,15 @@ loadmodule "sipmsgops.so"
 # SQL operations module connection for sql_query() function
 # Use 3 slashes to match dispatcher module format (both use same database)
 modparam("sqlops", "db_url",
-    "sqlite:///var/lib/opensips/routing.db")
+#    "sqlite:///var/lib/opensips/routing.db")
+   "sqlite:///etc/opensips/opensips.db")
+
 
 # --- Dispatcher (health checks via SIP OPTIONS) ---
 modparam("dispatcher", "db_url",
-    "sqlite:///var/lib/opensips/routing.db")
-
+#   "sqlite:///var/lib/opensips/routing.db")
+   "sqlite:///etc/opensips/opensips.db")
+   
 modparam("dispatcher", "ds_ping_method", "OPTIONS")
 modparam("dispatcher", "ds_ping_interval", 30)
 modparam("dispatcher", "ds_probing_threshold", 2)
@@ -830,15 +833,15 @@ onreply_route {
                     xlog("Callee endpoint IP from database: $var(endpoint_ip) (user=$var(to_user))\n");
                 }
             }
-            
-            # Also check the caller's endpoint IP
-            if ($var(from_user) != "") {
-                $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > datetime('now') LIMIT 1";
-                if (sql_query($var(query), "$avp(caller_ip)")) {
-                    if ($(avp(caller_ip)[0]) != "") {
-                        $var(caller_ip) = $(avp(caller_ip)[0]);
-                        xlog("Caller endpoint IP from database: $var(caller_ip) (user=$var(from_user))\n");
-                    }
+        }
+        
+        # Also check the caller's endpoint IP
+        if ($var(from_user) != "") {
+            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > datetime('now') LIMIT 1";
+            if (sql_query($var(query), "$avp(caller_ip)")) {
+                if ($(avp(caller_ip)[0]) != "") {
+                    $var(caller_ip) = $(avp(caller_ip)[0]);
+                    xlog("Caller endpoint IP from database: $var(caller_ip) (user=$var(from_user))\n");
                 }
             }
         }
