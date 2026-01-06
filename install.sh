@@ -109,59 +109,23 @@ install_dependencies() {
     # Add OpenSIPS official repository (apt.opensips.org)
     # Check if repository already added by checking if the file exists
     if [[ ! -f /etc/apt/sources.list.d/opensips.list ]]; then
-        # Detect OS and version for repository URL
-        source /etc/os-release
-        OS_CODENAME=""
-        
-        # Map Ubuntu/Debian versions to codenames
-        if [[ "$ID" == "ubuntu" ]]; then
-            case "$VERSION_ID" in
-                "24.04") OS_CODENAME="noble" ;;
-                "22.04") OS_CODENAME="jammy" ;;
-                "20.04") OS_CODENAME="focal" ;;
-                "18.04") OS_CODENAME="bionic" ;;
-                *)
-                    log_error "Unsupported Ubuntu version: ${VERSION_ID}"
-                    log_error "Supported versions: 18.04, 20.04, 22.04, 24.04"
-                    exit 1
-                    ;;
-            esac
-        elif [[ "$ID" == "debian" ]]; then
-            case "$VERSION_ID" in
-                "12") OS_CODENAME="bookworm" ;;
-                "11") OS_CODENAME="bullseye" ;;
-                "10") OS_CODENAME="buster" ;;
-                *)
-                    log_error "Unsupported Debian version: ${VERSION_ID}"
-                    log_error "Supported versions: 10, 11, 12"
-                    exit 1
-                    ;;
-            esac
-        else
-            log_error "Unsupported OS: ${ID}"
-            log_error "Supported OS: Ubuntu 18.04+, Debian 10+"
-            exit 1
-        fi
-        
-        log_info "Detected OS: ${ID} ${VERSION_ID} (${OS_CODENAME})"
-        
         # Install prerequisites
         apt-get update -qq
-        apt-get install -y curl gnupg2 ca-certificates || {
+        apt-get install -y curl ca-certificates || {
             log_error "Failed to install prerequisites for repository setup"
             exit 1
         }
         
-        # Add OpenSIPS GPG key
+        # Add OpenSIPS GPG key (using official method from OpenSIPS website)
         log_info "Adding OpenSIPS GPG key..."
-        curl -fsSL https://apt.opensips.org/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/opensips.gpg || {
+        curl https://apt.opensips.org/opensips-org.gpg -o /usr/share/keyrings/opensips-org.gpg || {
             log_error "Failed to add OpenSIPS GPG key"
             exit 1
         }
         
-        # Add OpenSIPS repository
-        log_info "Adding OpenSIPS repository for ${OS_CODENAME}..."
-        echo "deb [signed-by=/usr/share/keyrings/opensips.gpg] https://apt.opensips.org ${OS_CODENAME} 3.6-releases" > /etc/apt/sources.list.d/opensips.list || {
+        # Add OpenSIPS repository (hardcoded for Ubuntu 24.04 noble)
+        log_info "Adding OpenSIPS repository for noble (Ubuntu 24.04)..."
+        echo "deb [signed-by=/usr/share/keyrings/opensips-org.gpg] https://apt.opensips.org noble 3.6-releases" > /etc/apt/sources.list.d/opensips.list || {
             log_error "Failed to create OpenSIPS repository file"
             exit 1
         }
@@ -217,56 +181,18 @@ install_dependencies() {
 install_opensips_cli() {
     log_info "Installing OpenSIPS CLI..."
     
-    # Detect OS codename (reuse logic from install_dependencies)
-    source /etc/os-release
-    OS_CODENAME=""
-    
-    if [[ "$ID" == "ubuntu" ]]; then
-        case "$VERSION_ID" in
-            "24.04") OS_CODENAME="noble" ;;
-            "22.04") OS_CODENAME="jammy" ;;
-            "20.04") OS_CODENAME="focal" ;;
-            "18.04") OS_CODENAME="bionic" ;;
-            *)
-                log_error "Unsupported Ubuntu version: ${VERSION_ID}"
-                exit 1
-                ;;
-        esac
-    elif [[ "$ID" == "debian" ]]; then
-        case "$VERSION_ID" in
-            "12") OS_CODENAME="bookworm" ;;
-            "11") OS_CODENAME="bullseye" ;;
-            "10") OS_CODENAME="buster" ;;
-            *)
-                log_error "Unsupported Debian version: ${VERSION_ID}"
-                exit 1
-                ;;
-        esac
-    else
-        log_error "Unsupported OS: ${ID}"
-        exit 1
-    fi
-    
     # Check if CLI repository already added
     if [[ ! -f /etc/apt/sources.list.d/opensips-cli.list ]]; then
-        # Ensure GPG key exists (should already be there from main OpenSIPS install)
-        if [[ ! -f /usr/share/keyrings/opensips-org.gpg ]]; then
-            # Try to use the existing opensips.gpg key, or download opensips-org.gpg
-            if [[ -f /usr/share/keyrings/opensips.gpg ]]; then
-                log_info "Using existing OpenSIPS GPG key..."
-                cp /usr/share/keyrings/opensips.gpg /usr/share/keyrings/opensips-org.gpg
-            else
-                log_info "Adding OpenSIPS GPG key..."
-                curl -fsSL https://apt.opensips.org/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/opensips-org.gpg || {
-                    log_error "Failed to add OpenSIPS GPG key"
-                    exit 1
-                }
-            fi
-        fi
+        # Add OpenSIPS GPG key (using official method from OpenSIPS website)
+        log_info "Adding OpenSIPS GPG key..."
+        curl https://apt.opensips.org/opensips-org.gpg -o /usr/share/keyrings/opensips-org.gpg || {
+            log_error "Failed to add OpenSIPS GPG key"
+            exit 1
+        }
         
-        # Add OpenSIPS CLI repository
-        log_info "Adding OpenSIPS CLI repository for ${OS_CODENAME}..."
-        echo "deb [signed-by=/usr/share/keyrings/opensips-org.gpg] https://apt.opensips.org ${OS_CODENAME} cli-nightly" > /etc/apt/sources.list.d/opensips-cli.list || {
+        # Add OpenSIPS CLI repository (hardcoded for Ubuntu 24.04 noble)
+        log_info "Adding OpenSIPS CLI repository for noble (Ubuntu 24.04)..."
+        echo "deb [signed-by=/usr/share/keyrings/opensips-org.gpg] https://apt.opensips.org noble cli-nightly" > /etc/apt/sources.list.d/opensips-cli.list || {
             log_error "Failed to create OpenSIPS CLI repository file"
             exit 1
         }
