@@ -248,6 +248,7 @@ create_directories() {
     mkdir -p "$OPENSIPS_LOG_DIR"
     mkdir -p /var/run/opensips
     
+    chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_DIR"
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_DATA_DIR"
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_LOG_DIR"
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" /var/run/opensips
@@ -322,6 +323,9 @@ create_opensips_config() {
     
     cp "${CONFIG_DIR}/opensips.cfg.template" "$OPENSIPS_CFG"
     log_success "Copied OpenSIPS config from template: ${CONFIG_DIR}/opensips.cfg.template"
+    
+    # Set ownership on config file
+    chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_CFG"
     
     # Update database path in config to match install location
     # The config template uses /etc/opensips/opensips.db, which matches OPENSIPS_DIR
