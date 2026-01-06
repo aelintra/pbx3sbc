@@ -1,0 +1,20 @@
+# Tests to complete
+
+* endpoint-to-endpoint call    OK
+* Call hold     OK
+* Blind transfer    OK
+* Attended transfer OK
+* Phone based (SIP) DND     OK
+* Call pickup by third party    OK
+* BLF subscripions  OK
+* Group dial (ring group)   OK
+* Call Park/retrieve    Not done Yet
+* Call queues   Not Done Yet
+* IVR   Not Done Yet 
+* Star Codes    OK
+* Voicemail     OK
+* MOH   Not Done Yet
+* PJSIP     Not done Yet
+* Multi-domain URLs     Not done Yet
+* Outbound dial using Asterisk trunks   OK
+* Inbound dial to ring group using Asterisk trunks  OK 
