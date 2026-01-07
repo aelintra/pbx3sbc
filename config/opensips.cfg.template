@@ -48,6 +48,8 @@ loadmodule "db_sqlite.so"
 loadmodule "sqlops.so"
 loadmodule "dispatcher.so"
 loadmodule "sipmsgops.so"
+# NAT traversal module for fixing Contact headers and SDP
+loadmodule "nathelper.so"
 
 ####### Module Parameters ########
 
@@ -121,7 +123,7 @@ route {
     }
 
     # ---- Allowed methods only ----
-    if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS|NOTIFY|SUBSCRIBE")) {
+    if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS|NOTIFY|SUBSCRIBE|PRACK")) {
         sl_send_reply(405, "Method Not Allowed");
         exit;
     }
@@ -334,6 +336,9 @@ route {
             } else if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
                 xlog("L_ERR", "Failed to extract port - source port=$sp, endpoint_port=$var(endpoint_port)\n");
             } else {
+                # Fix NAT in REGISTER Contact header before storing
+                # This ensures we track the correct public IP for NAT traversal
+                fix_nated_register();
                 # Get expires from Expires header or Contact header
                 $var(expires) = $hdr(Expires);
                 if ($var(expires) == "") {
@@ -497,16 +502,16 @@ route[WITHINDLG] {
     }
 
     # If loose_route() fails, try to route based on transaction state
-    # ACK and BYE need special handling - they're part of existing transactions
-    if (is_method("ACK|BYE")) {
+    # ACK, PRACK, and BYE need special handling - they're part of existing transactions
+    if (is_method("ACK|PRACK|BYE")) {
         xlog("$rm request - loose_route() failed, checking transaction state\n");
         # Check if there's a matching transaction
         if (t_check_trans()) {
             xlog("$rm matches existing transaction, relaying\n");
-            # For ACKs, try t_relay() first (uses transaction state), fallback to RELAY route
-            if (is_method("ACK")) {
+            # For ACKs and PRACKs, try t_relay() first (uses transaction state), fallback to RELAY route
+            if (is_method("ACK|PRACK")) {
                 if (!t_relay()) {
-                    xlog("L_ERR", "t_relay() failed for ACK, trying stateless forward\n");
+                    xlog("L_ERR", "t_relay() failed for $rm, trying stateless forward\n");
                     route(RELAY);
                 }
             } else {
@@ -749,11 +754,12 @@ route[RELAY] {
         xlog("RELAY: Added Record-Route for INVITE to $du, Call-ID=$hdr(Call-ID)\n");
     }
     
-    # For ACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database (handles NAT correctly)
+    # For ACKs, PRACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database (handles NAT correctly)
     # Only do this if the Request-URI contains a private IP address (endpoint behind NAT)
     # Public IPs or domains (Asterisk) should not be modified
     # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
-    if (is_method("ACK|BYE|NOTIFY")) {
+    # PRACK needs this for 100rel support when endpoints are behind NAT
+    if (is_method("ACK|PRACK|BYE|NOTIFY")) {
         # Check if Request-URI domain is a private IP address (endpoint behind NAT)
         $var(check_ip) = $rd;
         route(CHECK_PRIVATE_IP);
@@ -804,6 +810,17 @@ route[RELAY] {
 
 onreply_route {
     xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
+    
+    # Fix NAT in Contact headers and SDP for responses from endpoints behind NAT
+    # This is critical for RTP to work correctly - fixes private IPs to public NAT IPs
+    # fix_nated_contact() fixes Contact headers in responses
+    # fix_nated_sdp() with "rewrite-media-ip" flag rewrites the media IP address (c= line) in SDP
+    # This ensures Asterisk receives the public NAT IP instead of private IP for RTP
+    fix_nated_contact();
+    if ($hdr(Content-Type) =~ "application/sdp") {
+        fix_nated_sdp("rewrite-media-ip");
+        xlog("Fixed NAT in SDP for response $rs from $si\n");
+    }
     
     # Log OPTIONS/NOTIFY responses specifically
     if (is_method("OPTIONS|NOTIFY")) {
