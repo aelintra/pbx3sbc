@@ -43,15 +43,8 @@ echo "Full schema loaded successfully."
 # Add our custom tables (required for routing logic)
 echo "Adding custom routing tables..."
 sqlite3 "$DB_PATH" <<EOF
--- Custom domain routing table (links domains to dispatcher sets)
-CREATE TABLE IF NOT EXISTS sip_domains (
-    domain TEXT PRIMARY KEY,
-    dispatcher_setid INTEGER NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    comment TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_sip_domains_enabled ON sip_domains(enabled);
+-- Note: Using standard OpenSIPS 'domain' table (created by schema)
+-- domain.id is used as dispatcher_setid for routing
 
 -- Endpoint locations table (for routing OPTIONS from Asterisk to endpoints)
 CREATE TABLE IF NOT EXISTS endpoint_locations (
@@ -79,5 +72,6 @@ echo "Or use sqlite3 directly:"
 echo "  sqlite3 ${DB_PATH}"
 echo
 echo "Example:"
-echo "  INSERT INTO sip_domains (domain, dispatcher_setid, enabled) VALUES ('example.com', 10, 1);"
-echo "  INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES (10, 'sip:10.0.1.10:5060', 0, 0, 0);"
+echo "  INSERT INTO domain (domain) VALUES ('example.com');"
+echo "  -- Note: Use domain.id as setid for dispatcher entries"
+echo "  INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES (1, 'sip:10.0.1.10:5060', 0, 0, 0);"

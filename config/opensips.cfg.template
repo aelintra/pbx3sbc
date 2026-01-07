@@ -433,8 +433,8 @@ route[DOMAIN_CHECK] {
     }
 
     # Lookup dispatcher set for this domain
-    # Use string concatenation to interpolate variable into SQL query
-    $var(query) = "SELECT dispatcher_setid FROM sip_domains WHERE domain='" + $var(domain) + "' AND enabled=1";
+    # Use domain.id as the dispatcher setid (standard OpenSIPS domain table)
+    $var(query) = "SELECT id FROM domain WHERE domain='" + $var(domain) + "'";
     if (!sql_query($var(query), "$avp(domain_setid)")) {
         xlog("L_NOTICE",
              "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");

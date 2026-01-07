@@ -38,7 +38,7 @@ if [[ -f "$DB_PATH" ]]; then
     echo "  Size: $(du -h "$DB_PATH" | cut -f1)"
     echo "  Integrity: $(sqlite3 "$DB_PATH" "PRAGMA integrity_check;" 2>/dev/null || echo 'Check failed')"
     echo
-    echo "  Domains: $(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sip_domains WHERE enabled=1;" 2>/dev/null || echo '0')"
+    echo "  Domains: $(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM domain;" 2>/dev/null || echo '0')"
     echo "  Dispatcher entries: $(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM dispatcher;" 2>/dev/null || echo '0')"
 else
     echo "  Database not found"
