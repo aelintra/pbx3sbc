@@ -11,19 +11,20 @@ This document captures the complete installation and configuration process for t
 
 ## Key Decisions
 
-### 1. Database Migration: SQLite → MySQL
+### 1. Database: MySQL from Start
 
-**Decision:** Migrate OpenSIPS routing database from SQLite to MySQL  
+**Decision:** Use MySQL for OpenSIPS routing database from initial installation  
 **Reason:** 
 - Control panel works better with MySQL
 - Future fault tolerance requires MySQL for dual OpenSIPS nodes
 - Better performance for web interface
+- No migration needed - start with MySQL from the beginning
 
 **Implementation:**
-- Used `scripts/migrate-sqlite-to-mysql.sh` script
 - Database: `opensips`
 - User: `opensips`
 - Password: `rigmarole` (stored in config files)
+- Database setup done during initial installation (not migrated)
 
 ### 2. Domain Table: Custom → Standard
 
