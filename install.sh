@@ -3,7 +3,7 @@
 # OpenSIPS SIP Edge Router Installation Script
 # Installs and configures OpenSIPS with MySQL routing database
 #
-# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>]
+# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>] [--preferlan]
 #
 
 set -euo pipefail
@@ -30,6 +30,7 @@ SKIP_DEPS=false
 SKIP_FIREWALL=false
 SKIP_DB=false
 ADVERTISED_IP=""
+PREFER_LAN=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -53,6 +54,10 @@ while [[ $# -gt 0 ]]; do
             fi
             ADVERTISED_IP="$2"
             shift 2
+            ;;
+        --preferlan)
+            PREFER_LAN=true
+            shift
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
@@ -148,6 +153,7 @@ install_dependencies() {
     apt-get install -y \
         opensips \
         opensips-mysql-module \
+        opensips-mysql-dbschema \
         opensips-http-modules \
         curl \
         wget \
@@ -302,6 +308,62 @@ configure_firewall() {
 
 # Litestream service removed - can be added back later
 
+detect_ip_address() {
+    local prefer_lan="${1:-false}"
+    local detected_ip=""
+    local external_ip=""
+    local lan_ip=""
+    
+    # Get LAN IP from first active interface (excluding loopback)
+    log_info "Detecting LAN IP..."
+    local active_iface
+    active_iface=$(ip addr | grep UP | grep -v lo: | head -n1 | awk -F': ' '{print $2}' || echo "")
+    
+    if [[ -n "$active_iface" ]]; then
+        lan_ip=$(ip -4 addr show dev "$active_iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
+        if [[ -n "$lan_ip" ]]; then
+            log_info "Detected LAN IP on ${active_iface}: ${lan_ip}"
+        fi
+    fi
+    
+    # Try to get external IP (for cloud deployments)
+    if [[ "$prefer_lan" != "true" ]]; then
+        log_info "Detecting external IP address..."
+        external_ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -n1 | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || true)
+        if [[ -n "$external_ip" ]]; then
+            log_info "Detected external IP: ${external_ip}"
+        fi
+    fi
+    
+    # Return preferred IP based on preference
+    if [[ "$prefer_lan" == "true" ]]; then
+        if [[ -n "$lan_ip" ]]; then
+            echo "$lan_ip"
+            return 0
+        fi
+        # Fall back to external if LAN not available
+        if [[ -n "$external_ip" ]]; then
+            log_warn "LAN IP not available, using external IP as fallback"
+            echo "$external_ip"
+            return 0
+        fi
+    else
+        # Prefer external IP, fall back to LAN
+        if [[ -n "$external_ip" ]]; then
+            echo "$external_ip"
+            return 0
+        fi
+        if [[ -n "$lan_ip" ]]; then
+            log_info "External IP detection failed, using LAN IP"
+            echo "$lan_ip"
+            return 0
+        fi
+    fi
+    
+    # No IP detected
+    return 1
+}
+
 create_opensips_config() {
     log_info "Creating OpenSIPS configuration..."
     
@@ -331,13 +393,31 @@ create_opensips_config() {
     # Set ownership on config file
     chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_CFG"
     
-    # Update advertised_address if provided
+    # Determine advertised_address: use provided IP, auto-detect, or warn
+    local final_ip=""
     if [[ -n "$ADVERTISED_IP" ]]; then
-        sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${ADVERTISED_IP}\"|g" "$OPENSIPS_CFG"
-        log_success "Set advertised_address to ${ADVERTISED_IP}"
+        final_ip="$ADVERTISED_IP"
+        log_info "Using provided advertised_address: ${final_ip}"
     else
-        log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
-        log_warn "Set it to your server's public IP address for cloud deployments"
+        log_info "Auto-detecting IP address..."
+        if final_ip=$(detect_ip_address "$PREFER_LAN"); then
+            if [[ "$PREFER_LAN" == "true" ]]; then
+                log_info "Auto-detected LAN IP: ${final_ip}"
+            else
+                log_info "Auto-detected IP: ${final_ip}"
+            fi
+        else
+            log_warn "Could not auto-detect IP address"
+            log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
+            log_warn "Set it to your server's public IP address for cloud deployments"
+            return 0
+        fi
+    fi
+    
+    # Update advertised_address in config
+    if [[ -n "$final_ip" ]]; then
+        sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${final_ip}\"|g" "$OPENSIPS_CFG"
+        log_success "Set advertised_address to ${final_ip}"
     fi
     
     log_success "OpenSIPS configuration created at ${OPENSIPS_CFG}"
