@@ -43,28 +43,36 @@ loadmodule "maxfwd.so"
 loadmodule "textops.so"
 # Transport protocol - required for socket binding
 loadmodule "proto_udp.so"
-loadmodule "db_sqlite.so"
+loadmodule "db_mysql.so"
 # SQL operations module for database queries
 loadmodule "sqlops.so"
 loadmodule "dispatcher.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
+# HTTP and MI modules (for control panel)
+loadmodule "httpd.so"
+loadmodule "mi_http.so"
+# Domain module (for control panel domain management)
+loadmodule "domain.so"
 
 ####### Module Parameters ########
 
-# --- SQLite routing database ---
+# --- MySQL routing database ---
 # SQL operations module connection for sql_query() function
-# Use 3 slashes to match dispatcher module format (both use same database)
-modparam("sqlops", "db_url",
-#    "sqlite:///var/lib/opensips/routing.db")
-   "sqlite:///etc/opensips/opensips.db")
-
+modparam("sqlops", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
 
 # --- Dispatcher (health checks via SIP OPTIONS) ---
-modparam("dispatcher", "db_url",
-#   "sqlite:///var/lib/opensips/routing.db")
-   "sqlite:///etc/opensips/opensips.db")
+modparam("dispatcher", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+
+# --- HTTP server (for MI interface) ---
+modparam("httpd", "port", 8888)
+
+# --- Domain module (for control panel) ---
+modparam("domain", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("domain", "domain_table", "domain")
+modparam("domain", "domain_col", "domain")
+modparam("domain", "db_mode", 1)
    
 modparam("dispatcher", "ds_ping_method", "OPTIONS")
 modparam("dispatcher", "ds_ping_interval", 30)
@@ -362,10 +370,10 @@ route {
                 
                 # Store/update endpoint location in database
                 # Calculate expiration time: current time + expires seconds
-                # Use SQLite's datetime modifier syntax: datetime('now', '+N seconds')
+                # Use MySQL syntax: DATE_ADD(NOW(), INTERVAL N SECOND)
                 # Note: sql_query() returns false for INSERT statements (no rows returned),
                 # but the INSERT still succeeds. We execute it and log the attempt.
-                $var(query) = "INSERT OR REPLACE INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', datetime('now', '+" + $var(expires_int) + " seconds'))";
+                $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(final_ip) + "', contact_port='" + $var(final_port) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
                 # Execute INSERT - return value is false for INSERT (no rows), but query succeeds
                 sql_query($var(query), "$avp(reg_result)");
                 xlog("Stored endpoint location: $var(endpoint_aor) -> $var(final_ip):$var(final_port) (expires in $var(expires_int) seconds)\n");
@@ -573,12 +581,12 @@ route[ENDPOINT_LOOKUP] {
     # First try exact AoR match (if AoR provided and not empty)
     if ($var(lookup_aor) != "") {
         xlog("ENDPOINT_LOOKUP: Trying exact AoR match for $var(lookup_aor)\n");
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > datetime('now')";
+        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
         if (sql_query($var(query), "$avp(endpoint_ip)")) {
             if ($(avp(endpoint_ip)[0]) != "") {
                 $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
                 # Get the port
-                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > datetime('now')";
+                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
                 if (sql_query($var(query), "$avp(endpoint_port)")) {
                     $var(endpoint_port) = $(avp(endpoint_port)[0]);
                 }
@@ -591,7 +599,7 @@ route[ENDPOINT_LOOKUP] {
     # Fallback: try username-only lookup (if exact match failed or wasn't attempted)
     if ($var(endpoint_ip) == "") {
         xlog("ENDPOINT_LOOKUP: Trying username-only match for $var(lookup_user)\n");
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
         xlog("ENDPOINT_LOOKUP: Executing query: $var(query)\n");
         $var(query_result) = sql_query($var(query), "$avp(endpoint_ip)");
         xlog("ENDPOINT_LOOKUP: sql_query() returned: $var(query_result)\n");
@@ -603,12 +611,12 @@ route[ENDPOINT_LOOKUP] {
                 $var(endpoint_ip) = $var(result_value);
                 xlog("ENDPOINT_LOOKUP: Found IP=$var(endpoint_ip), getting port\n");
                 # Get the port
-                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
                 if (sql_query($var(query), "$avp(endpoint_port)")) {
                     $var(endpoint_port) = $(avp(endpoint_port)[0]);
                 }
                 # Get the full AoR
-                $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > datetime('now') LIMIT 1";
+                $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
                 if (sql_query($var(query), "$avp(endpoint_aor)")) {
                     $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
                 }
@@ -843,7 +851,7 @@ onreply_route {
         # This helps diagnose RTP issues regardless of whether call is from Asterisk or endpoint
         if ($var(to_user) != "") {
             # Look up endpoint IP from database for the callee (To header)
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > datetime('now') LIMIT 1";
+            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > NOW() LIMIT 1";
             if (sql_query($var(query), "$avp(endpoint_ip)")) {
                 if ($(avp(endpoint_ip)[0]) != "") {
                     $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
@@ -854,7 +862,7 @@ onreply_route {
         
         # Also check the caller's endpoint IP
         if ($var(from_user) != "") {
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > datetime('now') LIMIT 1";
+            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > NOW() LIMIT 1";
             if (sql_query($var(query), "$avp(caller_ip)")) {
                 if ($(avp(caller_ip)[0]) != "") {
                     $var(caller_ip) = $(avp(caller_ip)[0]);

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # OpenSIPS SIP Edge Router Installation Script
-# Installs and configures OpenSIPS with SQLite routing database
+# Installs and configures OpenSIPS with MySQL routing database
 #
 # Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>]
 #
@@ -138,13 +138,17 @@ install_dependencies() {
     log_info "Updating package lists..."
     apt-get update -qq
     
-    log_info "Installing dependencies..."
+    log_info "Installing MySQL/MariaDB server..."
+    apt-get install -y mariadb-server || {
+        log_error "Failed to install MariaDB server"
+        exit 1
+    }
+    
+    log_info "Installing OpenSIPS and dependencies..."
     apt-get install -y \
         opensips \
-        opensips-sqlite-module \
         opensips-mysql-module \
-        libsqlite3-dev \
-        sqlite3 \
+        opensips-http-modules \
         curl \
         wget \
         ufw \
@@ -159,18 +163,18 @@ install_dependencies() {
         OPENSIPS_VERSION=$(opensips -V 2>&1 | head -n1 || echo "unknown")
         log_success "Dependencies installed (OpenSIPS: ${OPENSIPS_VERSION})"
         
-        # Verify SQLite module is available
-        if opensips -m 2>/dev/null | grep -q sqlite; then
-            log_success "SQLite module is available"
-        else
-            log_warn "SQLite module not found - check OpenSIPS module installation"
-        fi
-        
         # Verify MySQL module is available
         if opensips -m 2>/dev/null | grep -q mysql; then
             log_success "MySQL module is available"
         else
             log_warn "MySQL module not found - check OpenSIPS module installation"
+        fi
+        
+        # Verify HTTP modules are available (for control panel)
+        if opensips -m 2>/dev/null | grep -q httpd; then
+            log_success "HTTP modules are available"
+        else
+            log_warn "HTTP modules not found - required for control panel"
         fi
     else
         log_error "OpenSIPS installation failed - opensips command not found"
@@ -327,15 +331,6 @@ create_opensips_config() {
     # Set ownership on config file
     chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_CFG"
     
-    # Update database path in config to match install location
-    # The config template uses /etc/opensips/opensips.db, which matches OPENSIPS_DIR
-    # No replacement needed if paths match, but update if they differ
-    if [[ "${OPENSIPS_DIR}/opensips.db" != "/etc/opensips/opensips.db" ]]; then
-        sed -i "s|sqlite:///etc/opensips/opensips.db|sqlite://${OPENSIPS_DIR}/opensips.db|g" "$OPENSIPS_CFG"
-    fi
-    # Also handle legacy paths if present
-    sed -i "s|sqlite:///var/lib/opensips/routing.db|sqlite://${OPENSIPS_DIR}/opensips.db|g" "$OPENSIPS_CFG"
-    
     # Update advertised_address if provided
     if [[ -n "$ADVERTISED_IP" ]]; then
         sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${ADVERTISED_IP}\"|g" "$OPENSIPS_CFG"
@@ -354,15 +349,16 @@ initialize_database() {
         return
     fi
     
-    log_info "Initializing SQLite database..."
+    log_info "Setting up MySQL database..."
     
-    # Use the same database path as the config template (/etc/opensips/opensips.db)
-    # This matches the path in opensips.cfg.template
-    DB_PATH="${OPENSIPS_DIR}/opensips.db"
+    # Database configuration
+    DB_NAME="opensips"
+    DB_USER="opensips"
+    DB_PASS="rigmarole"
     
     # Check if database already exists
-    if [[ -f "$DB_PATH" ]]; then
-        log_warn "Database already exists at ${DB_PATH}"
+    if mysql -u root -e "USE ${DB_NAME};" 2>/dev/null; then
+        log_warn "MySQL database '${DB_NAME}' already exists"
         read -p "Reinitialize database? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -370,20 +366,40 @@ initialize_database() {
             log_info "Database already exists - if you need to reinitialize, run: sudo ${SCRIPT_DIR}/init-database.sh"
             return
         fi
-        log_info "Removing existing database for reinitialization..."
-        rm -f "$DB_PATH" "${DB_PATH}-wal" "${DB_PATH}-shm"
+        log_info "Dropping existing database for reinitialization..."
+        mysql -u root <<EOF
+DROP DATABASE IF EXISTS ${DB_NAME};
+EOF
     fi
     
+    # Create database and user
+    log_info "Creating MySQL database and user..."
+    mysql -u root <<EOF
+CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8 COLLATE utf8_general_ci;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create MySQL database and user"
+        return 1
+    fi
+    
+    log_success "MySQL database and user created"
+    
     # Use the dedicated init-database.sh script
-    # Set environment variables to override defaults
-    export DB_PATH="$DB_PATH"
+    # Set environment variables for MySQL configuration
+    export DB_NAME="$DB_NAME"
+    export DB_USER="$DB_USER"
+    export DB_PASS="$DB_PASS"
     export OPENSIPS_USER="$OPENSIPS_USER"
     export OPENSIPS_GROUP="$OPENSIPS_GROUP"
     
     log_info "Running database initialization script: ${SCRIPT_DIR}/init-database.sh"
     if "${SCRIPT_DIR}/init-database.sh"; then
-        log_success "Database initialized at ${DB_PATH}"
-        log_info "Add your domains and dispatcher entries using sqlite3 or the provided scripts"
+        log_success "Database schema initialized"
+        log_info "Add your domains and dispatcher entries using mysql or the provided scripts"
     else
         log_error "Database initialization failed"
         return 1
@@ -429,13 +445,12 @@ verify_installation() {
     echo
     
     # Check database
-    DB_PATH="${OPENSIPS_DIR}/opensips.db"
-    if [[ -f "$DB_PATH" ]]; then
-        echo -e "${GREEN}✓${NC} Database exists: ${DB_PATH}"
-        DB_SIZE=$(du -h "$DB_PATH" | cut -f1)
-        echo -e "  Size: ${DB_SIZE}"
+    if mysql -u opensips -p'rigmarole' -e "USE opensips;" 2>/dev/null; then
+        echo -e "${GREEN}✓${NC} MySQL database 'opensips' is accessible"
+        TABLE_COUNT=$(mysql -u opensips -p'rigmarole' opensips -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='opensips';" 2>/dev/null || echo "0")
+        echo -e "  Tables: ${TABLE_COUNT}"
     else
-        echo -e "${RED}✗${NC} Database not found: ${DB_PATH}"
+        echo -e "${RED}✗${NC} MySQL database 'opensips' not accessible"
     fi
     
     # Check OpenSIPS
@@ -462,9 +477,9 @@ verify_installation() {
     echo "=== Next Steps ==="
     echo
     echo "1. Add domains and dispatcher entries to the database:"
-    echo "   sqlite3 ${OPENSIPS_DIR}/opensips.db"
+    echo "   mysql -u opensips -p'rigmarole' opensips"
     echo "   Or use helper scripts:"
-    echo "     ${SCRIPT_DIR}/add-domain.sh <domain> <setid>"
+    echo "     ${SCRIPT_DIR}/add-domain.sh <domain>"
     echo "     ${SCRIPT_DIR}/add-dispatcher.sh <setid> <destination>"
     echo
     echo "2. Check service status:"
@@ -511,7 +526,7 @@ main() {
     echo
     log_info "Configuration files:"
     echo "  - OpenSIPS: ${OPENSIPS_DIR}/opensips.cfg"
-    echo "  - Database: ${OPENSIPS_DIR}/opensips.db"
+    echo "  - Database: MySQL database 'opensips'"
     echo
 }
 
