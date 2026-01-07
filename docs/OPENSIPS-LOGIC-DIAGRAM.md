@@ -165,21 +165,32 @@ flowchart TD
 flowchart TD
     Start([route WITHINDLG]) --> TryLooseRoute{"loose_route() Succeeds?"}
     TryLooseRoute -->|Yes| Relay1[route RELAY]
-    TryLooseRoute -->|No| CheckBYE{"Method = BYE?"}
-    CheckBYE -->|Yes| CheckTrans{Transaction Exists?}
+    TryLooseRoute -->|No| CheckACKPRACK{"Method = ACK/PRACK?"}
+    CheckACKPRACK -->|Yes| CheckTrans1{Transaction Exists?}
+    CheckACKPRACK -->|No| CheckBYE{"Method = BYE?"}
+    CheckBYE -->|Yes| CheckTrans2{Transaction Exists?}
     CheckBYE -->|No| Reply404[Reply 404 Not Here]
-    CheckTrans -->|Yes| Relay2[route RELAY]
-    CheckTrans -->|No| Relay3[route RELAY - Try Anyway]
-    Relay1 --> End1([Exit])
-    Relay2 --> End2([Exit])
-    Relay3 --> End3([Exit])
-    Reply404 --> End4([Exit])
+    CheckTrans1 -->|Yes| TryTRelay{"t_relay() Succeeds?"}
+    CheckTrans1 -->|No| Relay2[route RELAY - Try Anyway]
+    TryTRelay -->|Yes| End1([Exit])
+    TryTRelay -->|No| Relay3[route RELAY - Fallback]
+    CheckTrans2 -->|Yes| Relay4[route RELAY]
+    CheckTrans2 -->|No| Relay5[route RELAY - Try Anyway]
+    Relay1 --> End2([Exit])
+    Relay2 --> End3([Exit])
+    Relay3 --> End4([Exit])
+    Relay4 --> End5([Exit])
+    Relay5 --> End6([Exit])
+    Reply404 --> End7([Exit])
     
     style Start fill:#90EE90
     style End1 fill:#FFB6C1
     style End2 fill:#FFB6C1
     style End3 fill:#FFB6C1
     style End4 fill:#FFB6C1
+    style End5 fill:#FFB6C1
+    style End6 fill:#FFB6C1
+    style End7 fill:#FFB6C1
 ```
 
 ### route DOMAIN_CHECK
@@ -241,8 +252,22 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([route RELAY]) --> ArmFailure[t_on_failure]
-    ArmFailure --> Relay{"t_relay() Succeeds?"}
+    Start([route RELAY]) --> CheckINVITE{"Method = INVITE?"}
+    CheckINVITE -->|Yes| RecordRoute[Add Record-Route Header]
+    CheckINVITE -->|No| CheckACKPRACK{"Method = ACK/PRACK/BYE/NOTIFY?"}
+    CheckACKPRACK -->|Yes| CheckPrivateIP{Request-URI Domain = Private IP?}
+    CheckACKPRACK -->|No| ArmFailure1[t_on_failure]
+    CheckPrivateIP -->|Yes| LookupNATIP[Lookup Endpoint NAT IP from Database]
+    CheckPrivateIP -->|No| ArmFailure1
+    LookupNATIP --> FoundNATIP{NAT IP Found?}
+    FoundNATIP -->|Yes| UpdateDU[Update $du with NAT IP]
+    FoundNATIP -->|No| ArmFailure1
+    UpdateDU --> ArmFailure1
+    RecordRoute --> ArmFailure1
+    ArmFailure1 --> CheckNOTIFY{"Method = NOTIFY/OPTIONS?"}
+    CheckNOTIFY -->|Yes| LogTransaction[Log Transaction Creation]
+    CheckNOTIFY -->|No| Relay{"t_relay() Succeeds?"}
+    LogTransaction --> Relay
     Relay -->|Yes| End1([Exit])
     Relay -->|No| Reply500[Reply 500 Internal Server Error]
     Reply500 --> End2([Exit])
@@ -259,7 +284,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Response Received]) --> LogResponse[Log Response]
-    LogResponse --> CheckOptNotify{"Method = OPTIONS/NOTIFY?"}
+    LogResponse --> FixNATContact[fix_nated_contact - Fix Contact Header]
+    FixNATContact --> CheckSDP{Content-Type = application/sdp?}
+    CheckSDP -->|Yes| FixNATSDP["fix_nated_sdp('rewrite-media-ip') - Fix SDP IP"]
+    CheckSDP -->|No| CheckOptNotify{"Method = OPTIONS/NOTIFY?"}
+    FixNATSDP --> CheckOptNotify
     CheckOptNotify -->|Yes| LogOptNotify[Log OPTIONS/NOTIFY Response]
     CheckOptNotify -->|No| Check200{"Status = 200 OK with SDP?"}
     LogOptNotify --> Check200
@@ -306,7 +335,8 @@ flowchart TD
     GetSourceIP --> ExtractContact{Extract from Contact Header}
     ExtractContact --> ValidateIP{IP Valid?}
     ValidateIP -->|No| LogError[Log Error]
-    ValidateIP -->|Yes| GetExpires[Get Expires Value]
+    ValidateIP -->|Yes| FixNATRegister[fix_nated_register - Fix Contact Header for NAT]
+    FixNATRegister --> GetExpires[Get Expires Value]
     GetExpires --> StoreDB[Store in endpoint_locations Database]
     StoreDB --> RouteDomainCheck[Continue to DOMAIN_CHECK]
     LogError --> RouteDomainCheck
@@ -358,11 +388,13 @@ flowchart TD
 ## Key Decision Points
 
 1. **In-Dialog Detection**: `has_totag()` - Routes to `WITHINDLG` if To-tag exists
-2. **Method Validation**: Only allows REGISTER, INVITE, ACK, BYE, CANCEL, OPTIONS, NOTIFY, SUBSCRIBE
+2. **Method Validation**: Allows REGISTER, INVITE, ACK, BYE, CANCEL, OPTIONS, NOTIFY, SUBSCRIBE, PRACK
 3. **Endpoint Detection**: Checks if Request-URI domain is an IP address (regex pattern)
 4. **Domain Lookup**: Queries `sip_domains` table to find dispatcher setid
 5. **Dispatcher Selection**: Uses `ds_select_dst()` to find healthy Asterisk backend
 6. **Endpoint Lookup**: Queries `endpoint_locations` table for registered endpoint IP/port
+7. **NAT Traversal**: Uses `nathelper` module to fix Contact headers and SDP in responses
+8. **PRACK Support**: Handles PRACK requests for 100rel (reliable provisional responses)
 
 ## Database Tables Used
 
@@ -387,4 +419,7 @@ BUILD_ENDPOINT_URI
 - Record-Route headers are added for requests going through OpenSIPS
 - Health checks via dispatcher module send OPTIONS to Asterisk backends
 - Endpoint locations are stored during REGISTER and used for direct routing
+- **NAT Traversal**: `nathelper` module fixes Contact headers and SDP in responses
+- **PRACK Support**: PRACK requests are handled in `WITHINDLG` route for 100rel support
+- **NAT IP Lookup**: ACK, PRACK, BYE, and NOTIFY requests to endpoints behind NAT use database lookup for correct public IP
 
