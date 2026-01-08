@@ -27,6 +27,7 @@ See [Installation Guide](03-Install_notes.md) for details.
 - **[SIP Edge Router Overview](01-overview.md)** - Complete architecture and configuration guide
 - **[Installation Guide](03-Install_notes.md)** - Step-by-step installation instructions
 - **[Quick Start Guide](02-QUICKSTART.md)** - Quick reference for common tasks
+- **[User Guide](USER-GUIDE.md)** - Control Panel User Guide (Domain Management, Dispatcher, etc.)
 
 ## Architecture
 
