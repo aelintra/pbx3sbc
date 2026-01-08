@@ -131,3 +131,39 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 - RTP bypasses SBC (direct endpoint ↔ Asterisk)
 - Endpoint locations tracked for bidirectional routing
 
+## Future Enhancements
+
+### Containerization
+**Status:** Planned  
+**Priority:** Medium (after local testing and AWS deployment validation)
+
+Containerize OpenSIPS deployment for easier AWS/cloud deployments:
+
+- **Rationale:**
+  - OpenSIPS uses minimal ports (5060/udp, 5060/tcp, 5061/tcp, 8888/tcp) - easy to containerize
+  - Stateless routing logic (database-backed) - perfect for containers
+  - Enables horizontal scaling and clean deployments
+  - Works well with AWS ECS/Fargate, Kubernetes
+  - **Note:** OpenSIPS has an official Docker image available - containerization is a popular deployment method
+
+- **Resources:**
+  - Official Docker repository: https://github.com/OpenSIPS/docker-opensips
+  - Docker Hub: https://hub.docker.com/r/opensips/opensips
+  - Supports OpenSIPS 3.4+ with configurable versions
+  - Can install extra modules (e.g., MySQL module)
+
+- **Approach:**
+  - Consider using official OpenSIPS Docker image as base
+  - Multi-container architecture (OpenSIPS + Control Panel)
+  - Use RDS MySQL (managed, persistent)
+  - Host networking mode for SIP UDP (better NAT traversal)
+  - Configuration via environment variables and secrets
+  - Dockerfile/Docker Compose setup
+
+- **Prerequisites:**
+  - Complete local testing with phones
+  - Validate AWS deployment
+  - Lock down configuration and behavior
+
+**Related:** Containerization discussions and analysis documented in session notes
+
