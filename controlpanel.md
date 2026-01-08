@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the plan for installing and configuring the OpenSIPS Control Panel (OCP) version 9.x to manage the OpenSIPS SIP Edge Router. The control panel provides a web-based interface for provisioning, monitoring, and managing OpenSIPS servers.
+This document outlines the plan for installing and configuring the OpenSIPS Control Panel (OCP) version 9.3.5 to manage the OpenSIPS SIP Edge Router. The control panel provides a web-based interface for provisioning, monitoring, and managing OpenSIPS servers.
 
 **Documentation Reference:** https://controlpanel.opensips.org/documentation.php
 

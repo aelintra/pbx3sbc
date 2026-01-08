@@ -7,7 +7,7 @@ set -euo pipefail
 
 DB_NAME="${DB_NAME:-opensips}"
 DB_USER="${DB_USER:-opensips}"
-DB_PASS="${DB_PASS:-rigmarole}"
+DB_PASS="${DB_PASS:-your-password}"
 OPENSIPS_USER="${OPENSIPS_USER:-opensips}"
 OPENSIPS_GROUP="${OPENSIPS_GROUP:-opensips}"
 
@@ -72,7 +72,28 @@ CREATE TABLE IF NOT EXISTS endpoint_locations (
 CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
 EOF
 
-echo "Custom tables created successfully."
+# Add setid column to domain table (if not exists)
+echo "Adding setid column to domain table..."
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+                   WHERE TABLE_SCHEMA = DATABASE() 
+                   AND TABLE_NAME = 'domain' 
+                   AND COLUMN_NAME = 'setid');
+SET @sql = IF(@col_exists = 0,
+    'ALTER TABLE domain ADD COLUMN setid INT NOT NULL DEFAULT 0',
+    'SELECT ''Column setid already exists'' AS message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Update any existing domains to use id as setid
+UPDATE domain SET setid = id WHERE setid = 0;
+
+-- Add index if it doesn't exist
+CREATE INDEX IF NOT EXISTS idx_domain_setid ON domain(setid);
+EOF
+
+echo "Custom tables and schema modifications created successfully."
 
 echo "Database initialized successfully!"
 echo
@@ -88,6 +109,6 @@ echo "Or use mysql directly:"
 echo "  mysql -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME}"
 echo
 echo "Example:"
-echo "  INSERT INTO domain (domain) VALUES ('example.com');"
-echo "  -- Note: Use domain.id as setid for dispatcher entries"
-echo "  INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES (1, 'sip:10.0.1.10:5060', 0, 0, 0);"
+echo "  INSERT INTO domain (domain, setid) VALUES ('example.com', 10);"
+echo "  -- Note: Use domain.setid for dispatcher entries"
+echo "  INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES (10, 'sip:10.0.1.10:5060', 0, 0, 0);"

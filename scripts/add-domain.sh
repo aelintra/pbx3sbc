@@ -1,24 +1,28 @@
 #!/bin/bash
 #
 # Add a domain to the routing database
-# Uses standard OpenSIPS domain table - domain.id is used as dispatcher_setid
+# Uses MySQL domain table with explicit setid column
 #
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
+DB_NAME="${DB_NAME:-opensips}"
+DB_USER="${DB_USER:-opensips}"
+DB_PASS="${DB_PASS:-your-password}"
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <domain>"
+    echo "Usage: $0 <domain> [setid]"
     echo
     echo "Example:"
     echo "  $0 example.com"
+    echo "  $0 example.com 10"
     echo
-    echo "Note: domain.id (auto-generated) should be used as setid for dispatcher entries"
+    echo "Note: If setid is not provided, it defaults to the auto-generated domain ID"
     exit 1
 fi
 
 DOMAIN="$1"
+SETID="$2"  # Optional setid
 
 # Validate domain format (basic check)
 if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9\.-]*[a-zA-Z0-9]$ ]]; then
@@ -26,16 +30,30 @@ if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9\.-]*[a-zA-Z0-9]$ ]]; then
     exit 1
 fi
 
-# Insert domain and get the generated ID
-DOMAIN_ID=$(sqlite3 "$DB_PATH" <<EOF
-INSERT INTO domain (domain) VALUES ('$DOMAIN');
-SELECT last_insert_rowid();
+# Insert domain with setid
+if [ -z "$SETID" ]; then
+    # No setid provided, insert and get auto-generated ID
+    DOMAIN_ID=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN <<EOF
+INSERT INTO domain (domain, setid) VALUES ('$DOMAIN', 0);
+SELECT LAST_INSERT_ID();
 EOF
-)
+    )
+    # Update setid to match id if it was 0
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "UPDATE domain SET setid = id WHERE id = $DOMAIN_ID AND setid = 0;" >/dev/null 2>&1
+    SETID=$DOMAIN_ID
+else
+    # Setid provided, use it
+    DOMAIN_ID=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN <<EOF
+INSERT INTO domain (domain, setid) VALUES ('$DOMAIN', $SETID);
+SELECT LAST_INSERT_ID();
+EOF
+    )
+fi
 
 if [[ $? -eq 0 ]] && [[ -n "$DOMAIN_ID" ]]; then
-    echo "Domain added: $DOMAIN (id=$DOMAIN_ID)"
-    echo "Use setid=$DOMAIN_ID for dispatcher entries"
+    echo "Domain '$DOMAIN' added successfully"
+    echo "Domain ID: $DOMAIN_ID"
+    echo "Set ID: $SETID (use this for dispatcher entries)"
 else
     echo "Error: Failed to add domain"
     exit 1

@@ -58,7 +58,7 @@ After installing OpenSIPS packages:
 
 **Database:** `opensips`  
 **User:** `opensips`  
-**Password:** `rigmarole` (stored in config files)
+**Password:** `your-password` (stored in config files)
 
 ## Next Steps After Fresh Install
 

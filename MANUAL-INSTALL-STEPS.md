@@ -42,13 +42,13 @@ sudo mysql_secure_installation
 # Create OpenSIPS database and user
 sudo mysql <<EOF
 CREATE DATABASE IF NOT EXISTS opensips CHARACTER SET utf8 COLLATE utf8_general_ci;
-CREATE USER IF NOT EXISTS 'opensips'@'localhost' IDENTIFIED BY 'rigmarole';
+CREATE USER IF NOT EXISTS 'opensips'@'localhost' IDENTIFIED BY 'your-password';
 GRANT ALL PRIVILEGES ON opensips.* TO 'opensips'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
 # Verify connection
-mysql -u opensips -p'rigmarole' opensips -e "SELECT 'Connection successful' AS status;"
+mysql -u opensips -p'your-password' opensips -e "SELECT 'Connection successful' AS status;"
 ```
 
 ### Step 1.3: Run OpenSIPS Installation Script
@@ -79,16 +79,16 @@ sudo ./install.sh --skip-db  # Skip database init since we'll do MySQL manually
 ls -la /usr/share/opensips/mysql/
 
 # Load core schema
-mysql -u opensips -p'rigmarole' opensips < /usr/share/opensips/mysql/standard-create.sql
+mysql -u opensips -p'your-password' opensips < /usr/share/opensips/mysql/standard-create.sql
 
 # Load dispatcher schema
-mysql -u opensips -p'rigmarole' opensips < /usr/share/opensips/mysql/dispatcher-create.sql
+mysql -u opensips -p'your-password' opensips < /usr/share/opensips/mysql/dispatcher-create.sql
 
 # Load domain schema
-mysql -u opensips -p'rigmarole' opensips < /usr/share/opensips/mysql/domain-create.sql
+mysql -u opensips -p'your-password' opensips < /usr/share/opensips/mysql/domain-create.sql
 
 # Create custom endpoint_locations table
-mysql -u opensips -p'rigmarole' opensips <<EOF
+mysql -u opensips -p'your-password' opensips <<EOF
 CREATE TABLE IF NOT EXISTS endpoint_locations (
     aor VARCHAR(255) PRIMARY KEY,
     contact_ip VARCHAR(45) NOT NULL,
@@ -118,8 +118,8 @@ Edit `/etc/opensips/opensips.cfg`:
 loadmodule "db_mysql.so"
 
 # Update database URLs
-modparam("sqlops", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
-modparam("dispatcher", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("sqlops", "db_url", "mysql://opensips:your-password@localhost/opensips")
+modparam("dispatcher", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
 # Add HTTP and MI modules (for control panel)
 loadmodule "httpd.so"
@@ -128,7 +128,7 @@ modparam("httpd", "port", 8888)
 
 # Add domain module (for control panel)
 loadmodule "domain.so"
-modparam("domain", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
 modparam("domain", "domain_table", "domain")
 modparam("domain", "domain_col", "domain")
 modparam("domain", "db_mode", 1)
@@ -231,7 +231,7 @@ Set:
 $config->db_host = "localhost";
 $config->db_port = "3306";
 $config->db_user = "opensips";
-$config->db_pass = "rigmarole";
+$config->db_pass = "your-password";
 $config->db_name = "opensips";
 ```
 
@@ -247,9 +247,9 @@ After login, configure the OpenSIPS server connection:
 
 **Via Database:**
 ```bash
-mysql -u opensips -p'rigmarole' opensips <<EOF
+mysql -u opensips -p'your-password' opensips <<EOF
 INSERT INTO ocp_boxes_config (id, name, \`desc\`, mi_conn, db_host, db_port, db_user, db_pass, db_name)
-VALUES (1, 'opensips-server', 'OpenSIPS Server', 'json:127.0.0.1:8888/mi', 'localhost', 3306, 'opensips', 'rigmarole', 'opensips')
+VALUES (1, 'opensips-server', 'OpenSIPS Server', 'json:127.0.0.1:8888/mi', 'localhost', 3306, 'opensips', 'your-password', 'opensips')
 ON DUPLICATE KEY UPDATE 
     mi_conn='json:127.0.0.1:8888/mi',
     name='opensips-server',
@@ -260,7 +260,7 @@ EOF
 ### Step 2.7: Configure Domain Tool
 
 ```bash
-mysql -u opensips -p'rigmarole' opensips <<EOF
+mysql -u opensips -p'your-password' opensips <<EOF
 INSERT INTO ocp_tools_config (module, param, value, box_id) 
 VALUES ('domains', 'table_domains', 'domain', 1) 
 ON DUPLICATE KEY UPDATE value='domain';
@@ -270,7 +270,7 @@ EOF
 ### Step 2.8: Add Domain Table Version Entry
 
 ```bash
-mysql -u opensips -p'rigmarole' opensips <<EOF
+mysql -u opensips -p'your-password' opensips <<EOF
 INSERT INTO version (table_name, table_version) 
 VALUES ('domain', 4) 
 ON DUPLICATE KEY UPDATE table_version=4;
@@ -287,8 +287,26 @@ sudo nano /var/www/opensips-cp/web/tools/system/domains/template/domains.main.ph
 ```
 
 **Changes:**
-1. Remove `disabled=true` from submit button
-2. Add `<script> form_init_status(); </script>` before closing `</form>` tag
+1. Remove `disabled=true` from submit button (line ~64)
+2. Add `<script> form_init_status(); </script>` before closing `</form>` tag (after `</table>`, before `</form>`)
+3. **Add JavaScript event listener** to fix oninput event not firing:
+
+Add this script block after `<script> form_init_status(); </script>`:
+
+```javascript
+<script>
+(function() {
+  var domainField = document.getElementById("domain");
+  if (domainField) {
+    domainField.addEventListener("input", function() {
+      validate_input("domain", "domain_ok", "^(([0-9]{1,3}\\.){3}[0-9]{1,3})|(([A-Za-z0-9-]+\\.)+[a-zA-Z]+)$", null, "");
+    });
+  }
+})();
+</script>
+```
+
+**Why:** The inline `oninput` attribute generated by PHP's `form_generate_input_text()` function isn't being processed correctly by browsers. The `addEventListener()` approach ensures the validation fires when typing in the domain field.
 
 ### Step 2.10: Clear PHP Sessions and Restart
 
@@ -329,13 +347,13 @@ sudo journalctl -u opensips -n 50
 
 ```bash
 # Add a test domain (will get auto-generated ID)
-mysql -u opensips -p'rigmarole' opensips -e "INSERT INTO domain (domain) VALUES ('test.example.com');"
+mysql -u opensips -p'your-password' opensips -e "INSERT INTO domain (domain) VALUES ('test.example.com');"
 
 # Get the domain ID
-DOMAIN_ID=$(mysql -u opensips -p'rigmarole' opensips -sN -e "SELECT id FROM domain WHERE domain='test.example.com';")
+DOMAIN_ID=$(mysql -u opensips -p'your-password' opensips -sN -e "SELECT id FROM domain WHERE domain='test.example.com';")
 
 # Add dispatcher entry using domain ID as setid
-mysql -u opensips -p'rigmarole' opensips -e "INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES ($DOMAIN_ID, 'sip:10.0.1.10:5060', 0, 0, 0);"
+mysql -u opensips -p'your-password' opensips -e "INSERT INTO dispatcher (setid, destination, priority, state, probe_mode) VALUES ($DOMAIN_ID, 'sip:10.0.1.10:5060', 0, 0, 0);"
 ```
 
 ---
@@ -376,9 +394,9 @@ mysql -u opensips -p'rigmarole' opensips -e "INSERT INTO dispatcher (setid, dest
 
 ## Notes
 
-- Database password `rigmarole` is stored in multiple config files - consider using a secrets manager for production
+- Database password `your-password` is stored in multiple config files - consider using a secrets manager for production
 - Control panel stores configuration in database tables (`ocp_*` tables)
 - OpenSIPS config file location: `/etc/opensips/opensips.cfg`
 - Control panel web root: `/var/www/opensips-cp/web`
-- MySQL database: `opensips` (user: `opensips`, password: `rigmarole`)
+- MySQL database: `opensips` (user: `opensips`, password: `your-password`)
 

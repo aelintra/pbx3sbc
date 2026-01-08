@@ -60,16 +60,16 @@ loadmodule "domain.so"
 
 # --- MySQL routing database ---
 # SQL operations module connection for sql_query() function
-modparam("sqlops", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("sqlops", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
 # --- Dispatcher (health checks via SIP OPTIONS) ---
-modparam("dispatcher", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("dispatcher", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
 # --- HTTP server (for MI interface) ---
 modparam("httpd", "port", 8888)
 
 # --- Domain module (for control panel) ---
-modparam("domain", "db_url", "mysql://opensips:rigmarole@localhost/opensips")
+modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
 modparam("domain", "domain_table", "domain")
 modparam("domain", "domain_col", "domain")
 modparam("domain", "db_mode", 1)
@@ -441,8 +441,8 @@ route[DOMAIN_CHECK] {
     }
 
     # Lookup dispatcher set for this domain
-    # Use domain.id as the dispatcher setid (standard OpenSIPS domain table)
-    $var(query) = "SELECT id FROM domain WHERE domain='" + $var(domain) + "'";
+    # Use domain.setid as the dispatcher setid (explicit mapping)
+    $var(query) = "SELECT setid FROM domain WHERE domain='" + $var(domain) + "'";
     if (!sql_query($var(query), "$avp(domain_setid)")) {
         xlog("L_NOTICE",
              "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");

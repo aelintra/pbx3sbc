@@ -3,7 +3,7 @@
 # OpenSIPS SIP Edge Router Installation Script
 # Installs and configures OpenSIPS with MySQL routing database
 #
-# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>] [--preferlan]
+# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>] [--preferlan] [--db-password <PASSWORD>]
 #
 
 set -euo pipefail
@@ -31,6 +31,7 @@ SKIP_FIREWALL=false
 SKIP_DB=false
 ADVERTISED_IP=""
 PREFER_LAN=false
+DB_PASSWORD=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -58,6 +59,14 @@ while [[ $# -gt 0 ]]; do
         --preferlan)
             PREFER_LAN=true
             shift
+            ;;
+        --db-password)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}Error: --db-password requires a password${NC}"
+                exit 1
+            fi
+            DB_PASSWORD="$2"
+            shift 2
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
@@ -292,6 +301,10 @@ configure_firewall() {
     # Allow SSH (important!)
     ufw allow 22/tcp comment 'SSH'
     
+    # Allow HTTP/HTTPS (for control panel)
+    ufw allow 80/tcp comment 'HTTP'
+    ufw allow 443/tcp comment 'HTTPS'
+    
     # Allow SIP
     ufw allow 5060/udp comment 'SIP UDP'
     ufw allow 5060/tcp comment 'SIP TCP'
@@ -299,6 +312,9 @@ configure_firewall() {
     
     # Allow RTP range (for endpoints, not handled by OpenSIPS but good to document)
     ufw allow 10000:20000/udp comment 'RTP range'
+    
+    # Allow OpenSIPS MI interface (for control panel)
+    ufw allow 8888/tcp comment 'OpenSIPS MI HTTP'
     
     log_success "Firewall configured"
     log_warn "Firewall rules applied. Ensure SSH access is working before disconnecting!"
@@ -390,6 +406,14 @@ create_opensips_config() {
     cp "${CONFIG_DIR}/opensips.cfg.template" "$OPENSIPS_CFG"
     log_success "Copied OpenSIPS config from template: ${CONFIG_DIR}/opensips.cfg.template"
     
+    # Update database password in config (if DB is not skipped)
+    if [[ "$SKIP_DB" != true ]] && [[ -n "$DB_PASSWORD" ]]; then
+        # Escape password for sed (replace / with \/ and & with \&)
+        local escaped_pass
+        escaped_pass=$(echo "$DB_PASSWORD" | sed 's|/|\\/|g; s|&|\\&|g')
+        sed -i "s|your-password|${escaped_pass}|g" "$OPENSIPS_CFG"
+    fi
+    
     # Set ownership on config file
     chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_CFG"
     
@@ -423,6 +447,7 @@ create_opensips_config() {
     log_success "OpenSIPS configuration created at ${OPENSIPS_CFG}"
 }
 
+
 initialize_database() {
     if [[ "$SKIP_DB" == true ]]; then
         log_info "Skipping database initialization"
@@ -434,7 +459,7 @@ initialize_database() {
     # Database configuration
     DB_NAME="opensips"
     DB_USER="opensips"
-    DB_PASS="rigmarole"
+    DB_PASS="$DB_PASSWORD"  # Password already set in main() function
     
     # Check if database already exists
     if mysql -u root -e "USE ${DB_NAME};" 2>/dev/null; then
@@ -524,13 +549,17 @@ verify_installation() {
     echo "=== Installation Verification ==="
     echo
     
-    # Check database
-    if mysql -u opensips -p'rigmarole' -e "USE opensips;" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} MySQL database 'opensips' is accessible"
-        TABLE_COUNT=$(mysql -u opensips -p'rigmarole' opensips -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='opensips';" 2>/dev/null || echo "0")
-        echo -e "  Tables: ${TABLE_COUNT}"
+    # Check database (skip if DB setup was skipped)
+    if [[ "$SKIP_DB" != true ]] && [[ -n "$DB_PASSWORD" ]]; then
+        if mysql -u opensips -p"$DB_PASSWORD" -e "USE opensips;" 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} MySQL database 'opensips' is accessible"
+            TABLE_COUNT=$(mysql -u opensips -p"$DB_PASSWORD" opensips -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='opensips';" 2>/dev/null || echo "0")
+            echo -e "  Tables: ${TABLE_COUNT}"
+        else
+            echo -e "${RED}✗${NC} MySQL database 'opensips' not accessible"
+        fi
     else
-        echo -e "${RED}✗${NC} MySQL database 'opensips' not accessible"
+        echo -e "${YELLOW}⚠${NC} Database verification skipped"
     fi
     
     # Check OpenSIPS
@@ -557,7 +586,7 @@ verify_installation() {
     echo "=== Next Steps ==="
     echo
     echo "1. Add domains and dispatcher entries to the database:"
-    echo "   mysql -u opensips -p'rigmarole' opensips"
+    echo "   mysql -u opensips -p'your-password' opensips"
     echo "   Or use helper scripts:"
     echo "     ${SCRIPT_DIR}/add-domain.sh <domain>"
     echo "     ${SCRIPT_DIR}/add-dispatcher.sh <setid> <destination>"
@@ -595,6 +624,22 @@ main() {
     create_directories
     setup_helper_scripts
     configure_firewall
+    
+    # Get database password early so it can be used in config creation
+    if [[ "$SKIP_DB" != true ]] && [[ -z "$DB_PASSWORD" ]]; then
+        echo
+        read -sp "Enter MySQL database password for user 'opensips': " DB_PASSWORD
+        echo
+        if [[ -z "$DB_PASSWORD" ]]; then
+            log_error "Database password cannot be empty"
+            exit 1
+        fi
+    elif [[ "$SKIP_DB" != true ]]; then
+        DB_PASSWORD="$DB_PASSWORD"
+    else
+        DB_PASSWORD="your-password"  # Placeholder when skipping DB
+    fi
+    
     create_opensips_config
     initialize_database
     enable_services
