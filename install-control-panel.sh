@@ -256,8 +256,16 @@ download_control_panel() {
 configure_database() {
     log_info "Configuring control panel database connection..."
     
-    # Ensure config directory exists
+    # Ensure config directory exists (should already exist from download_control_panel)
     mkdir -p "$OCP_CONFIG_DIR"
+    
+    # Verify that config files from source were copied (especially local.inc.php)
+    if [[ ! -f "${OCP_CONFIG_DIR}/local.inc.php" ]]; then
+        log_error "local.inc.php is missing from config directory"
+        log_error "This file should have been copied from the source archive"
+        log_error "The control panel will not work without this file"
+        exit 1
+    fi
     
     DB_CONFIG_FILE="${OCP_CONFIG_DIR}/db.inc.php"
     
