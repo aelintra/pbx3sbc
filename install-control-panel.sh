@@ -166,6 +166,13 @@ download_control_panel() {
     # Create web root directory
     mkdir -p "$OCP_WEB_ROOT"
     
+    # Check if control panel is already installed (idempotency check)
+    if [[ -d "$OCP_WEB_DIR" ]] && [[ -f "${OCP_CONFIG_DIR}/db.inc.php" ]] && [[ -f "${OCP_WEB_DIR}/index.php" ]]; then
+        log_info "Control panel files already exist at ${OCP_WEB_ROOT}"
+        log_info "Skipping download and installation (idempotent)"
+        return 0
+    fi
+    
     # Determine download URL (fork if specified, otherwise upstream)
     if [[ -n "$OCP_FORK_REPO" ]]; then
         # Extract username/repo from fork URL if full URL provided
@@ -174,7 +181,8 @@ download_control_panel() {
         log_info "Using forked repository: ${FORK_REPO}"
     else
         # Use upstream repository (original, unpatched version)
-        DOWNLOAD_URL="https://github.com/OpenSIPS/opensips-cp/archive/refs/tags/${OCP_VERSION}.zip"
+        # Use master branch as tag 9.3.5 doesn't exist
+        DOWNLOAD_URL="https://github.com/OpenSIPS/opensips-cp/archive/refs/heads/master.zip"
         log_warn "Using upstream repository (no patches applied)"
         log_warn "Set OCP_FORK_REPO environment variable to use patched fork"
     fi
@@ -230,12 +238,19 @@ configure_database() {
         exit 1
     fi
     
-    # Backup original config
-    cp "$DB_CONFIG_FILE" "${DB_CONFIG_FILE}.backup"
+    # Backup original config only if backup doesn't exist (idempotency)
+    if [[ ! -f "${DB_CONFIG_FILE}.backup" ]]; then
+        cp "$DB_CONFIG_FILE" "${DB_CONFIG_FILE}.backup"
+        log_info "Backed up original database config"
+    fi
     
     # Update database configuration
     cat > "$DB_CONFIG_FILE" <<EOF
 <?php
+if (!isset(\$config)) {
+    \$config = new stdClass();
+}
+
 \$config->db_driver = "mysql";
 \$config->db_host = "${DB_HOST}";
 \$config->db_port = "${DB_PORT}";
@@ -304,6 +319,14 @@ EOF
 configure_control_panel_database() {
     log_info "Configuring control panel database tables..."
     
+    # Check if control panel tables exist (they are created by the web installation wizard)
+    if ! mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" -e "DESCRIBE ocp_boxes_config;" &>/dev/null; then
+        log_warn "Control panel database tables do not exist yet"
+        log_warn "Please access http://$(hostname -I | awk '{print $1}')/ and complete the installation wizard first"
+        log_warn "After the wizard completes, re-run this script to configure the database entries"
+        return 0
+    fi
+    
     # Configure ocp_boxes_config (OpenSIPS instance)
     mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" <<EOF
 INSERT INTO ocp_boxes_config (id, name, \`desc\`, mi_conn)
@@ -332,16 +355,50 @@ EOF
 }
 
 apply_domain_tool_fixes() {
-    # If using a fork, patches should already be applied
-    if [[ -n "$OCP_FORK_REPO" ]]; then
-        log_info "Using patched fork - skipping post-install fixes"
-        return
+    log_info "Applying domain tool patches from control-panel-patched/..."
+    
+    # Get the script directory to find control-panel-patched relative to script location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PATCHED_DIR="${SCRIPT_DIR}/control-panel-patched"
+    
+    if [[ ! -d "$PATCHED_DIR" ]]; then
+        log_error "Patched files directory not found: ${PATCHED_DIR}"
+        log_error "Please ensure control-panel-patched/ directory exists in the repository"
+        exit 1
     fi
     
-    log_warn "Using upstream repository without patches"
-    log_warn "Domain tool may not work correctly without fixes"
-    log_warn "See CONTROL-PANEL-FORK-GUIDE.md for patching instructions"
-    log_warn "Or use --fork-repo to specify a patched fork"
+    # Ensure target directories exist (idempotency: mkdir -p is safe to run multiple times)
+    mkdir -p "${OCP_WEB_ROOT}/web/tools/system/domains/template"
+    
+    # Copy patched domain tool files (idempotent: cp overwrites, same result each time)
+    if [[ -f "${PATCHED_DIR}/web/tools/system/domains/domains.php" ]]; then
+        cp "${PATCHED_DIR}/web/tools/system/domains/domains.php" "${OCP_WEB_ROOT}/web/tools/system/domains/domains.php"
+        chown www-data:www-data "${OCP_WEB_ROOT}/web/tools/system/domains/domains.php"
+        log_info "Applied patched domains.php"
+    else
+        log_warn "Patched domains.php not found, skipping..."
+    fi
+    
+    if [[ -f "${PATCHED_DIR}/web/tools/system/domains/template/domains.main.php" ]]; then
+        cp "${PATCHED_DIR}/web/tools/system/domains/template/domains.main.php" "${OCP_WEB_ROOT}/web/tools/system/domains/template/domains.main.php"
+        chown www-data:www-data "${OCP_WEB_ROOT}/web/tools/system/domains/template/domains.main.php"
+        log_info "Applied patched domains.main.php"
+    else
+        log_warn "Patched domains.main.php not found, skipping..."
+    fi
+    
+    if [[ -f "${PATCHED_DIR}/web/tools/system/domains/template/domains.form.php" ]]; then
+        cp "${PATCHED_DIR}/web/tools/system/domains/template/domains.form.php" "${OCP_WEB_ROOT}/web/tools/system/domains/template/domains.form.php"
+        chown www-data:www-data "${OCP_WEB_ROOT}/web/tools/system/domains/template/domains.form.php"
+        log_info "Applied patched domains.form.php"
+    else
+        log_warn "Patched domains.form.php not found, skipping..."
+    fi
+    
+    # Copy patched config file (db.inc.php is already configured by configure_database, but we keep the patch structure)
+    # Note: configure_database() already handles db.inc.php with the $config initialization fix
+    
+    log_success "Domain tool patches applied from control-panel-patched/"
 }
 
 configure_firewall() {
@@ -352,12 +409,34 @@ configure_firewall() {
     
     log_info "Configuring firewall..."
     
+    # Helper function to add firewall rule if it doesn't exist
+    add_ufw_rule_if_missing() {
+        local rule="$1"
+        local comment="$2"
+        
+        # Check if rule already exists
+        # UFW status format: rule ALLOW ... # comment (or [number] rule ALLOW ... with numbered)
+        # Escape special characters in rule for regex (e.g., '/' becomes '\/')
+        local escaped_rule=$(echo "$rule" | sed 's|/|\\/|g; s|\.|\\.|g')
+        if ufw status | grep -qE "^\s*\[.*\]\s+${escaped_rule}\s+|^\s*${escaped_rule}\s+.*ALLOW"; then
+            log_info "Firewall rule already exists: ${rule} (${comment})"
+            return 0
+        fi
+        
+        # Rule doesn't exist, add it
+        ufw allow "$rule" comment "$comment" || {
+            log_warn "Failed to add firewall rule: ${rule}"
+            return 1
+        }
+        log_info "Added firewall rule: ${rule} (${comment})"
+    }
+    
     # Enable UFW if not already enabled
     ufw --force enable || true
     
     # Allow HTTP/HTTPS
-    ufw allow 80/tcp comment 'HTTP' || true
-    ufw allow 443/tcp comment 'HTTPS' || true
+    add_ufw_rule_if_missing "80/tcp" "HTTP"
+    add_ufw_rule_if_missing "443/tcp" "HTTPS"
     
     log_success "Firewall configured"
 }
