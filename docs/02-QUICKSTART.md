@@ -144,4 +144,4 @@ sudo cat /etc/litestream.yml
 4. Review security settings
 5. Test failover scenarios
 
-For detailed information, see [03-Install_notes.md](03-Install_notes.md) and [01-overview.md](01-overview.md).
+For detailed information, see [03-Install_notes.md](03-Install_notes.md).

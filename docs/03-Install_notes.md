@@ -326,7 +326,6 @@ sudo apt-get remove kamailio kamailio-* sqlite3
 ## Support
 
 For issues and questions:
-- Check the documentation in `docs/01-overview.md`
 - Review logs: `journalctl -u kamailio` and `journalctl -u litestream`
 - Check the [Kamailio documentation](https://www.kamailio.org/docs/)
 - Check the [Litestream documentation](https://litestream.io/)

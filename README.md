@@ -1,6 +1,6 @@
 # PBX3sbc
 
-Kamailio SIP Edge Router with SQLite routing database and Litestream replication for PBX3 nodes.
+OpenSIPS SIP Edge Router with MySQL routing database for PBX3 nodes.
 
 ## Quick Start
 
@@ -20,13 +20,11 @@ See [03-Install_notes.md](03-Install_notes.md) for detailed installation instruc
 - ✅ **RTP Bypass**: No RTP handling at the edge (by design)
 - ✅ **Attack Mitigation**: Stateless drops for attackers
 - ✅ **Scalability**: Horizontally scalable edge tier
-- ✅ **Cloud Backup**: Litestream replication to S3/MinIO
 
 ## Documentation
 
 - [Installation Guide](03-Install_notes.md) - Complete installation instructions
 - [Testing Guide](docs/TESTING.md) - How to test the installation
-- [Overview Documentation](docs/01-overview.md) - Architecture and configuration details
 
 ## Project Structure
 
@@ -43,9 +41,8 @@ PBX3sbc/
 │   ├── restore-database.sh # Restore from backup
 │   └── view-status.sh      # View service status
 ├── config/                 # Configuration templates
-│   └── kamailio.cfg.template
+│   └── opensips.cfg.template
 └── docs/                   # Documentation
-    └── 01-overview.md
 ```
 
 ## Usage
@@ -89,9 +86,9 @@ sudo ./test-installation.sh
 
 ## Requirements
 
-- Ubuntu 20.04 LTS or later
+- Ubuntu 24.04 LTS
 - Root/sudo access
-- S3 bucket or MinIO instance (for backups)
+- MySQL/MariaDB database server
 
 ## License
 

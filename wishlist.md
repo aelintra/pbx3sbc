@@ -20,6 +20,4 @@
 
 ### Security and sign-in?  How to manage
 
-### backup/recovery model for openSIPS.cfg (minio/S3) and sqlite database (litestream)
-
-## litestream install
+### backup/recovery model for openSIPS.cfg and MySQL database

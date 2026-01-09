@@ -12,11 +12,11 @@
 3. **"Code cleanup: Extract helper routes and reduce duplication"** (4bf8d69)
 4. **"Fix ACK/BYE routing: Only update NAT IP for private IPs"** (0eb1cb8, 9e8cd3e)
 
-### Migration Status
-- ✅ **Kamailio → OpenSIPS migration complete**
+### Current Status
+- ✅ **OpenSIPS implementation complete**
 - ✅ **All refactoring complete**
 - ✅ **Basic functionality working**
-- 🔄 **Current focus:** usrloc module evaluation (new branch)
+- ✅ **Using simple SQL approach with endpoint_locations table** (see SIMPLIFIED-APPROACH.md)
 
 ## Key Fixes Implemented
 
@@ -45,7 +45,6 @@
 
 ### Main Files
 - **OpenSIPS Config:** `config/opensips.cfg.template` (883 lines)
-- **Migration Knowledge:** `OPENSIPS-MIGRATION-KNOWLEDGE.md` (comprehensive troubleshooting guide)
 - **Database Schema:** `scripts/init-database.sh`
 
 ### Key Features Working
@@ -69,8 +68,7 @@
 **Previous Branch:** `sercloud` (merged)
 
 **Next Steps:**
-- Evaluating usrloc module for potential improvements
-- New branch created for usrloc module evaluation
+- System is stable and working with SQL-based endpoint tracking
 
 ## Documentation References
 
@@ -83,21 +81,18 @@
 - **Helper Route:** `route[ENDPOINT_LOOKUP]` (lines 553-636)
 - **Helper Route:** `route[BUILD_ENDPOINT_URI]` (lines 688-723)
 
-### For Migration Knowledge
-- **Complete Guide:** `OPENSIPS-MIGRATION-KNOWLEDGE.md`
-  - Module parameter differences
-  - Function syntax differences
-  - Pseudo-variable differences
-  - Common errors and solutions
-  - Configuration checklist
+### For Configuration Reference
+- **OpenSIPS Configuration:** `config/opensips.cfg.template`
+- **Database Setup:** `scripts/init-database.sh`
+- **Installation:** `install.sh`
 
 ## Quick Reference for New Chat Sessions
 
 ### What We've Been Working On
-- Migrating from Kamailio to OpenSIPS
 - NAT traversal for in-dialog requests (ACK/BYE/NOTIFY)
 - Endpoint location tracking and routing
 - Health-aware routing with dispatcher module
+- Control panel integration and domain management
 
 ### Recent Fixes
 - NOTIFY routing for endpoints behind NAT (commit 3a9790f)
@@ -107,29 +102,27 @@
 ### Current State
 - ✅ All refactoring complete
 - ✅ Basic functionality working
-- 🔄 Evaluating usrloc module (new branch)
+- ✅ Using SQL-based endpoint tracking (endpoint_locations table)
 
 ### Key Files to Reference
 - `config/opensips.cfg.template` - Main OpenSIPS configuration
-- `OPENSIPS-MIGRATION-KNOWLEDGE.md` - Migration troubleshooting guide
 - `scripts/init-database.sh` - Database schema initialization
+- `SIMPLIFIED-APPROACH.md` - Current architecture approach
 
 ## System Architecture
 
 ```
 SIP Endpoints → OpenSIPS SBC → Asterisk Backends
                     ↓
-            SQLite Database (local)
-                    ↓
-            Litestream → S3/MinIO (backup)
+            MySQL Database
 ```
 
 **Key Points:**
 - OpenSIPS acts as Session Border Controller (SBC)
-- SQLite provides sub-millisecond routing lookups
-- Litestream replicates database changes to S3/MinIO
+- MySQL provides routing database
 - RTP bypasses SBC (direct endpoint ↔ Asterisk)
 - Endpoint locations tracked for bidirectional routing
+- Control panel for web-based management
 
 ## Future Enhancements
 
