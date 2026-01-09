@@ -113,6 +113,22 @@ check_ubuntu() {
     fi
 }
 
+update_system() {
+    log_info "Updating package lists..."
+    apt-get update -qq || {
+        log_error "Failed to update package lists"
+        exit 1
+    }
+    
+    log_info "Upgrading system packages..."
+    apt-get upgrade -y -qq || {
+        log_error "Failed to upgrade system packages"
+        exit 1
+    }
+    
+    log_success "System updated and upgraded"
+}
+
 install_dependencies() {
     if [[ "$SKIP_DEPS" == true ]]; then
         log_info "Skipping dependency installation"
@@ -798,6 +814,7 @@ main() {
     
     check_root
     check_ubuntu
+    update_system
     
     log_info "Starting installation..."
     echo
