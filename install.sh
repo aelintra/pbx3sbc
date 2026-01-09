@@ -101,16 +101,32 @@ check_root() {
 
 check_ubuntu() {
     if [[ ! -f /etc/os-release ]]; then
-        log_error "Cannot detect OS version"
+        log_error "Cannot detect OS version (/etc/os-release not found)"
         exit 1
     fi
     
     source /etc/os-release
+    
+    # Require Ubuntu
     if [[ "$ID" != "ubuntu" ]]; then
-        log_warn "This script is designed for Ubuntu. Proceeding anyway..."
-    else
-        log_info "Detected Ubuntu ${VERSION_ID}"
+        log_error "This script requires Ubuntu. Detected: ${ID}"
+        exit 1
     fi
+    
+    # Require Ubuntu 24.04 LTS (noble)
+    if [[ "$VERSION_ID" != "24.04" ]]; then
+        log_error "This script requires Ubuntu 24.04 LTS. Detected: Ubuntu ${VERSION_ID}"
+        log_error "Please use Ubuntu 24.04 LTS (noble)"
+        exit 1
+    fi
+    
+    # Verify it's LTS (VERSION_CODENAME should be "noble")
+    if [[ "${VERSION_CODENAME:-}" != "noble" ]]; then
+        log_warn "Expected Ubuntu 24.04 LTS (noble), but VERSION_CODENAME is: ${VERSION_CODENAME:-unknown}"
+        log_warn "Proceeding anyway, but this may cause issues..."
+    fi
+    
+    log_success "Detected Ubuntu 24.04 LTS (noble)"
 }
 
 update_system() {
