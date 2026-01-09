@@ -211,20 +211,46 @@ download_control_panel() {
         exit 1
     fi
     
-    # Find the extracted directory (should be opensips-cp-${OCP_VERSION})
-    EXTRACTED_DIR=$(find "$TEMP_EXTRACT" -maxdepth 1 -type d -name "opensips-cp-*" | head -1)
+    # Find the extracted directory (should be opensips-cp-${OCP_VERSION} or opensips-cp-master)
+    # Use -mindepth 1 to exclude the starting directory itself
+    EXTRACTED_DIR=$(find "$TEMP_EXTRACT" -mindepth 1 -maxdepth 1 -type d -name "opensips-cp-*" | head -1)
     
     if [[ -z "$EXTRACTED_DIR" ]] || [[ ! -d "$EXTRACTED_DIR" ]]; then
         log_error "Could not find extracted control panel directory"
+        log_error "Contents of $TEMP_EXTRACT:"
+        ls -la "$TEMP_EXTRACT" || true
+        log_error "Tried to find directories matching 'opensips-cp-*' in $TEMP_EXTRACT"
         exit 1
     fi
+    
+    log_info "Found extracted directory: ${EXTRACTED_DIR}"
+    
+    # Verify source structure before copying
+    if [[ ! -d "${EXTRACTED_DIR}/config" ]]; then
+        log_error "Source config directory not found: ${EXTRACTED_DIR}/config"
+        log_error "Contents of extracted directory:"
+        ls -la "$EXTRACTED_DIR" || true
+        exit 1
+    fi
+    
+    if [[ ! -d "${EXTRACTED_DIR}/web" ]]; then
+        log_error "Source web directory not found: ${EXTRACTED_DIR}/web"
+        log_error "Contents of extracted directory:"
+        ls -la "$EXTRACTED_DIR" || true
+        exit 1
+    fi
+    
+    log_info "Source structure verified (config/ and web/ directories found)"
     
     # Remove any existing installation to ensure clean copy
     # (This is safe because we already checked idempotency above)
     if [[ -d "$OCP_WEB_ROOT" ]]; then
         log_info "Removing existing installation for clean copy..."
-        rm -rf "$OCP_WEB_ROOT"/*
-        rm -rf "$OCP_WEB_ROOT"/.[!.]* 2>/dev/null || true  # Remove hidden files too
+        # Remove ALL contents including nested directories
+        find "$OCP_WEB_ROOT" -mindepth 1 -delete 2>/dev/null || {
+            rm -rf "$OCP_WEB_ROOT"/* 2>/dev/null || true
+            rm -rf "$OCP_WEB_ROOT"/.[!.]* 2>/dev/null || true
+        }
     fi
     
     # Ensure target directory exists
@@ -232,20 +258,76 @@ download_control_panel() {
     
     # Copy files to web root (copy contents, not the directory itself)
     log_info "Installing control panel files..."
+    log_info "Copying from: ${EXTRACTED_DIR}/"
+    log_info "Copying to: ${OCP_WEB_ROOT}/"
+    
+    # Verify target directory exists and is writable
+    if [[ ! -d "$OCP_WEB_ROOT" ]]; then
+        log_error "Target directory does not exist: ${OCP_WEB_ROOT}"
+        exit 1
+    fi
+    
+    if [[ ! -w "$OCP_WEB_ROOT" ]]; then
+        log_error "Target directory is not writable: ${OCP_WEB_ROOT}"
+        exit 1
+    fi
+    
     # Use rsync for reliable copying, or cp with proper syntax
     if command -v rsync &> /dev/null; then
-        rsync -a "${EXTRACTED_DIR}"/ "$OCP_WEB_ROOT/"
+        log_info "Using rsync to copy files..."
+        # Use -v for verbose output to see what's happening
+        if rsync -av "${EXTRACTED_DIR}"/ "$OCP_WEB_ROOT/" 2>&1; then
+            log_success "rsync completed"
+        else
+            RSYNC_EXIT=$?
+            log_error "rsync failed with exit code: ${RSYNC_EXIT}"
+            log_error "Source directory contents:"
+            ls -la "${EXTRACTED_DIR}" || true
+            log_error "Target directory contents:"
+            ls -la "$OCP_WEB_ROOT" || true
+            exit 1
+        fi
     else
-        cp -r "${EXTRACTED_DIR}"/* "$OCP_WEB_ROOT/"
+        log_info "rsync not found, using cp to copy files..."
+        if cp -rv "${EXTRACTED_DIR}"/* "$OCP_WEB_ROOT/" 2>&1; then
+            log_success "cp completed"
+        else
+            log_error "cp failed to copy files"
+            log_error "Source directory contents:"
+            ls -la "${EXTRACTED_DIR}" || true
+            log_error "Target directory contents:"
+            ls -la "$OCP_WEB_ROOT" || true
+            exit 1
+        fi
         # Also copy hidden files
-        cp -r "${EXTRACTED_DIR}"/.[!.]* "$OCP_WEB_ROOT/" 2>/dev/null || true
+        cp -rv "${EXTRACTED_DIR}"/.[!.]* "$OCP_WEB_ROOT/" 2>/dev/null || true
+    fi
+    
+    # Debug: List what was copied
+    log_info "Verifying files were copied..."
+    if [[ -d "${OCP_WEB_ROOT}/config" ]]; then
+        log_info "Config directory exists: ${OCP_WEB_ROOT}/config"
+        CONFIG_FILE_COUNT=$(find "${OCP_WEB_ROOT}/config" -maxdepth 1 -type f | wc -l)
+        log_info "Found ${CONFIG_FILE_COUNT} files in config directory"
+    else
+        log_error "Config directory does not exist after copy: ${OCP_WEB_ROOT}/config"
+        log_error "Contents of ${OCP_WEB_ROOT}:"
+        ls -la "$OCP_WEB_ROOT" || true
+        exit 1
     fi
     
     # Verify that config files were copied (including local.inc.php)
     if [[ ! -f "${OCP_CONFIG_DIR}/local.inc.php" ]]; then
-        log_warn "local.inc.php not found after copy - this may cause issues"
-        log_warn "Expected location: ${OCP_CONFIG_DIR}/local.inc.php"
+        log_error "local.inc.php not found after copy"
+        log_error "Expected location: ${OCP_CONFIG_DIR}/local.inc.php"
+        log_error "Checking what files exist in config directory:"
+        ls -la "${OCP_CONFIG_DIR}" 2>/dev/null || log_error "Config directory does not exist!"
+        log_error "Checking extracted directory (before cleanup):"
+        ls -la "${EXTRACTED_DIR}/config/" 2>/dev/null || log_error "Source config directory does not exist!"
+        exit 1
     fi
+    
+    log_success "Config files verified (local.inc.php found)"
     
     # Clean up
     rm -rf "$TEMP_EXTRACT" "$TEMP_ZIP"
