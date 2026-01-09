@@ -45,19 +45,31 @@ $errors="";
 #################
 if ($action=="add")
 {
-	$domain=$_POST['domain'];
-	$sql = "INSERT INTO ".$table." (domain" .($has_attrs?",attrs":""). ", last_modified) VALUES (?".($has_attrs?", ?":"").", NOW())";
-	$stm = $link->prepare($sql);
-	if ($stm === false) {
-		die('Failed to issue query ['.$sql.'], error message : ' . print_r($link->errorInfo(), true));
-	}
-	$vals = array($domain);
-	if ($has_attrs)
-		$vals[] = $_POST['attrs'];
-	if ($stm->execute($vals)==FALSE) {
-        	$errors = "Add/Insert to DB failed with: ". print_r($stm->errorInfo(), true);
-	} else {
-		$info="Domain Name has been inserted";
+	# Only process INSERT if this is a POST request (form submission)
+	if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add']))
+	{
+		$domain=$_POST['domain'];
+		$setid = isset($_POST['setid']) && $_POST['setid'] != '' ? intval($_POST['setid']) : 0;
+		$sql = "INSERT INTO ".$table." (domain, setid" .($has_attrs?",attrs":""). ", last_modified) VALUES (?, ?".($has_attrs?", ?":"").", NOW())";
+		$stm = $link->prepare($sql);
+		if ($stm === false) {
+			die('Failed to issue query ['.$sql.'], error message : ' . print_r($link->errorInfo(), true));
+		}
+		$vals = array($domain, $setid);
+		if ($has_attrs)
+			$vals[] = $_POST['attrs'];
+		if ($stm->execute($vals)==FALSE) {
+			$errors = "Add/Insert to DB failed with: ". print_r($stm->errorInfo(), true);
+		} else {
+			$info="Domain Name has been inserted";
+			# Auto-set setid = id if setid was 0
+			if ($setid == 0) {
+				$last_id = $link->lastInsertId();
+				$update_sql = "UPDATE ".$table." SET setid = ? WHERE id = ?";
+				$update_stm = $link->prepare($update_sql);
+				$update_stm->execute(array($last_id, $last_id));
+			}
+		}
 	}
 }
 ###############
