@@ -1,12 +1,14 @@
 #!/bin/bash
 #
 # Add a dispatcher destination to the routing database
-# OpenSIPS 3.6 version 9 schema
+# OpenSIPS 3.6 version 9 schema (MySQL)
 #
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/opensips/routing.db}"
+DB_NAME="${DB_NAME:-opensips}"
+DB_USER="${DB_USER:-opensips}"
+DB_PASS="${DB_PASS:-your-password}"
 
 if [[ $# -lt 2 ]]; then
     echo "Usage: $0 <setid> <destination> [priority] [weight] [socket] [description]"
@@ -31,7 +33,7 @@ if [[ ! "$DESTINATION" =~ ^sip: ]]; then
 fi
 
 # Insert dispatcher entry (OpenSIPS 3.6 version 9 schema)
-# Column order: setid, destination, socket, state, probe_mode, weight, priority, attrs, description
+# Standard dispatcher table columns: id, setid, destination, socket, state, probe_mode, weight, priority, attrs, description
 # Build SQL with optional parameters (socket, description are nullable)
 SQL="INSERT INTO dispatcher (setid, destination, state, probe_mode, weight, priority"
 VALUES="$SETID, '$DESTINATION', 0, 0, '$WEIGHT', $PRIORITY"
@@ -48,7 +50,7 @@ fi
 
 SQL="$SQL) VALUES ($VALUES);"
 
-sqlite3 "$DB_PATH" "$SQL"
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "$SQL"
 
 if [[ $? -eq 0 ]]; then
     echo "Dispatcher added: setid $SETID -> $DESTINATION"
