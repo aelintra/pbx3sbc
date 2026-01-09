@@ -216,13 +216,6 @@ install_dependencies() {
         else
             log_warn "MySQL module not found - check OpenSIPS module installation"
         fi
-        
-        # Verify HTTP modules are available (for control panel)
-        if opensips -m 2>/dev/null | grep -q httpd; then
-            log_success "HTTP modules are available"
-        else
-            log_warn "HTTP modules not found - required for control panel"
-        fi
     else
         log_error "OpenSIPS installation failed - opensips command not found"
         exit 1
@@ -355,10 +348,6 @@ configure_firewall() {
     # Allow SSH (important!)
     add_ufw_rule_if_missing "22/tcp" "SSH"
     
-    # Allow HTTP/HTTPS (for control panel)
-    add_ufw_rule_if_missing "80/tcp" "HTTP"
-    add_ufw_rule_if_missing "443/tcp" "HTTPS"
-    
     # Allow SIP
     add_ufw_rule_if_missing "5060/udp" "SIP UDP"
     add_ufw_rule_if_missing "5060/tcp" "SIP TCP"
@@ -366,9 +355,6 @@ configure_firewall() {
     
     # Allow RTP range (for endpoints, not handled by OpenSIPS but good to document)
     add_ufw_rule_if_missing "10000:20000/udp" "RTP range"
-    
-    # Allow OpenSIPS MI interface (for control panel)
-    add_ufw_rule_if_missing "8888/tcp" "OpenSIPS MI HTTP"
     
     log_success "Firewall configured"
     log_warn "Firewall rules applied. Ensure SSH access is working before disconnecting!"

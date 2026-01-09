@@ -50,11 +50,6 @@ loadmodule "dispatcher.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
-# HTTP and MI modules (for control panel)
-loadmodule "httpd.so"
-loadmodule "mi_http.so"
-# Domain module (for control panel domain management)
-loadmodule "domain.so"
 
 ####### Module Parameters ########
 
@@ -65,15 +60,6 @@ modparam("sqlops", "db_url", "mysql://opensips:your-password@localhost/opensips"
 # --- Dispatcher (health checks via SIP OPTIONS) ---
 modparam("dispatcher", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
-# --- HTTP server (for MI interface) ---
-modparam("httpd", "port", 8888)
-
-# --- Domain module (for control panel) ---
-modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
-modparam("domain", "domain_table", "domain")
-modparam("domain", "domain_col", "domain")
-modparam("domain", "db_mode", 1)
-   
 modparam("dispatcher", "ds_ping_method", "OPTIONS")
 modparam("dispatcher", "ds_ping_interval", 30)
 modparam("dispatcher", "ds_probing_threshold", 2)
