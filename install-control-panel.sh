@@ -297,8 +297,12 @@ EOF
     # Disable default site if it exists
     a2dissite 000-default.conf 2>/dev/null || true
     
-    # Set proper ownership
+    # Set proper ownership and permissions
     chown -R www-data:www-data "$OCP_WEB_ROOT"
+    # Set directory permissions (755 = rwxr-xr-x) - Apache needs execute to traverse
+    find "$OCP_WEB_ROOT" -type d -exec chmod 755 {} \;
+    # Set file permissions (644 = rw-r--r--) - Apache needs read
+    find "$OCP_WEB_ROOT" -type f -exec chmod 644 {} \;
     
     # Test Apache configuration
     if apache2ctl configtest >/dev/null 2>&1; then
