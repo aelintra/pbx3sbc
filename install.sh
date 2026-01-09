@@ -429,19 +429,20 @@ create_opensips_config() {
     OPENSIPS_CFG="${OPENSIPS_DIR}/opensips.cfg"
     
     if [[ -f "$OPENSIPS_CFG" ]]; then
-        # Check if existing config is valid
-        if opensips -C -f "$OPENSIPS_CFG" &>/dev/null; then
-            log_info "OpenSIPS config already exists and is valid at ${OPENSIPS_CFG}"
-            log_info "Skipping config creation (idempotent)"
-            return 0
-        else
-            log_warn "OpenSIPS config exists but is invalid at ${OPENSIPS_CFG}"
-            read -p "Backup existing config and create new? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                log_info "Skipping OpenSIPS config creation"
+        # Check if this is our config (contains CHANGE_ME marker) or the default OpenSIPS package config
+        if grep -q "CHANGE_ME" "$OPENSIPS_CFG" 2>/dev/null; then
+            # This is our config template - check if it's valid and already configured
+            if opensips -C -f "$OPENSIPS_CFG" &>/dev/null && ! grep -q "advertised_address=\"CHANGE_ME\"" "$OPENSIPS_CFG" 2>/dev/null; then
+                log_info "OpenSIPS config already exists and is configured at ${OPENSIPS_CFG}"
+                log_info "Skipping config creation (idempotent)"
                 return 0
             fi
+            # Our config exists but needs updating - backup and continue
+            log_info "Backing up existing config..."
+            mv "$OPENSIPS_CFG" "${OPENSIPS_CFG}.backup.$(date +%Y%m%d_%H%M%S)"
+        else
+            # This is the default OpenSIPS package config, not ours - backup and replace it
+            log_info "Default OpenSIPS package config detected - backing up and replacing with our template..."
             mv "$OPENSIPS_CFG" "${OPENSIPS_CFG}.backup.$(date +%Y%m%d_%H%M%S)"
         fi
     fi
@@ -491,7 +492,7 @@ create_opensips_config() {
         local external_ip="$DETECTED_EXTERNAL_IP"
         local active_iface="$DETECTED_ACTIVE_IFACE"
         
-        # If only one IP is available, use it automatically
+        # Prompt user to choose IP address when at least one is detected
         if [[ -n "$lan_ip" ]] && [[ -n "$external_ip" ]]; then
             # Both IPs detected - prompt user to choose
             echo
@@ -527,23 +528,95 @@ create_opensips_config() {
                 esac
             done
         elif [[ -n "$lan_ip" ]]; then
-            # Only LAN IP detected
-            final_ip="$lan_ip"
+            # Only LAN IP detected - still prompt user (they might want to enter a different IP)
+            echo
+            log_info "Detected IP address:"
             if [[ -n "$active_iface" ]]; then
-                log_info "Auto-detected LAN IP on ${active_iface}: ${final_ip}"
+                echo "  LAN IP (${active_iface}):     ${lan_ip}"
             else
-                log_info "Auto-detected LAN IP: ${final_ip}"
+                echo "  LAN IP:                      ${lan_ip}"
             fi
+            echo
+            echo "Which IP address should be used for advertised_address?"
+            echo "  1) Use detected LAN IP (${lan_ip})"
+            echo "  2) Enter a different IP address"
+            echo
+            while true; do
+                read -p "Enter choice (1 or 2): " -n 1 -r
+                echo
+                case $REPLY in
+                    1)
+                        final_ip="$lan_ip"
+                        log_info "Selected LAN IP: ${final_ip}"
+                        break
+                        ;;
+                    2)
+                        read -p "Enter IP address: " -r
+                        echo
+                        if [[ $REPLY =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                            final_ip="$REPLY"
+                            log_info "Selected IP: ${final_ip}"
+                            break
+                        else
+                            echo -e "${YELLOW}Invalid IP address format. Please enter a valid IPv4 address.${NC}"
+                        fi
+                        ;;
+                    *)
+                        echo -e "${YELLOW}Invalid choice. Please enter 1 or 2.${NC}"
+                        ;;
+                esac
+            done
         elif [[ -n "$external_ip" ]]; then
-            # Only external IP detected
-            final_ip="$external_ip"
-            log_info "Auto-detected external IP: ${final_ip}"
+            # Only external IP detected - still prompt user (they might want to enter a different IP)
+            echo
+            log_info "Detected IP address:"
+            echo "  External IP:                ${external_ip}"
+            echo
+            echo "Which IP address should be used for advertised_address?"
+            echo "  1) Use detected External IP (${external_ip})"
+            echo "  2) Enter a different IP address"
+            echo
+            while true; do
+                read -p "Enter choice (1 or 2): " -n 1 -r
+                echo
+                case $REPLY in
+                    1)
+                        final_ip="$external_ip"
+                        log_info "Selected External IP: ${final_ip}"
+                        break
+                        ;;
+                    2)
+                        read -p "Enter IP address: " -r
+                        echo
+                        if [[ $REPLY =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                            final_ip="$REPLY"
+                            log_info "Selected IP: ${final_ip}"
+                            break
+                        else
+                            echo -e "${YELLOW}Invalid IP address format. Please enter a valid IPv4 address.${NC}"
+                        fi
+                        ;;
+                    *)
+                        echo -e "${YELLOW}Invalid choice. Please enter 1 or 2.${NC}"
+                        ;;
+                esac
+            done
         else
-            # No IPs detected
+            # No IPs detected - prompt user to enter one
+            echo
             log_warn "Could not auto-detect IP address"
-            log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
-            log_warn "Set it to your server's public IP address for cloud deployments"
-            return 0
+            echo "Please enter the IP address to use for advertised_address:"
+            while true; do
+                read -p "Enter IP address: " -r
+                echo
+                if [[ $REPLY =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                    final_ip="$REPLY"
+                    log_info "Selected IP: ${final_ip}"
+                    break
+                else
+                    echo -e "${YELLOW}Invalid IP address format. Please enter a valid IPv4 address.${NC}"
+                fi
+            done
         fi
     fi
     
