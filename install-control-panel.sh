@@ -279,6 +279,7 @@ configure_apache() {
 <VirtualHost *:80>
     ServerName localhost
     DocumentRoot ${OCP_WEB_DIR}
+    DirectoryIndex index.php index.html
     
     <Directory ${OCP_WEB_DIR}>
         Options -Indexes +FollowSymLinks
