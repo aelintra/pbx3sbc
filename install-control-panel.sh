@@ -299,6 +299,9 @@ EOF
     
     # Set proper ownership and permissions
     chown -R www-data:www-data "$OCP_WEB_ROOT"
+    # Ensure parent directories have execute permission (Apache needs this to traverse)
+    chmod 755 /var/www 2>/dev/null || true
+    chmod 755 "$OCP_WEB_ROOT" 2>/dev/null || true
     # Set directory permissions (755 = rwxr-xr-x) - Apache needs execute to traverse
     find "$OCP_WEB_ROOT" -type d -exec chmod 755 {} \;
     # Set file permissions (644 = rw-r--r--) - Apache needs read
