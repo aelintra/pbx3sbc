@@ -66,10 +66,29 @@ CREATE TABLE IF NOT EXISTS endpoint_locations (
     aor VARCHAR(255) PRIMARY KEY,
     contact_ip VARCHAR(45) NOT NULL,
     contact_port VARCHAR(10) NOT NULL,
+    contact_uri VARCHAR(255) NOT NULL,
     expires DATETIME NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
+EOF
+
+# Add contact_uri column to existing tables (if table exists but column doesn't)
+echo "Ensuring contact_uri column exists in endpoint_locations table..."
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+                   WHERE TABLE_SCHEMA = DATABASE() 
+                   AND TABLE_NAME = 'endpoint_locations' 
+                   AND COLUMN_NAME = 'contact_uri');
+SET @sql = IF(@col_exists = 0,
+    'ALTER TABLE endpoint_locations ADD COLUMN contact_uri VARCHAR(255) NOT NULL DEFAULT "" AFTER contact_port',
+    'SELECT "Column contact_uri already exists" AS message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Migrate existing data: populate contact_uri from aor if empty
+UPDATE endpoint_locations SET contact_uri = CONCAT('sip:', aor) WHERE contact_uri = '' OR contact_uri IS NULL;
 EOF
 
 # Add setid column to domain table (if not exists)

@@ -366,17 +366,28 @@ route {
                     $var(final_port) = "5060";
                 }
                 
-                xlog("Extracted endpoint info: AoR=$var(endpoint_aor), IP=$var(final_ip), Port=$var(final_port), Expires=$var(expires_int)\n");
+                # Extract Contact URI format for Request-URI matching
+                # Construct Contact URI from known values: user@IP:port
+                # This provides a consistent format for Request-URI matching
+                # Note: This doesn't include URI parameters like 'line' from the Contact header
+                # Some endpoints (e.g., Snom) may require "support broken registrar" enabled if they
+                # need exact Contact URI matching including parameters
+                # Example: sip:1000@192.168.1.138:42714
+                $var(contact_uri) = "sip:" + $tU + "@" + $var(final_ip) + ":" + $var(final_port);
+                xlog("REGISTER: Constructed Contact URI: $var(contact_uri) (from user=$tU, IP=$var(final_ip), port=$var(final_port))\n");
+                
+                xlog("Extracted endpoint info: AoR=$var(endpoint_aor), IP=$var(final_ip), Port=$var(final_port), Contact-URI=$var(contact_uri), Expires=$var(expires_int)\n");
                 
                 # Store/update endpoint location in database
                 # Calculate expiration time: current time + expires seconds
                 # Use MySQL syntax: DATE_ADD(NOW(), INTERVAL N SECOND)
+                # Store contact_uri to ensure Request-URI matches Contact URI from REGISTER
                 # Note: sql_query() returns false for INSERT statements (no rows returned),
                 # but the INSERT still succeeds. We execute it and log the attempt.
-                $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(final_ip) + "', contact_port='" + $var(final_port) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
+                $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, contact_uri, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', '" + $var(contact_uri) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(final_ip) + "', contact_port='" + $var(final_port) + "', contact_uri='" + $var(contact_uri) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
                 # Execute INSERT - return value is false for INSERT (no rows), but query succeeds
                 sql_query($var(query), "$avp(reg_result)");
-                xlog("Stored endpoint location: $var(endpoint_aor) -> $var(final_ip):$var(final_port) (expires in $var(expires_int) seconds)\n");
+                xlog("Stored endpoint location: $var(endpoint_aor) -> $var(final_ip):$var(final_port), Contact-URI=$var(contact_uri) (expires in $var(expires_int) seconds)\n");
             }
         } else {
             xlog("L_WARN", "REGISTER without Contact header - cannot track endpoint location\n");
@@ -590,8 +601,13 @@ route[ENDPOINT_LOOKUP] {
                 if (sql_query($var(query), "$avp(endpoint_port)")) {
                     $var(endpoint_port) = $(avp(endpoint_port)[0]);
                 }
+                # Get the contact_uri (stored Contact URI format for Request-URI matching)
+                $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
+                if (sql_query($var(query), "$avp(contact_uri)")) {
+                    $var(contact_uri) = $(avp(contact_uri)[0]);
+                }
                 $var(endpoint_aor) = $var(lookup_aor);
-                xlog("ENDPOINT_LOOKUP: Exact match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+                xlog("ENDPOINT_LOOKUP: Exact match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
             }
         }
     }
@@ -620,7 +636,12 @@ route[ENDPOINT_LOOKUP] {
                 if (sql_query($var(query), "$avp(endpoint_aor)")) {
                     $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
                 }
-                xlog("ENDPOINT_LOOKUP: Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+                # Get the contact_uri (stored Contact URI format for Request-URI matching)
+                $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
+                if (sql_query($var(query), "$avp(contact_uri)")) {
+                    $var(contact_uri) = $(avp(contact_uri)[0]);
+                }
+                xlog("ENDPOINT_LOOKUP: Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
                 xlog("ENDPOINT_LOOKUP: Continuing after username match...\n");
             } else {
                 xlog("ENDPOINT_LOOKUP: Query returned empty result (result_value is empty)\n");
@@ -631,13 +652,18 @@ route[ENDPOINT_LOOKUP] {
     }
     
     # Validate and set defaults
-    xlog("ENDPOINT_LOOKUP: After lookup, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)', endpoint_aor='$var(endpoint_aor)'\n");
+    xlog("ENDPOINT_LOOKUP: After lookup, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)', endpoint_aor='$var(endpoint_aor)', contact_uri='$var(contact_uri)'\n");
     if ($var(endpoint_ip) != "") {
         xlog("ENDPOINT_LOOKUP: IP found, calling VALIDATE_ENDPOINT\n");
         route(VALIDATE_ENDPOINT);
         xlog("ENDPOINT_LOOKUP: After VALIDATE_ENDPOINT, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)'\n");
+        # Ensure contact_uri is set (fallback to AoR format if not stored)
+        if ($var(contact_uri) == "" && $var(endpoint_aor) != "") {
+            $var(contact_uri) = "sip:" + $var(endpoint_aor);
+            xlog("ENDPOINT_LOOKUP: contact_uri not stored, using fallback: $var(contact_uri)\n");
+        }
         $var(lookup_success) = 1;
-        xlog("ENDPOINT_LOOKUP: Success - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor)\n");
+        xlog("ENDPOINT_LOOKUP: Success - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
     } else {
         xlog("ENDPOINT_LOOKUP: Failed - no endpoint found for user=$var(lookup_user)\n");
         $var(lookup_success) = 0;
@@ -680,56 +706,57 @@ route[VALIDATE_ENDPOINT] {
 
 # Build endpoint URI helper route
 # Constructs destination URI ($du) and Request-URI ($ru) for routing to endpoints
-# Handles domain extraction and fallback logic for Request-URI construction
+# Uses stored contact_uri for Request-URI to ensure it matches Contact URI from REGISTER
 #
 # Input variables:
 #   $var(endpoint_user)   - Username for the endpoint (required)
 #   $var(endpoint_ip)     - Endpoint IP address (required)
 #   $var(endpoint_port)   - Endpoint port (required, should be validated)
 #   $var(endpoint_aor)    - Full AoR (user@domain) if available (optional)
+#   $var(contact_uri)     - Stored Contact URI format (from REGISTER) for Request-URI matching (optional)
 #
 # Output variables:
 #   $du - Destination URI (sip:user@ip:port) for routing
-#   $ru - Request-URI (sip:user@domain or sip:user@ip:port) with domain fallbacks
+#   $ru - Request-URI (uses stored contact_uri if available, otherwise fallback to AoR format)
 #
 # Usage:
 #   $var(endpoint_user) = "40004";
 #   $var(endpoint_ip) = "192.168.1.100";
 #   $var(endpoint_port) = "5060";
 #   $var(endpoint_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
+#   $var(contact_uri) = "sip:40004@pbx3sbc.vcloudpbx.com";  # Optional, from ENDPOINT_LOOKUP
 #   route(BUILD_ENDPOINT_URI);
 route[BUILD_ENDPOINT_URI] {
     # Build destination URI with IP:port for routing (NAT traversal)
     $du = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
     
-    # Extract domain from AoR if available
-    $var(endpoint_domain) = "";
-    if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@(.+)") {
-        $var(endpoint_domain) = $re;
-    }
-    
-    # If domain extraction failed or domain is an IP, try To header as fallback
-    if ($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-        $var(to_domain) = $(tu{uri.domain});
-        if ($var(to_domain) != "" && $var(to_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-            $var(endpoint_domain) = $var(to_domain);
-            xlog("BUILD_ENDPOINT_URI: Using domain from To header: $var(endpoint_domain)\n");
-        }
-    }
-    
-    # Construct Request-URI with fallback logic
-    if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-        # AoR has domain (not IP), use it directly
+    # Use stored contact_uri if available (ensures Request-URI matches Contact URI from REGISTER)
+    # This fixes the "broken registrar" issue for Snom and other endpoints
+    if ($var(contact_uri) != "" && $var(contact_uri) != "0") {
+        $ru = $var(contact_uri);
+        xlog("BUILD_ENDPOINT_URI: Using stored Contact-URI for Request-URI: $ru\n");
+    } else if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+        # Fallback: AoR has domain (not IP), use it directly
         $ru = "sip:" + $var(endpoint_aor);
-        xlog("BUILD_ENDPOINT_URI: Using AoR directly in Request-URI: $ru\n");
-    } else if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-        # Fallback: construct from extracted domain
-        $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
-        xlog("BUILD_ENDPOINT_URI: Using extracted domain in Request-URI: $ru\n");
+        xlog("BUILD_ENDPOINT_URI: Using AoR directly in Request-URI (fallback): $ru\n");
     } else {
-        # Last resort: use IP if domain not found
-        xlog("L_WARN", "BUILD_ENDPOINT_URI: Cannot determine domain, using IP in Request-URI: $du\n");
-        $ru = $du;
+        # Last resort: extract domain from To header or use IP
+        $var(endpoint_domain) = "";
+        if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@(.+)") {
+            $var(endpoint_domain) = $re;
+        }
+        # Try To header as fallback
+        if (($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") && $(tu{uri.domain}) != "" && $(tu{uri.domain}) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+            $var(endpoint_domain) = $(tu{uri.domain});
+        }
+        if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+            $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
+            xlog("BUILD_ENDPOINT_URI: Using extracted domain in Request-URI (fallback): $ru\n");
+        } else {
+            # Last resort: use IP if domain not found (shouldn't happen with proper registration)
+            xlog("L_WARN", "BUILD_ENDPOINT_URI: Cannot determine domain, using IP in Request-URI (last resort): $du\n");
+            $ru = $du;
+        }
     }
     
     # Route returns normally to caller (no exit needed)
