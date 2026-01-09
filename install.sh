@@ -298,23 +298,45 @@ configure_firewall() {
     # Enable UFW if not already enabled
     ufw --force enable || true
     
+    # Helper function to add firewall rule if it doesn't exist
+    add_ufw_rule_if_missing() {
+        local rule="$1"
+        local comment="$2"
+        
+        # Check if rule already exists
+        # UFW status format: rule ALLOW ... # comment (or [number] rule ALLOW ... with numbered)
+        # Escape special characters in rule for regex (e.g., '/' becomes '\/')
+        local escaped_rule=$(echo "$rule" | sed 's|/|\\/|g; s|\.|\\.|g')
+        if ufw status | grep -qE "^\s*\[.*\]\s+${escaped_rule}\s+|^\s*${escaped_rule}\s+.*ALLOW"; then
+            log_info "Firewall rule already exists: ${rule} (${comment})"
+            return 0
+        fi
+        
+        # Rule doesn't exist, add it
+        ufw allow "$rule" comment "$comment" || {
+            log_warn "Failed to add firewall rule: ${rule}"
+            return 1
+        }
+        log_info "Added firewall rule: ${rule} (${comment})"
+    }
+    
     # Allow SSH (important!)
-    ufw allow 22/tcp comment 'SSH'
+    add_ufw_rule_if_missing "22/tcp" "SSH"
     
     # Allow HTTP/HTTPS (for control panel)
-    ufw allow 80/tcp comment 'HTTP'
-    ufw allow 443/tcp comment 'HTTPS'
+    add_ufw_rule_if_missing "80/tcp" "HTTP"
+    add_ufw_rule_if_missing "443/tcp" "HTTPS"
     
     # Allow SIP
-    ufw allow 5060/udp comment 'SIP UDP'
-    ufw allow 5060/tcp comment 'SIP TCP'
-    ufw allow 5061/tcp comment 'SIP TLS'
+    add_ufw_rule_if_missing "5060/udp" "SIP UDP"
+    add_ufw_rule_if_missing "5060/tcp" "SIP TCP"
+    add_ufw_rule_if_missing "5061/tcp" "SIP TLS"
     
     # Allow RTP range (for endpoints, not handled by OpenSIPS but good to document)
-    ufw allow 10000:20000/udp comment 'RTP range'
+    add_ufw_rule_if_missing "10000:20000/udp" "RTP range"
     
     # Allow OpenSIPS MI interface (for control panel)
-    ufw allow 8888/tcp comment 'OpenSIPS MI HTTP'
+    add_ufw_rule_if_missing "8888/tcp" "OpenSIPS MI HTTP"
     
     log_success "Firewall configured"
     log_warn "Firewall rules applied. Ensure SSH access is working before disconnecting!"
@@ -324,30 +346,51 @@ configure_firewall() {
 
 # Litestream service removed - can be added back later
 
+# Detect both LAN and external IP addresses
+detect_both_ips() {
+    local lan_ip=""
+    local external_ip=""
+    local active_iface=""
+    
+    # Get LAN IP from first active interface (excluding loopback)
+    active_iface=$(ip addr | grep UP | grep -v lo: | head -n1 | awk -F': ' '{print $2}' || echo "")
+    
+    if [[ -n "$active_iface" ]]; then
+        lan_ip=$(ip -4 addr show dev "$active_iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
+    fi
+    
+    # Try to get external IP (for cloud deployments)
+    external_ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -n1 | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || true)
+    
+    # Return both IPs via global variables (bash doesn't return multiple values easily)
+    DETECTED_LAN_IP="$lan_ip"
+    DETECTED_EXTERNAL_IP="$external_ip"
+    DETECTED_ACTIVE_IFACE="$active_iface"
+}
+
 detect_ip_address() {
     local prefer_lan="${1:-false}"
-    local detected_ip=""
     local external_ip=""
     local lan_ip=""
     
     # Get LAN IP from first active interface (excluding loopback)
-    log_info "Detecting LAN IP..."
+    log_info "Detecting LAN IP..." >&2
     local active_iface
     active_iface=$(ip addr | grep UP | grep -v lo: | head -n1 | awk -F': ' '{print $2}' || echo "")
     
     if [[ -n "$active_iface" ]]; then
         lan_ip=$(ip -4 addr show dev "$active_iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
         if [[ -n "$lan_ip" ]]; then
-            log_info "Detected LAN IP on ${active_iface}: ${lan_ip}"
+            log_info "Detected LAN IP on ${active_iface}: ${lan_ip}" >&2
         fi
     fi
     
     # Try to get external IP (for cloud deployments)
     if [[ "$prefer_lan" != "true" ]]; then
-        log_info "Detecting external IP address..."
+        log_info "Detecting external IP address..." >&2
         external_ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -n1 | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || true)
         if [[ -n "$external_ip" ]]; then
-            log_info "Detected external IP: ${external_ip}"
+            log_info "Detected external IP: ${external_ip}" >&2
         fi
     fi
     
@@ -359,7 +402,7 @@ detect_ip_address() {
         fi
         # Fall back to external if LAN not available
         if [[ -n "$external_ip" ]]; then
-            log_warn "LAN IP not available, using external IP as fallback"
+            log_warn "LAN IP not available, using external IP as fallback" >&2
             echo "$external_ip"
             return 0
         fi
@@ -370,7 +413,7 @@ detect_ip_address() {
             return 0
         fi
         if [[ -n "$lan_ip" ]]; then
-            log_info "External IP detection failed, using LAN IP"
+            log_info "External IP detection failed, using LAN IP" >&2
             echo "$lan_ip"
             return 0
         fi
@@ -386,14 +429,21 @@ create_opensips_config() {
     OPENSIPS_CFG="${OPENSIPS_DIR}/opensips.cfg"
     
     if [[ -f "$OPENSIPS_CFG" ]]; then
-        log_warn "OpenSIPS config already exists at ${OPENSIPS_CFG}"
-        read -p "Backup existing config and create new? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Skipping OpenSIPS config creation"
-            return
+        # Check if existing config is valid
+        if opensips -C -f "$OPENSIPS_CFG" &>/dev/null; then
+            log_info "OpenSIPS config already exists and is valid at ${OPENSIPS_CFG}"
+            log_info "Skipping config creation (idempotent)"
+            return 0
+        else
+            log_warn "OpenSIPS config exists but is invalid at ${OPENSIPS_CFG}"
+            read -p "Backup existing config and create new? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_info "Skipping OpenSIPS config creation"
+                return 0
+            fi
+            mv "$OPENSIPS_CFG" "${OPENSIPS_CFG}.backup.$(date +%Y%m%d_%H%M%S)"
         fi
-        mv "$OPENSIPS_CFG" "${OPENSIPS_CFG}.backup.$(date +%Y%m%d_%H%M%S)"
     fi
     
     # Copy template - it must exist
@@ -417,20 +467,79 @@ create_opensips_config() {
     # Set ownership on config file
     chown "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_CFG"
     
-    # Determine advertised_address: use provided IP, auto-detect, or warn
+    # Determine advertised_address: use provided IP, auto-detect with prompt, or warn
     local final_ip=""
     if [[ -n "$ADVERTISED_IP" ]]; then
         final_ip="$ADVERTISED_IP"
         log_info "Using provided advertised_address: ${final_ip}"
-    else
-        log_info "Auto-detecting IP address..."
-        if final_ip=$(detect_ip_address "$PREFER_LAN"); then
-            if [[ "$PREFER_LAN" == "true" ]]; then
-                log_info "Auto-detected LAN IP: ${final_ip}"
-            else
-                log_info "Auto-detected IP: ${final_ip}"
-            fi
+    elif [[ "$PREFER_LAN" == "true" ]]; then
+        # --preferlan flag: use LAN IP directly without prompt
+        log_info "Auto-detecting LAN IP address..."
+        if final_ip=$(detect_ip_address "true"); then
+            log_info "Auto-detected LAN IP: ${final_ip}"
         else
+            log_warn "Could not detect LAN IP address"
+            log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
+            return 0
+        fi
+    else
+        # Auto-detect and prompt user to choose between LAN and external IP
+        log_info "Auto-detecting IP addresses..."
+        detect_both_ips
+        
+        local lan_ip="$DETECTED_LAN_IP"
+        local external_ip="$DETECTED_EXTERNAL_IP"
+        local active_iface="$DETECTED_ACTIVE_IFACE"
+        
+        # If only one IP is available, use it automatically
+        if [[ -n "$lan_ip" ]] && [[ -n "$external_ip" ]]; then
+            # Both IPs detected - prompt user to choose
+            echo
+            log_info "Detected IP addresses:"
+            if [[ -n "$active_iface" ]]; then
+                echo "  LAN IP (${active_iface}):     ${lan_ip}"
+            else
+                echo "  LAN IP:                      ${lan_ip}"
+            fi
+            echo "  External IP:                ${external_ip}"
+            echo
+            echo "Which IP address should be used for advertised_address?"
+            echo "  1) LAN IP (${lan_ip}) - Recommended for local/testing deployments"
+            echo "  2) External IP (${external_ip}) - Recommended for cloud/production deployments"
+            echo
+            while true; do
+                read -p "Enter choice (1 or 2): " -n 1 -r
+                echo
+                case $REPLY in
+                    1)
+                        final_ip="$lan_ip"
+                        log_info "Selected LAN IP: ${final_ip}"
+                        break
+                        ;;
+                    2)
+                        final_ip="$external_ip"
+                        log_info "Selected External IP: ${final_ip}"
+                        break
+                        ;;
+                    *)
+                        echo -e "${YELLOW}Invalid choice. Please enter 1 or 2.${NC}"
+                        ;;
+                esac
+            done
+        elif [[ -n "$lan_ip" ]]; then
+            # Only LAN IP detected
+            final_ip="$lan_ip"
+            if [[ -n "$active_iface" ]]; then
+                log_info "Auto-detected LAN IP on ${active_iface}: ${final_ip}"
+            else
+                log_info "Auto-detected LAN IP: ${final_ip}"
+            fi
+        elif [[ -n "$external_ip" ]]; then
+            # Only external IP detected
+            final_ip="$external_ip"
+            log_info "Auto-detected external IP: ${final_ip}"
+        else
+            # No IPs detected
             log_warn "Could not auto-detect IP address"
             log_warn "advertised_address not set - you must manually update it in ${OPENSIPS_CFG}"
             log_warn "Set it to your server's public IP address for cloud deployments"
@@ -440,6 +549,8 @@ create_opensips_config() {
     
     # Update advertised_address in config
     if [[ -n "$final_ip" ]]; then
+        # Trim any whitespace/newlines from the IP address
+        final_ip=$(echo "$final_ip" | tr -d '\n\r' | xargs)
         sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${final_ip}\"|g" "$OPENSIPS_CFG"
         log_success "Set advertised_address to ${final_ip}"
     fi
