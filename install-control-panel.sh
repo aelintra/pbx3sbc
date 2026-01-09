@@ -241,6 +241,12 @@ download_control_panel() {
         cp -r "${EXTRACTED_DIR}"/.[!.]* "$OCP_WEB_ROOT/" 2>/dev/null || true
     fi
     
+    # Verify that config files were copied (including local.inc.php)
+    if [[ ! -f "${OCP_CONFIG_DIR}/local.inc.php" ]]; then
+        log_warn "local.inc.php not found after copy - this may cause issues"
+        log_warn "Expected location: ${OCP_CONFIG_DIR}/local.inc.php"
+    fi
+    
     # Clean up
     rm -rf "$TEMP_EXTRACT" "$TEMP_ZIP"
     
