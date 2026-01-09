@@ -219,9 +219,27 @@ download_control_panel() {
         exit 1
     fi
     
-    # Copy files to web root
+    # Remove any existing installation to ensure clean copy
+    # (This is safe because we already checked idempotency above)
+    if [[ -d "$OCP_WEB_ROOT" ]]; then
+        log_info "Removing existing installation for clean copy..."
+        rm -rf "$OCP_WEB_ROOT"/*
+        rm -rf "$OCP_WEB_ROOT"/.[!.]* 2>/dev/null || true  # Remove hidden files too
+    fi
+    
+    # Ensure target directory exists
+    mkdir -p "$OCP_WEB_ROOT"
+    
+    # Copy files to web root (copy contents, not the directory itself)
     log_info "Installing control panel files..."
-    cp -r "${EXTRACTED_DIR}"/* "$OCP_WEB_ROOT/"
+    # Use rsync for reliable copying, or cp with proper syntax
+    if command -v rsync &> /dev/null; then
+        rsync -a "${EXTRACTED_DIR}"/ "$OCP_WEB_ROOT/"
+    else
+        cp -r "${EXTRACTED_DIR}"/* "$OCP_WEB_ROOT/"
+        # Also copy hidden files
+        cp -r "${EXTRACTED_DIR}"/.[!.]* "$OCP_WEB_ROOT/" 2>/dev/null || true
+    fi
     
     # Clean up
     rm -rf "$TEMP_EXTRACT" "$TEMP_ZIP"
