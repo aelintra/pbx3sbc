@@ -166,8 +166,9 @@ download_control_panel() {
     # Create web root directory
     mkdir -p "$OCP_WEB_ROOT"
     
-    # Check if control panel is already installed (idempotency check)
-    if [[ -d "$OCP_WEB_DIR" ]] && [[ -f "${OCP_CONFIG_DIR}/db.inc.php" ]] && [[ -f "${OCP_WEB_DIR}/index.php" ]]; then
+    # Check if control panel files are already installed (idempotency check)
+    # Note: We check for web files, not config file (config is created by configure_database)
+    if [[ -d "$OCP_WEB_DIR" ]] && [[ -f "${OCP_WEB_DIR}/index.php" ]]; then
         log_info "Control panel files already exist at ${OCP_WEB_ROOT}"
         log_info "Skipping download and installation (idempotent)"
         return 0
