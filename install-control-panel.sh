@@ -231,15 +231,13 @@ download_control_panel() {
 configure_database() {
     log_info "Configuring control panel database connection..."
     
+    # Ensure config directory exists
+    mkdir -p "$OCP_CONFIG_DIR"
+    
     DB_CONFIG_FILE="${OCP_CONFIG_DIR}/db.inc.php"
     
-    if [[ ! -f "$DB_CONFIG_FILE" ]]; then
-        log_error "Database config file not found: ${DB_CONFIG_FILE}"
-        exit 1
-    fi
-    
-    # Backup original config only if backup doesn't exist (idempotency)
-    if [[ ! -f "${DB_CONFIG_FILE}.backup" ]]; then
+    # Backup original config only if it exists and backup doesn't exist (idempotency)
+    if [[ -f "$DB_CONFIG_FILE" ]] && [[ ! -f "${DB_CONFIG_FILE}.backup" ]]; then
         cp "$DB_CONFIG_FILE" "${DB_CONFIG_FILE}.backup"
         log_info "Backed up original database config"
     fi
