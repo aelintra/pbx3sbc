@@ -7,10 +7,11 @@
 ## Recent Work Summary
 
 ### Latest Commits
-1. **"merged the sercloud work - running OK"** (6c1a25f) - Most recent merge
-2. **"Fix NOTIFY routing for endpoints behind NAT"** (3a9790f) - Critical fix for NOTIFY requests
-3. **"Code cleanup: Extract helper routes and reduce duplication"** (4bf8d69)
-4. **"Fix ACK/BYE routing: Only update NAT IP for private IPs"** (0eb1cb8, 9e8cd3e)
+1. **"Major documentation cleanup: Remove outdated migration and legacy architecture docs"** (20307e5) - Removed 17 files, updated 12 files
+2. **"Fix control panel installer: correct directory finding and improve debugging"** (3d2c883) - Fixed config file copy issues
+3. **"Add installation verification script and checklist"** (430ae46) - Added verification tools
+4. **"merged the sercloud work - running OK"** (6c1a25f)
+5. **"Fix NOTIFY routing for endpoints behind NAT"** (3a9790f) - Critical fix for NOTIFY requests
 
 ### Current Status
 - ✅ **OpenSIPS implementation complete**
@@ -32,9 +33,8 @@
 
 **Files Modified:**
 - `config/opensips.cfg.template` - Added NOTIFY to `is_method("ACK|BYE|NOTIFY")` check
-- `OPENSIPS-MIGRATION-KNOWLEDGE.md` - Documented the fix and root cause
 
-**Location:** See `route[RELAY]` in `config/opensips.cfg.template` (lines 744-801)
+**Location:** See `route[RELAY]` in `config/opensips.cfg.template`
 
 ### 2. ACK/BYE Routing Fix
 **Issue:** ACK/BYE routing was incorrectly modifying destination URI for public IPs/domains (Asterisk backends).
@@ -73,8 +73,7 @@
 ## Documentation References
 
 ### For NOTIFY Routing
-- **Fix Location:** `config/opensips.cfg.template` - `route[RELAY]` (line 756)
-- **Documentation:** `OPENSIPS-MIGRATION-KNOWLEDGE.md` - Section "Error: NOTIFY requests failing with null destination URI" (line 506)
+- **Fix Location:** `config/opensips.cfg.template` - `route[RELAY]`
 
 ### For NAT Traversal
 - **Helper Route:** `route[CHECK_PRIVATE_IP]` (lines 728-742)
@@ -94,7 +93,10 @@
 - Health-aware routing with dispatcher module
 - Control panel integration and domain management
 
-### Recent Fixes
+### Recent Work
+- Documentation cleanup: Removed 17 outdated files (USRLOC, Kamailio migration, MinIO, SQLite/Litestream docs)
+- Control panel installer fixes: Fixed directory finding and config file copying
+- Installation verification: Added verification script and checklist
 - NOTIFY routing for endpoints behind NAT (commit 3a9790f)
 - ACK/BYE routing to only update NAT IP for private IPs
 - Code cleanup and helper route extraction
@@ -107,7 +109,11 @@
 ### Key Files to Reference
 - `config/opensips.cfg.template` - Main OpenSIPS configuration
 - `scripts/init-database.sh` - Database schema initialization
-- `SIMPLIFIED-APPROACH.md` - Current architecture approach
+- `install.sh` - OpenSIPS installation script
+- `install-control-panel.sh` - Control panel installation script
+- `verify-control-panel-install.sh` - Installation verification script
+- `SIMPLIFIED-APPROACH.md` - Current architecture approach (SQL-based endpoint tracking)
+- `INSTALLATION-VERIFICATION-CHECKLIST.md` - Verification checklist
 
 ## System Architecture
 
