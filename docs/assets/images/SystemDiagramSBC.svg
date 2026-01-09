@@ -32,40 +32,27 @@
   
   <!-- Standard box dimensions: width=200, height=140 -->
   
-  <!-- SQLite Database (top row) -->
-  <rect x="300" y="60" width="200" height="140" rx="10" fill="url(#dbGradient)" stroke="#4A3A8A" stroke-width="2" filter="url(#shadow)"/>
-  <text x="400" y="90" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">SQLite</text>
-  <text x="400" y="115" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">routing.db</text>
-  <text x="400" y="140" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• sip_domains</text>
-  <text x="400" y="155" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• dispatcher</text>
-  <text x="400" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">WAL Mode</text>
-  <text x="400" y="185" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">Local Cache</text>
+  <!-- MySQL Database (top row) -->
+  <rect x="450" y="60" width="200" height="140" rx="10" fill="url(#dbGradient)" stroke="#4A3A8A" stroke-width="2" filter="url(#shadow)"/>
+  <text x="550" y="90" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">MySQL</text>
+  <text x="550" y="115" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">Routing Database</text>
+  <text x="550" y="140" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• domain</text>
+  <text x="550" y="155" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• dispatcher</text>
+  <text x="550" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• endpoint_locations</text>
+  <text x="550" y="185" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">Persistent Storage</text>
   
-  <!-- Litestream Service (top row) -->
-  <rect x="550" y="60" width="200" height="140" rx="10" fill="#48BB78" stroke="#2F855A" stroke-width="2" filter="url(#shadow)"/>
-  <text x="650" y="90" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">Litestream</text>
-  <text x="650" y="115" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">Replication</text>
-  <text x="650" y="140" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• WAL Streaming</text>
-  <text x="650" y="155" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Continuous Backup</text>
-  <text x="650" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Point-in-Time</text>
-  <text x="650" y="185" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">Recovery</text>
+  <!-- Control Panel (optional, shown on the right) -->
+  <rect x="750" y="60" width="200" height="140" rx="10" fill="#9F7AEA" stroke="#6B46C1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="850" y="90" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">Control Panel</text>
+  <text x="850" y="115" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">Web UI</text>
+  <text x="850" y="140" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#F3E8FF">• Domain Management</text>
+  <text x="850" y="155" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#F3E8FF">• Dispatcher Config</text>
+  <text x="850" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#F3E8FF">• System Monitoring</text>
+  <text x="850" y="185" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#F3E8FF">Apache/PHP</text>
   
-  <!-- Litestream to SQLite Arrow -->
-  <path d="M 500 130 L 550 130" stroke="#48BB78" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="525" y="125" font-family="Arial, sans-serif" font-size="10" fill="#48BB78">Replicate</text>
-  
-  <!-- S3/MinIO Cloud Storage (top row) -->
-  <rect x="800" y="60" width="200" height="140" rx="10" fill="url(#cloudGradient)" stroke="#CC7700" stroke-width="2" filter="url(#shadow)"/>
-  <text x="900" y="90" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">S3 / MinIO</text>
-  <text x="900" y="115" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">Backup Store</text>
-  <text x="900" y="140" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#FFF8DC">• WAL Files</text>
-  <text x="900" y="155" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#FFF8DC">• Point-in-Time</text>
-  <text x="900" y="170" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#FFF8DC">• Recovery Store</text>
-  <text x="900" y="185" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#FFF8DC">Cloud Storage</text>
-  
-  <!-- Litestream to S3 Arrow -->
-  <path d="M 750 130 L 800 130" stroke="#FFA500" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="775" y="125" font-family="Arial, sans-serif" font-size="10" fill="#FF8C00">Backup</text>
+  <!-- Control Panel to MySQL Arrow -->
+  <path d="M 750 130 L 650 130" stroke="#9F7AEA" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
+  <text x="700" y="125" font-family="Arial, sans-serif" font-size="10" fill="#9F7AEA">Query</text>
   
   <!-- Internet/Endpoints -->
   <rect x="50" y="250" width="200" height="140" rx="10" fill="#E8E8E8" stroke="#333" stroke-width="2" filter="url(#shadow)"/>
@@ -80,18 +67,18 @@
   <path d="M 250 320 L 350 320" stroke="#4A90E2" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
   <text x="300" y="310" font-family="Arial, sans-serif" font-size="11" fill="#4A90E2" font-weight="bold">SIP</text>
   
-  <!-- PBX3sbc (Kamailio SBC) -->
+  <!-- PBX3sbc (OpenSIPS SBC) -->
   <rect x="350" y="250" width="200" height="140" rx="10" fill="url(#sbcGradient)" stroke="#2E5C8A" stroke-width="3" filter="url(#shadow)"/>
   <text x="450" y="280" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="white">PBX3sbc</text>
-  <text x="450" y="305" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">SIP Edge Router</text>
+  <text x="450" y="305" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="white">OpenSIPS SBC</text>
   <text x="450" y="325" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Domain Validation</text>
   <text x="450" y="340" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Attack Mitigation</text>
   <text x="450" y="355" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Health Checks</text>
   <text x="450" y="370" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#E0E0E0">• Load Balancing</text>
   
-  <!-- Database Query Arrow (bidirectional) from PBX3sbc to SQLite -->
-  <path d="M 450 250 L 450 200" stroke="#7B68EE" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
-  <text x="460" y="225" font-family="Arial, sans-serif" font-size="10" fill="#7B68EE">Query</text>
+  <!-- Database Query Arrow (bidirectional) from PBX3sbc to MySQL -->
+  <path d="M 450 250 L 550 200" stroke="#7B68EE" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
+  <text x="500" y="220" font-family="Arial, sans-serif" font-size="10" fill="#7B68EE">Query</text>
   
   <!-- SIP Flow Arrow from PBX3sbc to PBX3 -->
   <path d="M 550 320 L 700 320" stroke="#4A90E2" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
@@ -109,15 +96,17 @@
   <text x="845" y="352" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#666">10.0.1.11</text>
   <text x="800" y="370" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#666">Health Checks (OPTIONS)</text>
   
-  <!-- RTP Bypass Flow (single arrow) -->
-  <path d="M 150 450 L 800 450" stroke="#FF6B6B" stroke-width="2" fill="none" stroke-dasharray="5,5" marker-end="url(#arrowhead)"/>
-  <text x="475" y="440" font-family="Arial, sans-serif" font-size="11" fill="#FF6B6B" font-weight="bold">RTP Bypass</text>
-  <text x="475" y="455" font-family="Arial, sans-serif" font-size="10" fill="#FF6B6B">(Direct to Asterisk)</text>
+  <!-- RTP Bypass Flow (bidirectional arrow) -->
+  <path d="M 150 450 L 800 450" stroke="#FF6B6B" stroke-width="2" fill="none" stroke-dasharray="5,5" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
+  <text x="475" y="428" font-family="Arial, sans-serif" font-size="11" fill="#FF6B6B" font-weight="bold">RTP Media</text>
+  <text x="475" y="442" font-family="Arial, sans-serif" font-size="10" fill="#FF6B6B" font-style="italic">Direct: Endpoint ↔ Asterisk</text>
+  <text x="475" y="468" font-family="Arial, sans-serif" font-size="9" fill="#CC5555">(Does not transit through OpenSIPS)</text>
   
   <!-- RTP Label -->
-  <rect x="700" y="470" width="100" height="30" rx="5" fill="#FFE5E5" stroke="#FF6B6B" stroke-width="1"/>
-  <text x="750" y="488" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#FF6B6B">RTP</text>
-  <text x="750" y="500" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#CC5555">Media Stream</text>
+  <rect x="700" y="480" width="130" height="50" rx="5" fill="#FFE5E5" stroke="#FF6B6B" stroke-width="1"/>
+  <text x="765" y="497" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#FF6B6B">RTP Media</text>
+  <text x="765" y="512" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#CC5555">Handled by</text>
+  <text x="765" y="526" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#CC5555">Asterisk &amp; Endpoint</text>
   
   <!-- Legend -->
   <rect x="50" y="550" width="1500" height="260" rx="10" fill="white" stroke="#CCC" stroke-width="1" filter="url(#shadow)"/>
@@ -128,27 +117,27 @@
   <text x="160" y="605" font-family="Arial, sans-serif" font-size="12" fill="#333">SIP Signaling (through SBC)</text>
   
   <path d="M 100 625 L 150 625" stroke="#FF6B6B" stroke-width="2" fill="none" stroke-dasharray="5,5" marker-end="url(#arrowhead)"/>
-  <text x="160" y="630" font-family="Arial, sans-serif" font-size="12" fill="#333">RTP Media (bypasses SBC, direct to Asterisk)</text>
+  <text x="160" y="630" font-family="Arial, sans-serif" font-size="12" fill="#333">RTP Media (direct Endpoint ↔ Asterisk, does not transit OpenSIPS)</text>
   
   <path d="M 100 650 L 150 650" stroke="#7B68EE" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
-  <text x="160" y="655" font-family="Arial, sans-serif" font-size="12" fill="#333">Database Queries (local SQLite)</text>
+  <text x="160" y="655" font-family="Arial, sans-serif" font-size="12" fill="#333">Database Queries (MySQL)</text>
   
-  <path d="M 100 675 L 150 675" stroke="#48BB78" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="160" y="680" font-family="Arial, sans-serif" font-size="12" fill="#333">Litestream Replication (to S3/MinIO)</text>
+  <path d="M 100 675 L 150 675" stroke="#9F7AEA" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
+  <text x="160" y="680" font-family="Arial, sans-serif" font-size="12" fill="#333">Control Panel Database Access</text>
   
   <!-- Additional Info -->
-  <text x="800" y="720" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666" font-style="italic">PBX3sbc provides domain validation, attack mitigation, and health-aware routing while maintaining local SQLite database with cloud backup</text>
+  <text x="800" y="720" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666" font-style="italic">PBX3sbc provides domain validation, attack mitigation, and health-aware routing using OpenSIPS with MySQL database</text>
   
   <!-- Second column of legend for better use of space -->
   <path d="M 800 600 L 850 600" stroke="#4A90E2" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
   <text x="860" y="605" font-family="Arial, sans-serif" font-size="12" fill="#333">SIP flows through PBX3sbc for security and routing</text>
   
   <path d="M 800 625 L 850 625" stroke="#FF6B6B" stroke-width="2" fill="none" stroke-dasharray="5,5" marker-end="url(#arrowhead)"/>
-  <text x="860" y="630" font-family="Arial, sans-serif" font-size="12" fill="#333">RTP media bypasses SBC for optimal performance</text>
+  <text x="860" y="630" font-family="Arial, sans-serif" font-size="12" fill="#333">RTP media handled directly by Asterisk and endpoint, OpenSIPS only processes SIP signaling</text>
   
   <path d="M 800 650 L 850 650" stroke="#7B68EE" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
-  <text x="860" y="655" font-family="Arial, sans-serif" font-size="12" fill="#333">SQLite provides sub-millisecond routing lookups</text>
+  <text x="860" y="655" font-family="Arial, sans-serif" font-size="12" fill="#333">MySQL provides reliable routing and endpoint tracking</text>
   
-  <path d="M 800 675 L 850 675" stroke="#48BB78" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-  <text x="860" y="680" font-family="Arial, sans-serif" font-size="12" fill="#333">Litestream ensures continuous backup and recovery</text>
+  <path d="M 800 675 L 850 675" stroke="#9F7AEA" stroke-width="2" fill="none" marker-end="url(#arrowhead)" marker-start="url(#arrowhead-reverse)"/>
+  <text x="860" y="680" font-family="Arial, sans-serif" font-size="12" fill="#333">Control Panel provides web-based management interface</text>
 </svg>
