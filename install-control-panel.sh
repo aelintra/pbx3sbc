@@ -358,12 +358,28 @@ EOF
 configure_control_panel_database() {
     log_info "Configuring control panel database tables..."
     
-    # Check if control panel tables exist (they are created by the web installation wizard)
+    # Check if control panel tables exist
     if ! mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" -e "DESCRIBE ocp_boxes_config;" &>/dev/null; then
-        log_warn "Control panel database tables do not exist yet"
-        log_warn "Please access http://$(hostname -I | awk '{print $1}')/ and complete the installation wizard first"
-        log_warn "After the wizard completes, re-run this script to configure the database entries"
-        return 0
+        log_info "Control panel database tables do not exist, creating them..."
+        
+        # Check if db_schema.mysql exists
+        SCHEMA_FILE="${OCP_CONFIG_DIR}/db_schema.mysql"
+        if [[ ! -f "$SCHEMA_FILE" ]]; then
+            log_error "Database schema file not found: ${SCHEMA_FILE}"
+            log_error "The control panel files may not have been copied correctly"
+            exit 1
+        fi
+        
+        # Load database schema
+        log_info "Loading control panel database schema..."
+        if mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" < "$SCHEMA_FILE" 2>/dev/null; then
+            log_success "Control panel database tables created"
+        else
+            log_error "Failed to load database schema"
+            exit 1
+        fi
+    else
+        log_info "Control panel database tables already exist"
     fi
     
     # Configure ocp_boxes_config (OpenSIPS instance)
