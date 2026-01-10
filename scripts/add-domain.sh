@@ -6,9 +6,28 @@
 
 set -euo pipefail
 
+# Try to source db-config.sh if it exists (provides DB credentials)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/db-config.sh" ]]; then
+    source "${SCRIPT_DIR}/db-config.sh" 2>/dev/null || true
+fi
+
 DB_NAME="${DB_NAME:-opensips}"
 DB_USER="${DB_USER:-opensips}"
 DB_PASS="${DB_PASS:-your-password}"
+
+# Check if password is still the default placeholder
+if [[ "$DB_PASS" == "your-password" ]]; then
+    echo "Error: MySQL password not set"
+    echo
+    echo "Please set the DB_PASS environment variable:"
+    echo "  export DB_PASS='your-actual-password'"
+    echo "  $0 $@"
+    echo
+    echo "Or set it inline:"
+    echo "  DB_PASS='your-actual-password' $0 $@"
+    exit 1
+fi
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <domain> [setid]"
