@@ -355,13 +355,13 @@ configure_database() {
         # Escape password for sed (escape special characters)
         ESCAPED_PASS=$(printf '%s\n' "$DB_PASS" | sed 's/[[\.*^$()+?{|]/\\&/g')
         
-        # Update database configuration
+        # Update database configuration (handle both commented and uncommented lines)
         sed -i "s/^DB_CONNECTION=.*/DB_CONNECTION=mysql/" .env
-        sed -i "s/^DB_HOST=.*/DB_HOST=127.0.0.1/" .env
-        sed -i "s/^DB_PORT=.*/DB_PORT=3306/" .env
-        sed -i "s/^DB_DATABASE=.*/DB_DATABASE=${DB_NAME}/" .env
-        sed -i "s/^DB_USERNAME=.*/DB_USERNAME=${DB_USER}/" .env
-        sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${ESCAPED_PASS}/" .env
+        sed -i "s/^#\?DB_HOST=.*/DB_HOST=127.0.0.1/" .env
+        sed -i "s/^#\?DB_PORT=.*/DB_PORT=3306/" .env
+        sed -i "s/^#\?DB_DATABASE=.*/DB_DATABASE=${DB_NAME}/" .env
+        sed -i "s/^#\?DB_USERNAME=.*/DB_USERNAME=${DB_USER}/" .env
+        sed -i "s/^#\?DB_PASSWORD=.*/DB_PASSWORD=${ESCAPED_PASS}/" .env
         
         log_success "Database configuration updated in .env"
     else
@@ -419,8 +419,8 @@ install_shield() {
         log_warn "Failed to publish Shield config (may already be published)"
     }
     
-    # Run Shield install
-    php artisan shield:install --no-interaction || {
+    # Run Shield install (panel name is 'admin' by default)
+    php artisan shield:install admin --no-interaction || {
         log_error "Failed to install Shield"
         exit 1
     }
@@ -429,7 +429,7 @@ install_shield() {
 }
 
 create_admin_user() {
-    log_info "Creating admin user..."
+    log_info "Admin user creation..."
     
     cd "$ADMIN_PANEL_DIR"
     
@@ -443,31 +443,15 @@ create_admin_user() {
     USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null | grep -oE '[0-9]+' | head -n1 || echo "0")
     if [[ "$USER_COUNT" -gt 0 ]]; then
         log_info "Users already exist in database (${USER_COUNT} user(s))"
-        read -p "Create additional admin user? [y/N]: " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Skipping user creation"
-            return
-        fi
+        log_info "Skipping user creation (users can be created via web interface)"
+        return
     fi
     
-    # Create admin user
-    echo
-    log_info "Creating Filament admin user..."
-    
-    if [[ -n "$ADMIN_EMAIL" ]]; then
-        php artisan make:filament-user --name=admin --email="$ADMIN_EMAIL" || {
-            log_error "Failed to create admin user"
-            exit 1
-        }
-    else
-        php artisan make:filament-user || {
-            log_error "Failed to create admin user"
-            exit 1
-        }
-    fi
-    
-    log_success "Admin user created"
+    # Note: make:filament-user requires HTTP context and doesn't work in CLI
+    # Users must be created via the web interface after starting the server
+    log_warn "Filament's make:filament-user command requires HTTP context"
+    log_info "User creation will be skipped - create users via the web interface"
+    log_info "After starting the server, visit /admin/register to create the first user"
 }
 
 set_permissions() {
@@ -562,21 +546,26 @@ print_summary() {
     echo "     cd ${ADMIN_PANEL_DIR}"
     echo "     php artisan serve --host=0.0.0.0 --port=8000"
     echo
-    echo "  2. Access admin panel:"
+    echo "  2. Create your first admin user:"
+    echo "     Visit: http://$(hostname -I | awk '{print $1}'):8000/admin/register"
+    echo "     (or http://localhost:8000/admin/register from the server)"
+    echo "     Note: User creation must be done via web interface"
+    echo
+    echo "  3. Access admin panel:"
     echo "     http://$(hostname -I | awk '{print $1}'):8000/admin"
     echo "     (or http://localhost:8000/admin from the server)"
     echo
-    echo "  3. Create Filament resources for your models:"
+    echo "  4. Create Filament resources for your models:"
     echo "     php artisan make:filament-resource Domain"
     echo "     php artisan make:filament-resource Dispatcher"
     echo
     if [[ -f /etc/systemd/system/admin-panel.service ]]; then
-        echo "  4. Optional - Enable systemd service:"
+        echo "  5. Optional - Enable systemd service:"
         echo "     systemctl enable admin-panel"
         echo "     systemctl start admin-panel"
         echo
     fi
-    echo "  5. For production deployment, configure nginx/Apache"
+    echo "  6. For production deployment, configure nginx/Apache"
     echo "     and set up proper virtual host configuration"
     echo
 }
