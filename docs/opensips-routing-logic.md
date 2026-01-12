@@ -327,8 +327,8 @@ The routing database is located at:
 This database contains:
 - `sip_domains`: Domain to dispatcher set mappings
 - `dispatcher`: Asterisk backend destinations
-- `endpoint_locations`: Endpoint IP/port tracking
-- Standard OpenSIPS tables (version, location, etc.)
+- `endpoint_locations`: Endpoint IP/port tracking (custom table, we do NOT use the OpenSIPS `location` table)
+- Standard OpenSIPS tables (version, etc.)
 
 ## Future Enhancements
 
