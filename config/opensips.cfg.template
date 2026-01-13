@@ -71,6 +71,9 @@ modparam("dispatcher", "options_reply_codes", "200")
 
 # --- Accounting (CDR) ---
 modparam("acc", "db_url", "mysql://opensips:your-password@localhost/opensips")
+modparam("acc", "early_media", 0)
+modparam("acc", "report_cancels", 1)
+modparam("acc", "detect_direction", 1)
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -495,8 +498,9 @@ route[TO_DISPATCHER] {
     # The transaction module should handle this automatically, but log it
     if (is_method("INVITE")) {
         xlog("INVITE transaction created, waiting for response from $du\n");
-        # Enable accounting for INVITE transactions
-        acc_log_request();
+        # Enable accounting for INVITE transactions (database backend)
+        # do_accounting() marks transaction for accounting - handles both request and response
+        do_accounting("db");
     }
     exit;
 }
@@ -788,9 +792,9 @@ route[RELAY] {
     # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
     # PRACK needs this for 100rel support when endpoints are behind NAT
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
-        # Enable accounting for BYE requests
+        # Enable accounting for BYE requests (database backend)
         if (is_method("BYE")) {
-            acc_log_request();
+            do_accounting("db");
         }
         # Check if Request-URI domain is a private IP address (endpoint behind NAT)
         $var(check_ip) = $rd;
@@ -843,8 +847,8 @@ route[RELAY] {
 onreply_route {
     xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
     
-    # Log accounting for responses
-    acc_log_response();
+    # Accounting for responses is handled automatically by do_accounting() in request route
+    # No need to explicitly log responses here
     
     # Fix NAT in Contact headers and SDP for responses from endpoints behind NAT
     # This is critical for RTP to work correctly - fixes private IPs to public NAT IPs
