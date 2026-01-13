@@ -44,10 +44,27 @@ for schema_file in "${SCHEMA_FILES[@]}"; do
     fi
 done
 
-# Load core schema (standard-create.sql) - includes version table
+# Load core schema (standard-create.sql) - includes version table, acc table, and all core OpenSIPS tables
 echo "Loading core OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
+echo "  This creates all core tables including: version, acc, missed_calls, subscriber, uri, dialog, etc."
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql"
-echo "Core schema loaded successfully."
+if [[ $? -eq 0 ]]; then
+    echo "Core schema loaded successfully."
+    # Verify key tables were created
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
+        echo "  ✓ Accounting table (acc) verified"
+    else
+        echo "  ⚠ Warning: acc table not found - check standard-create.sql"
+    fi
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'version';" 2>/dev/null | grep -q "version"; then
+        echo "  ✓ Version table verified"
+    else
+        echo "  ⚠ Warning: version table not found"
+    fi
+else
+    echo "Error: Failed to load core schema"
+    exit 1
+fi
 
 # Load dispatcher schema
 echo "Loading dispatcher schema from ${SCHEMA_DIR}/dispatcher-create.sql..."
