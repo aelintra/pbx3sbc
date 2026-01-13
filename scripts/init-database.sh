@@ -47,9 +47,25 @@ done
 # Load core schema (standard-create.sql) - includes version table, acc table, and all core OpenSIPS tables
 echo "Loading core OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
 echo "  This creates all core tables including: version, acc, missed_calls, subscriber, uri, dialog, etc."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql"
-if [[ $? -eq 0 ]]; then
+
+# Check file size to ensure it's not empty
+SCHEMA_SIZE=$(stat -f%z "${SCHEMA_DIR}/standard-create.sql" 2>/dev/null || stat -c%s "${SCHEMA_DIR}/standard-create.sql" 2>/dev/null || echo "0")
+if [[ "$SCHEMA_SIZE" -lt 1000 ]]; then
+    echo "  ⚠ Warning: standard-create.sql appears to be very small ($SCHEMA_SIZE bytes) - may be empty or incomplete"
+fi
+
+# Load schema and capture any errors
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1; then
     echo "Core schema loaded successfully."
+    
+    # Count total tables after loading
+    TABLE_COUNT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
+    echo "  Total tables in database: ${TABLE_COUNT}"
+    
+    # List all tables for verification
+    echo "  Tables created:"
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SHOW TABLES;" 2>/dev/null | sed 's/^/    - /' || echo "    (could not list tables)"
+    
     # Verify key tables were created
     if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
         echo "  ✓ Accounting table (acc) verified"
@@ -63,6 +79,8 @@ if [[ $? -eq 0 ]]; then
     fi
 else
     echo "Error: Failed to load core schema"
+    echo "  Check MySQL error messages above"
+    echo "  Verify file exists: ${SCHEMA_DIR}/standard-create.sql"
     exit 1
 fi
 
@@ -131,10 +149,14 @@ EOF
 
 echo "Custom tables and schema modifications created successfully."
 
+# Final table count
+FINAL_TABLE_COUNT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
+echo
 echo "Database initialized successfully!"
 echo
 echo "Database: ${DB_NAME}"
 echo "User: ${DB_USER}"
+echo "Total tables: ${FINAL_TABLE_COUNT}"
 echo
 echo "Add domains and dispatcher entries:"
 echo "  Use the helper scripts:"
