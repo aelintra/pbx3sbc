@@ -29,70 +29,92 @@ if [[ ! -d "$SCHEMA_DIR" ]]; then
 fi
 
 # Required schema files
+# Note: standard-create.sql only creates the version table
+# Each OpenSIPS module has its own create file
 SCHEMA_FILES=(
-    "standard-create.sql"
-    "dispatcher-create.sql"
-    "domain-create.sql"
+    "standard-create.sql"      # Creates version table only
+    "acc-create.sql"                # Accounting/CDR tables (acc, missed_calls)
+    "dispatcher-create.sql"         # Dispatcher table
+    "domain-create.sql"             # Domain table
 )
 
 # Check if schema files exist
+MISSING_FILES=()
 for schema_file in "${SCHEMA_FILES[@]}"; do
     if [[ ! -f "${SCHEMA_DIR}/${schema_file}" ]]; then
-        echo "Error: Schema file not found: ${SCHEMA_DIR}/${schema_file}"
-        echo "Please ensure OpenSIPS packages are fully installed."
-        exit 1
+        MISSING_FILES+=("${schema_file}")
     fi
 done
 
-# Load core schema (standard-create.sql) - includes version table, acc table, and all core OpenSIPS tables
-echo "Loading core OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
-echo "  This creates all core tables including: version, acc, missed_calls, subscriber, uri, dialog, etc."
-
-# Check file size to ensure it's not empty
-SCHEMA_SIZE=$(stat -f%z "${SCHEMA_DIR}/standard-create.sql" 2>/dev/null || stat -c%s "${SCHEMA_DIR}/standard-create.sql" 2>/dev/null || echo "0")
-if [[ "$SCHEMA_SIZE" -lt 1000 ]]; then
-    echo "  ⚠ Warning: standard-create.sql appears to be very small ($SCHEMA_SIZE bytes) - may be empty or incomplete"
+if [[ ${#MISSING_FILES[@]} -gt 0 ]]; then
+    echo "Warning: Some schema files not found:"
+    for file in "${MISSING_FILES[@]}"; do
+        echo "  - ${file}"
+    done
+    echo "Available schema files in ${SCHEMA_DIR}:"
+    ls -1 "${SCHEMA_DIR}"/*.sql 2>/dev/null | sed 's|^|  |' || echo "  (none found)"
+    echo
+    echo "Continuing with available files..."
 fi
 
-# Load schema and capture any errors
-if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1; then
-    echo "Core schema loaded successfully."
-    
-    # Count total tables after loading
-    TABLE_COUNT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
-    echo "  Total tables in database: ${TABLE_COUNT}"
-    
-    # List all tables for verification
-    echo "  Tables created:"
-    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SHOW TABLES;" 2>/dev/null | sed 's/^/    - /' || echo "    (could not list tables)"
-    
-    # Verify key tables were created
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
-        echo "  ✓ Accounting table (acc) verified"
+# Load standard schema (creates version table only)
+echo "Loading standard OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
+echo "  This creates the version table (schema version tracking)"
+if [[ -f "${SCHEMA_DIR}/standard-create.sql" ]]; then
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1; then
+        echo "  ✓ Standard schema loaded successfully"
     else
-        echo "  ⚠ Warning: acc table not found - check standard-create.sql"
-    fi
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'version';" 2>/dev/null | grep -q "version"; then
-        echo "  ✓ Version table verified"
-    else
-        echo "  ⚠ Warning: version table not found"
+        echo "  ⚠ Warning: Failed to load standard-create.sql"
     fi
 else
-    echo "Error: Failed to load core schema"
-    echo "  Check MySQL error messages above"
-    echo "  Verify file exists: ${SCHEMA_DIR}/standard-create.sql"
-    exit 1
+    echo "  ⚠ Warning: standard-create.sql not found, skipping"
+fi
+
+# Load accounting schema (acc, missed_calls tables)
+echo "Loading accounting schema from ${SCHEMA_DIR}/acc-create.sql..."
+echo "  This creates acc and missed_calls tables for CDR"
+if [[ -f "${SCHEMA_DIR}/acc-create.sql" ]]; then
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/acc-create.sql" 2>&1; then
+        echo "  ✓ Accounting schema loaded successfully"
+    else
+        echo "  ⚠ Warning: Failed to load acc-create.sql"
+    fi
+else
+    echo "  ⚠ Warning: acc-create.sql not found - accounting tables will not be created"
+    echo "    You may need to install opensips-mysql-module or create acc table manually"
 fi
 
 # Load dispatcher schema
 echo "Loading dispatcher schema from ${SCHEMA_DIR}/dispatcher-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql"
-echo "Dispatcher schema loaded successfully."
+if [[ -f "${SCHEMA_DIR}/dispatcher-create.sql" ]]; then
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql" 2>&1; then
+        echo "  ✓ Dispatcher schema loaded successfully"
+    else
+        echo "  ⚠ Warning: Failed to load dispatcher-create.sql"
+    fi
+else
+    echo "  ⚠ Warning: dispatcher-create.sql not found, skipping"
+fi
 
 # Load domain schema
 echo "Loading domain schema from ${SCHEMA_DIR}/domain-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql"
-echo "Domain schema loaded successfully."
+if [[ -f "${SCHEMA_DIR}/domain-create.sql" ]]; then
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql" 2>&1; then
+        echo "  ✓ Domain schema loaded successfully"
+    else
+        echo "  ⚠ Warning: Failed to load domain-create.sql"
+    fi
+else
+    echo "  ⚠ Warning: domain-create.sql not found, skipping"
+fi
+
+# Show table count after loading all schemas
+echo
+TABLE_COUNT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
+echo "Tables created so far: ${TABLE_COUNT}"
+echo "Table list:"
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SHOW TABLES;" 2>/dev/null | sed 's/^/  - /' || echo "  (could not list tables)"
+echo
 
 # Create custom endpoint_locations table (MySQL syntax)
 echo "Creating custom endpoint_locations table..."
