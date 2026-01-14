@@ -79,10 +79,15 @@ fi
 echo "Loading standard OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
 echo "  This creates the version table (schema version tracking)"
 if [[ -f "${SCHEMA_DIR}/standard-create.sql" ]]; then
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1; then
-        echo "  ✓ Standard schema loaded successfully"
+    # Check if version table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'version';" 2>/dev/null | grep -q "version"; then
+        echo "  ✓ Version table already exists, skipping"
     else
-        echo "  ⚠ Warning: Failed to load standard-create.sql"
+        if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1; then
+            echo "  ✓ Standard schema loaded successfully"
+        else
+            echo "  ⚠ Warning: Failed to load standard-create.sql"
+        fi
     fi
 else
     echo "  ⚠ Warning: standard-create.sql not found, skipping"
@@ -92,10 +97,18 @@ fi
 echo "Loading accounting schema from ${SCHEMA_DIR}/acc-create.sql..."
 echo "  This creates acc and missed_calls tables for CDR"
 if [[ -f "${SCHEMA_DIR}/acc-create.sql" ]]; then
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/acc-create.sql" 2>&1; then
-        echo "  ✓ Accounting schema loaded successfully"
+    # Check if acc table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
+        echo "  ✓ Accounting tables already exist, skipping"
     else
-        echo "  ⚠ Warning: Failed to load acc-create.sql"
+        # Load schema, suppressing duplicate entry errors (from version table INSERTs)
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/acc-create.sql" 2>&1 | grep -v "ERROR.*Duplicate entry" || true
+        # Verify table was created
+        if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
+            echo "  ✓ Accounting schema loaded successfully"
+        else
+            echo "  ⚠ Warning: Failed to create acc table"
+        fi
     fi
 else
     echo "  ⚠ Warning: acc-create.sql not found - accounting tables will not be created"
@@ -105,10 +118,18 @@ fi
 # Load dispatcher schema
 echo "Loading dispatcher schema from ${SCHEMA_DIR}/dispatcher-create.sql..."
 if [[ -f "${SCHEMA_DIR}/dispatcher-create.sql" ]]; then
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql" 2>&1; then
-        echo "  ✓ Dispatcher schema loaded successfully"
+    # Check if dispatcher table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'dispatcher';" 2>/dev/null | grep -q "dispatcher"; then
+        echo "  ✓ Dispatcher table already exists, skipping"
     else
-        echo "  ⚠ Warning: Failed to load dispatcher-create.sql"
+        # Load schema, suppressing duplicate entry errors (from version table INSERTs)
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql" 2>&1 | grep -v "ERROR.*Duplicate entry" || true
+        # Verify table was created
+        if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'dispatcher';" 2>/dev/null | grep -q "dispatcher"; then
+            echo "  ✓ Dispatcher schema loaded successfully"
+        else
+            echo "  ⚠ Warning: Failed to create dispatcher table"
+        fi
     fi
 else
     echo "  ⚠ Warning: dispatcher-create.sql not found, skipping"
@@ -117,10 +138,18 @@ fi
 # Load domain schema
 echo "Loading domain schema from ${SCHEMA_DIR}/domain-create.sql..."
 if [[ -f "${SCHEMA_DIR}/domain-create.sql" ]]; then
-    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql" 2>&1; then
-        echo "  ✓ Domain schema loaded successfully"
+    # Check if domain table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'domain';" 2>/dev/null | grep -q "domain"; then
+        echo "  ✓ Domain table already exists, skipping"
     else
-        echo "  ⚠ Warning: Failed to load domain-create.sql"
+        # Load schema, suppressing duplicate entry errors (from version table INSERTs)
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql" 2>&1 | grep -v "ERROR.*Duplicate entry" || true
+        # Verify table was created
+        if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'domain';" 2>/dev/null | grep -q "domain"; then
+            echo "  ✓ Domain schema loaded successfully"
+        else
+            echo "  ⚠ Warning: Failed to create domain table"
+        fi
     fi
 else
     echo "  ⚠ Warning: domain-create.sql not found, skipping"
