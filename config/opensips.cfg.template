@@ -836,7 +836,7 @@ route[RELAY] {
     # If transaction doesn't exist (expired), we need to route statelessly
     if (is_method("BYE")) {
         # Ensure destination URI is set from Request-URI if not already set
-        if ($du == $null || $du == "") {
+        if ($du == "") {
             $du = $ru;
             xlog("RELAY: BYE - Set destination URI from Request-URI: $du\n");
         }
