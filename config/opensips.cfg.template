@@ -792,10 +792,6 @@ route[RELAY] {
     # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
     # PRACK needs this for 100rel support when endpoints are behind NAT
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
-        # Enable accounting for BYE requests (database backend)
-        if (is_method("BYE")) {
-            do_accounting("db");
-        }
         # Check if Request-URI domain is a private IP address (endpoint behind NAT)
         $var(check_ip) = $rd;
         route(CHECK_PRIVATE_IP);
@@ -855,8 +851,12 @@ route[RELAY] {
                 exit;
             }
             xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
+            # Enable accounting for BYE requests AFTER successful routing (database backend)
+            do_accounting("db");
         } else {
             xlog("RELAY: BYE - t_relay() succeeded (transaction found)\n");
+            # Enable accounting for BYE requests AFTER successful routing (database backend)
+            do_accounting("db");
         }
     } else {
         # For other methods, use standard t_relay()
