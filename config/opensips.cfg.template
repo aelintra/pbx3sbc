@@ -820,28 +820,32 @@ route[RELAY] {
     # BYE requests need special handling because t_relay() requires transaction state
     # If transaction doesn't exist (expired), we need to route statelessly
     if (is_method("BYE")) {
-        # Ensure destination URI is set from Request-URI if not already set
-        if ($du == "") {
+        # When loose_route() processes Route headers, it may modify $du
+        # If $du is empty or points to ourselves, use Request-URI instead
+        if ($du == "" || $(du{uri.host}) == $(myself)) {
             $du = $ru;
-            xlog("RELAY: BYE - Set destination URI from Request-URI: $du\n");
+            xlog("RELAY: BYE - Set destination URI from Request-URI: $du (was empty or self)\n");
         }
         
+        xlog("RELAY: BYE - Attempting to relay to $du (Request-URI=$ru)\n");
+        
         # Try t_relay() first - it will use transaction state if available
-        if (!t_relay()) {
-            # t_relay() failed - transaction might not exist or expired
+        # Use t_relay_to() to explicitly specify destination, which may work better
+        if (!t_relay_to("$du")) {
+            # t_relay_to() failed - transaction might not exist or expired
             # Try to route statelessly using the destination URI
-            xlog("L_WARN", "RELAY: BYE - t_relay() failed (transaction not found?), trying stateless forward to $du\n");
+            xlog("L_WARN", "RELAY: BYE - t_relay_to() failed (transaction not found?), trying stateless forward to $du\n");
             
             # Use forward() for stateless forwarding when transaction doesn't exist
             # This handles BYE even if the INVITE transaction has expired
-            if (!forward()) {
+            if (!forward("$du")) {
                 xlog("L_ERR", "RELAY: BYE - forward() failed, cannot route BYE to $du\n");
                 sl_send_reply(500, "Internal Server Error");
                 exit;
             }
             xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
         } else {
-            xlog("RELAY: BYE - t_relay() succeeded (transaction found)\n");
+            xlog("RELAY: BYE - t_relay_to() succeeded (transaction found or created)\n");
         }
     } else {
         # For other methods, use standard t_relay()
