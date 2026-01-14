@@ -5,6 +5,14 @@
 
 set -euo pipefail
 
+# Try to read database credentials from credentials file (created by install.sh)
+CRED_FILE="/etc/opensips/.mysql_credentials"
+if [[ -f "$CRED_FILE" ]]; then
+    # Source the credentials file to get DB_NAME, DB_USER, DB_PASS
+    source "$CRED_FILE" 2>/dev/null || true
+fi
+
+# Set defaults if not already set from credentials file
 DB_NAME="${DB_NAME:-opensips}"
 DB_USER="${DB_USER:-opensips}"
 DB_PASS="${DB_PASS:-your-password}"
@@ -14,6 +22,16 @@ OPENSIPS_GROUP="${OPENSIPS_GROUP:-opensips}"
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root (use sudo)"
     exit 1
+fi
+
+# Warn if using default password
+if [[ "$DB_PASS" == "your-password" ]]; then
+    echo "Warning: Using default password 'your-password'"
+    echo "  If this is incorrect, either:"
+    echo "    1. Set DB_PASS environment variable: sudo DB_PASS='your-password' ./scripts/init-database.sh"
+    echo "    2. Create credentials file: sudo ./scripts/setup-db-credentials.sh [password]"
+    echo "    3. Source credentials file manually if it exists at ${CRED_FILE}"
+    echo
 fi
 
 echo "Initializing OpenSIPS MySQL database '${DB_NAME}'..."
