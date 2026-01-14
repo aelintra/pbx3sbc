@@ -816,12 +816,42 @@ route[RELAY] {
         xlog("RELAY: Creating transaction for $rm to $du, Call-ID=$hdr(Call-ID)\n");
     }
     
-    if (!t_relay()) {
-        # Use sl_send_reply() since we're in request route, not reply route
-        sl_send_reply(500, "Internal Server Error");
+    # For BYE requests, handle transaction lookup failure gracefully
+    # BYE requests need special handling because t_relay() requires transaction state
+    # If transaction doesn't exist (expired), we need to route statelessly
+    if (is_method("BYE")) {
+        # Ensure destination URI is set from Request-URI if not already set
+        if ($du == "") {
+            $du = $ru;
+            xlog("RELAY: BYE - Set destination URI from Request-URI: $du\n");
+        }
+        
+        # Try t_relay() first - it will use transaction state if available
+        if (!t_relay()) {
+            # t_relay() failed - transaction might not exist or expired
+            # Try to route statelessly using the destination URI
+            xlog("L_WARN", "RELAY: BYE - t_relay() failed (transaction not found?), trying stateless forward to $du\n");
+            
+            # Use forward() for stateless forwarding when transaction doesn't exist
+            # This handles BYE even if the INVITE transaction has expired
+            if (!forward()) {
+                xlog("L_ERR", "RELAY: BYE - forward() failed, cannot route BYE to $du\n");
+                sl_send_reply(500, "Internal Server Error");
+                exit;
+            }
+            xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
+        } else {
+            xlog("RELAY: BYE - t_relay() succeeded (transaction found)\n");
+        }
     } else {
-        if (is_method("NOTIFY|OPTIONS")) {
-            xlog("RELAY: Transaction created successfully for $rm, Call-ID=$hdr(Call-ID)\n");
+        # For other methods, use standard t_relay()
+        if (!t_relay()) {
+            # Use sl_send_reply() since we're in request route, not reply route
+            sl_send_reply(500, "Internal Server Error");
+        } else {
+            if (is_method("NOTIFY|OPTIONS")) {
+                xlog("RELAY: Transaction created successfully for $rm, Call-ID=$hdr(Call-ID)\n");
+            }
         }
     }
     exit;
