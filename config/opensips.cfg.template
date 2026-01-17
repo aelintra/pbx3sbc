@@ -875,10 +875,42 @@ route[RELAY] {
         xlog("RELAY: Creating transaction for $rm to $du, Call-ID=$hdr(Call-ID)\n");
     }
     
-    # For BYE requests, handle transaction lookup failure gracefully
-    # BYE requests need special handling because t_relay() requires transaction state
-    # If transaction doesn't exist (expired), we need to route statelessly
-    if (is_method("BYE")) {
+    # For ACK and PRACK requests, ensure proper transaction-based routing
+    # ACK/PRACK should use transaction state when available, but need fallback if transaction expired
+    # This prevents retransmission loops where ACKs aren't properly forwarded
+    if (is_method("ACK|PRACK")) {
+        # Validate destination URI
+        if ($du == "" || $du == "0") {
+            $du = $ru;
+            xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty)\n");
+        }
+        
+        xlog("RELAY: $rm - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route))\n");
+        
+        # Try t_relay() first - it will use transaction state if available
+        # ACK/PRACK should work with transaction state since they're part of the INVITE transaction
+        if (!t_relay()) {
+            # t_relay() failed - transaction might not exist or expired
+            # For ACK/PRACK, this is unusual but can happen if transaction expired
+            xlog("L_WARN", "RELAY: $rm - t_relay() failed for destination $du (transaction not found?)\n");
+            
+            # Try stateless forward as fallback
+            # This ensures ACK/PRACK reaches destination even if transaction expired
+            if (!forward()) {
+                xlog("L_ERR", "RELAY: $rm - forward() also failed for destination $du\n");
+                # For ACK, we can't send an error response (ACK has no response)
+                # For PRACK, we could send an error, but it's better to just log and exit
+                exit;
+            } else {
+                xlog("RELAY: $rm - Stateless forward succeeded to $du\n");
+            }
+        } else {
+            xlog("RELAY: $rm - t_relay() succeeded (transaction found)\n");
+        }
+    } else if (is_method("BYE")) {
+        # For BYE requests, handle transaction lookup failure gracefully
+        # BYE requests need special handling because t_relay() requires transaction state
+        # If transaction doesn't exist (expired), we need to route statelessly
         # When loose_route() processes Route headers, it may modify $du
         # Validate and fix destination URI to prevent 476 "Unresolvable destination" errors
         if ($du == "" || $du == "0") {
