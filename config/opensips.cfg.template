@@ -503,6 +503,25 @@ route[WITHINDLG] {
     if (loose_route()) {
         xlog("loose_route() succeeded for $rm, following Record-Route, $du=$du, $ru=$ru\n");
         
+        # For ACK and PRACK requests, validate destination URI after loose_route()
+        # loose_route() may not set $du correctly, causing ACKs to not be forwarded
+        if (is_method("ACK|PRACK")) {
+            # If $du is empty or invalid, use Request-URI
+            # ACK/PRACK should use Request-URI as fallback since they're in-dialog requests
+            if ($du == "" || $du == "0") {
+                $du = $ru;
+                xlog("ACK/PRACK: loose_route() set empty destination, using Request-URI: $du\n");
+            } else {
+                # Validate $du is a valid SIP URI format
+                if ($du !~ "^sip:") {
+                    xlog("L_WARN", "ACK/PRACK: loose_route() set invalid destination format: $du, using Request-URI: $ru\n");
+                    $du = $ru;
+                } else {
+                    xlog("ACK/PRACK: loose_route() set destination to: $du\n");
+                }
+            }
+        }
+        
         # For BYE requests, validate destination URI after loose_route()
         # loose_route() may set $du to a domain that can't be resolved, causing 476 errors
         if (is_method("BYE")) {
@@ -628,10 +647,11 @@ route[ENDPOINT_LOOKUP] {
     $var(endpoint_aor) = "";
     $var(lookup_success) = 0;
     
-    # Validate input
-    if ($var(lookup_user) == "") {
-        xlog("L_ERR", "ENDPOINT_LOOKUP: lookup_user is empty\n");
-        exit;
+    # Validate input - check for empty, null, or <null> string
+    if ($var(lookup_user) == "" || $var(lookup_user) == "0" || $var(lookup_user) == "<null>") {
+        xlog("L_ERR", "ENDPOINT_LOOKUP: lookup_user is empty/null: '$var(lookup_user)'\n");
+        $var(lookup_success) = 0;
+        return;
     }
     
     # First try exact AoR match (if AoR provided and not empty)
@@ -839,31 +859,78 @@ route[RELAY] {
     # Public IPs or domains (Asterisk) should not be modified
     # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
     # PRACK needs this for 100rel support when endpoints are behind NAT
+    # ACK should NOT use this logic - ACKs to Asterisk should use Request-URI directly
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
-        # Check if Request-URI domain is a private IP address (endpoint behind NAT)
-        $var(check_ip) = $rd;
-        route(CHECK_PRIVATE_IP);
-        
-        if ($var(is_private) == 1) {
-            # Request-URI contains private IP - this is an endpoint behind NAT, need to fix to public NAT IP
-            $var(msg_user) = $rU;
-            if ($var(msg_user) != "") {
-                # Use existing ENDPOINT_LOOKUP helper route instead of duplicating database queries
-                $var(lookup_user) = $var(msg_user);
-                $var(lookup_aor) = "";  # Username-only lookup
-                route(ENDPOINT_LOOKUP);
+        # For ACK/PRACK, skip NAT fix if Request-URI doesn't have username or is not private IP
+        # ACKs to Asterisk (public IP) should not go through NAT fix logic
+        if (is_method("ACK|PRACK")) {
+            # For ACK/PRACK, only apply NAT fix if:
+            # 1. Request-URI has a username (not ACK to Asterisk)
+            # 2. Request-URI domain is a private IP (endpoint behind NAT)
+            # This ensures:
+            # - ACKs to Asterisk (no username) skip NAT fix
+            # - ACKs to endpoints behind NAT (username + private IP) get NAT fix
+            # - ACKs to public endpoints (username + public IP) skip NAT fix
+            
+            # Check if Request-URI has a username
+            # In OpenSIPS 3.x, is_user() is obsolete, so we check if Request-URI contains @ with non-empty username
+            # Pattern: sip:user@domain (has username) vs sip:domain or sip:@domain (no username)
+            if ($ru =~ "^sip:[^@]+@") {
+                # Has username - check if it's a private IP (endpoint behind NAT)
+                $var(check_ip) = $rd;
+                route(CHECK_PRIVATE_IP);
                 
-                if ($var(lookup_success) == 1) {
-                    # Set destination URI to use NAT IP from database
-                    $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                    xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
+                if ($var(is_private) == 1) {
+                    # Request-URI contains private IP with username - endpoint behind NAT, need NAT fix
+                    $var(msg_user) = $rU;
+                    # Use existing ENDPOINT_LOOKUP helper route
+                    $var(lookup_user) = $var(msg_user);
+                    $var(lookup_aor) = "";  # Username-only lookup
+                    route(ENDPOINT_LOOKUP);
+                    
+                    if ($var(lookup_success) == 1 && $var(endpoint_ip) != "" && $var(endpoint_ip) != "0" && $var(endpoint_ip) != "<null>") {
+                        # Set destination URI to use NAT IP from database
+                        $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                        xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
+                    } else {
+                        # Endpoint lookup failed or invalid - don't modify, use Request-URI
+                        xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed or invalid, using original Request-URI (was $ru)\n");
+                    }
                 } else {
-                    xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed for user=$var(msg_user), using original Request-URI\n");
+                    # Request-URI has username but public IP - skip NAT fix (public endpoint)
+                    xlog("RELAY: $rm - Request-URI has username but public IP ($var(check_ip)), skipping NAT fix\n");
                 }
+            } else {
+                # No username - skip NAT fix (ACK to Asterisk)
+                xlog("RELAY: $rm - Request-URI has no username, skipping NAT fix logic (Request-URI=$ru)\n");
             }
         } else {
-            # Request-URI contains public IP or domain (Asterisk) - don't modify, let t_relay() use transaction state
-            xlog("RELAY: $rm - Request-URI has public IP/domain ($var(check_ip)), not modifying destination\n");
+            # For BYE and NOTIFY, use original NAT fix logic
+            # Check if Request-URI domain is a private IP address (endpoint behind NAT)
+            $var(check_ip) = $rd;
+            route(CHECK_PRIVATE_IP);
+            
+            if ($var(is_private) == 1) {
+                # Request-URI contains private IP - this is an endpoint behind NAT, need to fix to public NAT IP
+                $var(msg_user) = $rU;
+                if ($var(msg_user) != "") {
+                    # Use existing ENDPOINT_LOOKUP helper route instead of duplicating database queries
+                    $var(lookup_user) = $var(msg_user);
+                    $var(lookup_aor) = "";  # Username-only lookup
+                    route(ENDPOINT_LOOKUP);
+                    
+                    if ($var(lookup_success) == 1) {
+                        # Set destination URI to use NAT IP from database
+                        $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                        xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
+                    } else {
+                        xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed for user=$var(msg_user), using original Request-URI\n");
+                    }
+                }
+            } else {
+                # Request-URI contains public IP or domain (Asterisk) - don't modify, let t_relay() use transaction state
+                xlog("RELAY: $rm - Request-URI has public IP/domain ($var(check_ip)), not modifying destination\n");
+            }
         }
     }
     
