@@ -501,7 +501,66 @@ route[WITHINDLG] {
 
     # Check for Record-Route header and follow it
     if (loose_route()) {
-        xlog("loose_route() succeeded for $rm, following Record-Route\n");
+        xlog("loose_route() succeeded for $rm, following Record-Route, $du=$du, $ru=$ru\n");
+        
+        # For BYE requests, validate destination URI after loose_route()
+        # loose_route() may set $du to a domain that can't be resolved, causing 476 errors
+        if (is_method("BYE")) {
+            # If $du is empty or appears invalid, try to extract from Request-URI
+            if ($du == "" || $du == "0") {
+                xlog("L_WARN", "BYE: loose_route() set empty destination, using Request-URI: $ru\n");
+                $du = $ru;
+            } else {
+                # Log what loose_route() set as destination for debugging
+                xlog("BYE: loose_route() set destination to: $du\n");
+                
+                # If $du contains a domain name (not IP), it might fail DNS resolution
+                # Extract domain from $du to check if it's an IP address
+                $var(dest_domain) = $(du{uri.domain});
+                if ($var(dest_domain) != "" && $var(dest_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Destination is a domain name, not an IP - might fail DNS
+                    # For BYE, prefer using Request-URI if it has an IP address
+                    $var(ru_domain) = $rd;
+                    if ($var(ru_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        xlog("L_WARN", "BYE: loose_route() set domain destination ($du), but Request-URI has IP ($ru), using Request-URI\n");
+                        $du = $ru;
+                    } else {
+                        # Both are domains - try to extract Contact header as fallback
+                        if ($hdr(Contact) != "") {
+                            # Extract Contact URI - might have IP address
+                            $var(contact_uri) = $hdr(Contact);
+                            # Remove angle brackets if present
+                            if ($var(contact_uri) =~ "^<(.+)>$") {
+                                $var(contact_uri) = $re;
+                            }
+                            # Extract domain from Contact
+                            if ($var(contact_uri) =~ "@([^:;>]+)") {
+                                $var(contact_domain) = $re;
+                                if ($var(contact_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                                    # Contact has IP - construct destination from Contact
+                                    $var(contact_user) = $rU;
+                                    if ($var(contact_user) == "") {
+                                        $var(contact_user) = $tU;
+                                    }
+                                    # Extract port from Contact if present
+                                    $var(contact_port) = "";
+                                    if ($var(contact_uri) =~ ":([0-9]+)[;>]") {
+                                        $var(contact_port) = $re;
+                                    }
+                                    if ($var(contact_port) != "") {
+                                        $du = "sip:" + $var(contact_user) + "@" + $var(contact_domain) + ":" + $var(contact_port);
+                                    } else {
+                                        $du = "sip:" + $var(contact_user) + "@" + $var(contact_domain) + ":5060";
+                                    }
+                                    xlog("BYE: Using Contact header IP for destination: $du\n");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         route(RELAY);
         exit;
     }
@@ -821,28 +880,68 @@ route[RELAY] {
     # If transaction doesn't exist (expired), we need to route statelessly
     if (is_method("BYE")) {
         # When loose_route() processes Route headers, it may modify $du
-        # If $du is empty, use Request-URI instead
-        if ($du == "") {
+        # Validate and fix destination URI to prevent 476 "Unresolvable destination" errors
+        if ($du == "" || $du == "0") {
             $du = $ru;
             xlog("RELAY: BYE - Set destination URI from Request-URI: $du (was empty)\n");
+        } else {
+            # Validate $du is a valid SIP URI format
+            if ($du !~ "^sip:") {
+                xlog("L_WARN", "RELAY: BYE - Invalid destination URI format: $du, using Request-URI: $ru\n");
+                $du = $ru;
+            } else {
+                # Check if destination domain is resolvable
+                # If $du contains a domain name (not IP), it might fail DNS resolution
+                $var(dest_domain) = $(du{uri.domain});
+                if ($var(dest_domain) != "" && $var(dest_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Destination is a domain name - might fail DNS
+                    # If Request-URI has an IP address, prefer that
+                    $var(ru_domain) = $rd;
+                    if ($var(ru_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        xlog("L_WARN", "RELAY: BYE - Destination is domain ($du), Request-URI has IP ($ru), using Request-URI to avoid DNS failure\n");
+                        $du = $ru;
+                    }
+                }
+            }
         }
         
-        xlog("RELAY: BYE - Attempting to relay to $du (Request-URI=$ru)\n");
+        xlog("RELAY: BYE - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route))\n");
         
         # Try t_relay() first - it will use transaction state if available
         if (!t_relay()) {
-            # t_relay() failed - transaction might not exist or expired
-            # Try to route statelessly using the destination URI
-            xlog("L_WARN", "RELAY: BYE - t_relay() failed (transaction not found?), trying stateless forward to $du\n");
+            # t_relay() failed - transaction might not exist or expired, or destination unresolvable
+            # Log the error for debugging
+            xlog("L_WARN", "RELAY: BYE - t_relay() failed for destination $du (transaction not found or destination unresolvable?)\n");
             
+            # If t_relay() failed due to unresolvable destination, try using Request-URI
+            if ($du != $ru) {
+                xlog("L_WARN", "RELAY: BYE - Retrying with Request-URI as destination: $ru\n");
+                $du = $ru;
+            }
+            
+            # Try to route statelessly using the destination URI
             # Use forward() for stateless forwarding when transaction doesn't exist
             # This handles BYE even if the INVITE transaction has expired
             if (!forward()) {
-                xlog("L_ERR", "RELAY: BYE - forward() failed, cannot route BYE to $du\n");
-                sl_send_reply(500, "Internal Server Error");
-                exit;
+                xlog("L_ERR", "RELAY: BYE - forward() failed for destination $du, Request-URI=$ru\n");
+                # If forward() also fails, it's likely a DNS resolution issue
+                # Try one more time with Request-URI if different
+                if ($du != $ru) {
+                    $du = $ru;
+                    xlog("L_WARN", "RELAY: BYE - Last attempt with Request-URI: $du\n");
+                    if (!forward()) {
+                        xlog("L_ERR", "RELAY: BYE - All forwarding attempts failed, sending 500 error\n");
+                        sl_send_reply(500, "Internal Server Error");
+                        exit;
+                    }
+                    xlog("RELAY: BYE - Stateless forward succeeded with Request-URI: $du\n");
+                } else {
+                    sl_send_reply(500, "Internal Server Error");
+                    exit;
+                }
+            } else {
+                xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
             }
-            xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
         } else {
             xlog("RELAY: BYE - t_relay() succeeded (transaction found)\n");
         }
