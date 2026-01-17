@@ -257,128 +257,27 @@ route {
     
     # ---- Handle REGISTER to track endpoint locations ----
     if (is_method("REGISTER")) {
-        xlog("REGISTER received from $si, Contact: $hdr(Contact), To: $hdr(To)\n");
-        
-        # Extract endpoint location from Contact header and store in database
-        # This allows us to route OPTIONS from Asterisk back to endpoints
-        # Check if Contact header exists and extract values
         if ($hdr(Contact) != "") {
-            # Extract AoR from To header (user@domain)
-            # OpenSIPS: extract domain from To URI using $(tu{uri.domain})
             $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
-            
-            # Extract IP and port - always use source IP/port for REGISTER (endpoint sends directly)
-            # Contact header extraction is for NAT scenarios, but source is more reliable for REGISTER
-            # Initialize with source IP/port first
             $var(endpoint_ip) = $si;
-            $var(endpoint_port) = $sp;
-            
-            # Ensure port is set (default to 5060 if source port is missing)
-            if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-                $var(endpoint_port) = "5060";
-            }
-            
-            xlog("REGISTER: Initial endpoint values - IP=$var(endpoint_ip), Port=$var(endpoint_port) (from source $si:$sp)\n");
-            
-            # Try to extract from Contact header as fallback (for NAT scenarios)
-            # Use regex to extract IP:port from Contact header string
-            $var(contact_ip) = "";
-            $var(contact_port) = "";
-            
-            # Extract IP address from Contact header (pattern: @IP:port or @IP)
-            # Match IPv4 address after @ symbol
-            # Contact format: <sip:user@IP:port> or sip:user@IP:port
-            if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
-                $var(contact_ip) = $re;
-                xlog("REGISTER: Extracted Contact IP from header: $var(contact_ip) (regex matched)\n");
-                
-                # Extract port if present (pattern: :PORT after the IP)
-                if ($hdr(Contact) =~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:([0-9]+)") {
-                    $var(contact_port) = $re;
-                    xlog("REGISTER: Extracted Contact port from header: $var(contact_port)\n");
-                }
-            } else {
-                xlog("REGISTER: Contact header regex did not match IP pattern: $hdr(Contact)\n");
-            }
-            
-            # For REGISTER, always use source IP/port (endpoint sends directly to OpenSIPS)
-            # Contact header extraction is unreliable (regex $re not working correctly in OpenSIPS)
-            # Source IP/port is the actual connection endpoint, which is what we need
-            # Only use Contact header if we can successfully extract a valid IP that's different
-            # For now, skip Contact header extraction and use source directly
-            $var(endpoint_ip) = $si;
-            $var(endpoint_port) = $sp;
-            if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-                $var(endpoint_port) = "5060";
-            }
-            xlog("REGISTER: Using source IP/port for endpoint: $var(endpoint_ip):$var(endpoint_port)\n");
-            
-            # Final validation - ensure we have valid values
-            if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
-                $var(endpoint_ip) = $si;
-            }
-            if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
+            if ($sp != "" && $sp != "0") {
                 $var(endpoint_port) = $sp;
-                if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-                    $var(endpoint_port) = "5060";
-                }
+            } else {
+                $var(endpoint_port) = "5060";
             }
             
-            # Validate extracted IP and port before storing
-            if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
-                xlog("L_ERR", "Failed to extract IP - source IP=$si, Contact: $hdr(Contact), endpoint_ip=$var(endpoint_ip)\n");
-            } else if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-                xlog("L_ERR", "Failed to extract port - source port=$sp, endpoint_port=$var(endpoint_port)\n");
+            fix_nated_register();
+            if ($hdr(Expires) != "" && $hdr(Expires) != "0") {
+                $var(expires_int) = $hdr(Expires);
             } else {
-                # Fix NAT in REGISTER Contact header before storing
-                # This ensures we track the correct public IP for NAT traversal
-                fix_nated_register();
-                # Get expires from Expires header or Contact header
-                $var(expires) = $hdr(Expires);
-                if ($var(expires) == "") {
-                    $var(expires) = "3600";  # Default 1 hour
-                }
-                
-                # Ensure expires is a valid integer
-                $var(expires_int) = $var(expires);
-                if ($var(expires_int) == "" || $var(expires_int) == "0") {
-                    $var(expires_int) = "3600";
-                }
-                
-                # Use extracted endpoint IP/port (from Contact header if NAT, otherwise source)
-                $var(final_ip) = $var(endpoint_ip);
-                $var(final_port) = $var(endpoint_port);
-                if ($var(final_port) == "" || $var(final_port) == "0") {
-                    $var(final_port) = "5060";
-                }
-                
-                # Extract Contact URI format for Request-URI matching
-                # Construct Contact URI from known values: user@IP:port
-                # This provides a consistent format for Request-URI matching
-                # Note: This doesn't include URI parameters like 'line' from the Contact header
-                # Some endpoints (e.g., Snom) may require "support broken registrar" enabled if they
-                # need exact Contact URI matching including parameters
-                # Example: sip:1000@192.168.1.138:42714
-                $var(contact_uri) = "sip:" + $tU + "@" + $var(final_ip) + ":" + $var(final_port);
-                xlog("REGISTER: Constructed Contact URI: $var(contact_uri) (from user=$tU, IP=$var(final_ip), port=$var(final_port))\n");
-                
-                xlog("Extracted endpoint info: AoR=$var(endpoint_aor), IP=$var(final_ip), Port=$var(final_port), Contact-URI=$var(contact_uri), Expires=$var(expires_int)\n");
-                
-                # Store/update endpoint location in database
-                # Calculate expiration time: current time + expires seconds
-                # Use MySQL syntax: DATE_ADD(NOW(), INTERVAL N SECOND)
-                # Store contact_uri to ensure Request-URI matches Contact URI from REGISTER
-                # Note: sql_query() returns false for INSERT statements (no rows returned),
-                # but the INSERT still succeeds. We execute it and log the attempt.
-                $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, contact_uri, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(final_ip) + "', '" + $var(final_port) + "', '" + $var(contact_uri) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(final_ip) + "', contact_port='" + $var(final_port) + "', contact_uri='" + $var(contact_uri) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
-                # Execute INSERT - return value is false for INSERT (no rows), but query succeeds
-                sql_query($var(query), "$avp(reg_result)");
-                xlog("Stored endpoint location: $var(endpoint_aor) -> $var(final_ip):$var(final_port), Contact-URI=$var(contact_uri) (expires in $var(expires_int) seconds)\n");
+                $var(expires_int) = "3600";
             }
-        } else {
-            xlog("L_WARN", "REGISTER without Contact header - cannot track endpoint location\n");
+            $var(contact_uri) = "sip:" + $tU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+            
+            $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, contact_uri, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(endpoint_ip) + "', '" + $var(endpoint_port) + "', '" + $var(contact_uri) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(endpoint_ip) + "', contact_port='" + $var(endpoint_port) + "', contact_uri='" + $var(contact_uri) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
+            sql_query($var(query), "$avp(reg_result)");
+            xlog("REGISTER: Stored endpoint $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires $var(expires_int)s)\n");
         }
-        # Continue to DOMAIN_CHECK to forward REGISTER to Asterisk
     }
 
     route(DOMAIN_CHECK);
@@ -639,103 +538,60 @@ route[WITHINDLG] {
 #       # Use $var(endpoint_ip), $var(endpoint_port), $var(endpoint_aor)
 #   }
 route[ENDPOINT_LOOKUP] {
-    xlog("ENDPOINT_LOOKUP: Looking up user=$var(lookup_user), AoR=$var(lookup_aor)\n");
-    
-    # Initialize output variables
     $var(endpoint_ip) = "";
     $var(endpoint_port) = "";
     $var(endpoint_aor) = "";
+    $var(contact_uri) = "";
     $var(lookup_success) = 0;
     
-    # Validate input - check for empty, null, or <null> string
     if ($var(lookup_user) == "" || $var(lookup_user) == "0" || $var(lookup_user) == "<null>") {
-        xlog("L_ERR", "ENDPOINT_LOOKUP: lookup_user is empty/null: '$var(lookup_user)'\n");
-        $var(lookup_success) = 0;
         return;
     }
     
-    # First try exact AoR match (if AoR provided and not empty)
+    # Try exact AoR match first (if provided)
     if ($var(lookup_aor) != "") {
-        xlog("ENDPOINT_LOOKUP: Trying exact AoR match for $var(lookup_aor)\n");
         $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-        if (sql_query($var(query), "$avp(endpoint_ip)")) {
-            if ($(avp(endpoint_ip)[0]) != "") {
-                $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                # Get the port
-                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-                if (sql_query($var(query), "$avp(endpoint_port)")) {
-                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                }
-                # Get the contact_uri (stored Contact URI format for Request-URI matching)
-                $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-                if (sql_query($var(query), "$avp(contact_uri)")) {
-                    $var(contact_uri) = $(avp(contact_uri)[0]);
-                }
-                $var(endpoint_aor) = $var(lookup_aor);
-                xlog("ENDPOINT_LOOKUP: Exact match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
+        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
+            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
+            if (sql_query($var(query), "$avp(endpoint_port)")) {
+                $var(endpoint_port) = $(avp(endpoint_port)[0]);
             }
+            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
+            if (sql_query($var(query), "$avp(contact_uri)")) {
+                $var(contact_uri) = $(avp(contact_uri)[0]);
+            }
+            $var(endpoint_aor) = $var(lookup_aor);
         }
     }
     
-    # Fallback: try username-only lookup (if exact match failed or wasn't attempted)
+    # Fallback: username-only lookup
     if ($var(endpoint_ip) == "") {
-        xlog("ENDPOINT_LOOKUP: Trying username-only match for $var(lookup_user)\n");
         $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-        xlog("ENDPOINT_LOOKUP: Executing query: $var(query)\n");
-        $var(query_result) = sql_query($var(query), "$avp(endpoint_ip)");
-        xlog("ENDPOINT_LOOKUP: sql_query() returned: $var(query_result)\n");
-        if ($var(query_result)) {
-            xlog("ENDPOINT_LOOKUP: Query succeeded, checking result\n");
-            $var(result_value) = $(avp(endpoint_ip)[0]);
-            xlog("ENDPOINT_LOOKUP: AVP result[0] = '$var(result_value)'\n");
-            if ($var(result_value) != "") {
-                $var(endpoint_ip) = $var(result_value);
-                xlog("ENDPOINT_LOOKUP: Found IP=$var(endpoint_ip), getting port\n");
-                # Get the port
-                $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-                if (sql_query($var(query), "$avp(endpoint_port)")) {
-                    $var(endpoint_port) = $(avp(endpoint_port)[0]);
-                }
-                # Get the full AoR
-                $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-                if (sql_query($var(query), "$avp(endpoint_aor)")) {
-                    $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
-                }
-                # Get the contact_uri (stored Contact URI format for Request-URI matching)
-                $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-                if (sql_query($var(query), "$avp(contact_uri)")) {
-                    $var(contact_uri) = $(avp(contact_uri)[0]);
-                }
-                xlog("ENDPOINT_LOOKUP: Username match found - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
-                xlog("ENDPOINT_LOOKUP: Continuing after username match...\n");
-            } else {
-                xlog("ENDPOINT_LOOKUP: Query returned empty result (result_value is empty)\n");
+        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
+            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
+            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
+            if (sql_query($var(query), "$avp(endpoint_port)")) {
+                $var(endpoint_port) = $(avp(endpoint_port)[0]);
             }
-        } else {
-            xlog("L_ERR", "ENDPOINT_LOOKUP: SQL query returned false for username=$var(lookup_user)\n");
+            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
+            if (sql_query($var(query), "$avp(contact_uri)")) {
+                $var(contact_uri) = $(avp(contact_uri)[0]);
+            }
+            $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
+            if (sql_query($var(query), "$avp(endpoint_aor)")) {
+                $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
+            }
         }
     }
     
-    # Validate and set defaults
-    xlog("ENDPOINT_LOOKUP: After lookup, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)', endpoint_aor='$var(endpoint_aor)', contact_uri='$var(contact_uri)'\n");
     if ($var(endpoint_ip) != "") {
-        xlog("ENDPOINT_LOOKUP: IP found, calling VALIDATE_ENDPOINT\n");
         route(VALIDATE_ENDPOINT);
-        xlog("ENDPOINT_LOOKUP: After VALIDATE_ENDPOINT, endpoint_ip='$var(endpoint_ip)', endpoint_port='$var(endpoint_port)'\n");
-        # Ensure contact_uri is set (fallback to AoR format if not stored)
         if ($var(contact_uri) == "" && $var(endpoint_aor) != "") {
             $var(contact_uri) = "sip:" + $var(endpoint_aor);
-            xlog("ENDPOINT_LOOKUP: contact_uri not stored, using fallback: $var(contact_uri)\n");
         }
         $var(lookup_success) = 1;
-        xlog("ENDPOINT_LOOKUP: Success - IP=$var(endpoint_ip), Port=$var(endpoint_port), AoR=$var(endpoint_aor), Contact-URI=$var(contact_uri)\n");
-    } else {
-        xlog("ENDPOINT_LOOKUP: Failed - no endpoint found for user=$var(lookup_user)\n");
-        $var(lookup_success) = 0;
     }
-    
-    xlog("ENDPOINT_LOOKUP: Returning with lookup_success=$var(lookup_success)\n");
-    # Helper route returns normally to allow caller to continue processing
     return;
 }
 
@@ -830,16 +686,26 @@ route[BUILD_ENDPOINT_URI] {
 # Check if IP address is private (RFC 1918)
 # Input: $var(check_ip) - IP address to check
 # Output: $var(is_private) - 1 if private, 0 if public
+# Covers all RFC 1918 private IP ranges:
+#   Class A: 10.0.0.0 - 10.255.255.255
+#   Class B: 172.16.0.0 - 172.31.255.255
+#   Class C: 192.168.0.0 - 192.168.255.255
 route[CHECK_PRIVATE_IP] {
     $var(is_private) = 0;
+    # Class C: 192.168.0.0 - 192.168.255.255
     if ($var(check_ip) =~ "^192\\.168\\.") {
         $var(is_private) = 1;
+    # Class A: 10.0.0.0 - 10.255.255.255
     } else if ($var(check_ip) =~ "^10\\.") {
         $var(is_private) = 1;
+    # Class B: 172.16.0.0 - 172.31.255.255
+    # 172.16-19
     } else if ($var(check_ip) =~ "^172\\.1[6-9]\\.") {
         $var(is_private) = 1;
+    # 172.20-29
     } else if ($var(check_ip) =~ "^172\\.2[0-9]\\.") {
         $var(is_private) = 1;
+    # 172.30-31
     } else if ($var(check_ip) =~ "^172\\.3[01]\\.") {
         $var(is_private) = 1;
     }
@@ -854,82 +720,36 @@ route[RELAY] {
         xlog("RELAY: Added Record-Route for INVITE to $du, Call-ID=$hdr(Call-ID)\n");
     }
     
-    # For ACKs, PRACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database (handles NAT correctly)
-    # Only do this if the Request-URI contains a private IP address (endpoint behind NAT)
-    # Public IPs or domains (Asterisk) should not be modified
-    # NOTIFY needs this because Asterisk sends NOTIFY with private IP in Request-URI after SUBSCRIBE
-    # PRACK needs this for 100rel support when endpoints are behind NAT
-    # ACK should NOT use this logic - ACKs to Asterisk should use Request-URI directly
+    # For ACKs, PRACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database
+    # Only applies if Request-URI contains private IP (endpoint behind NAT)
+    # ACK/PRACK: Only if Request-URI has username (ACKs to Asterisk have no username)
+    # BYE/NOTIFY: Always check if private IP
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
-        # For ACK/PRACK, skip NAT fix if Request-URI doesn't have username or is not private IP
-        # ACKs to Asterisk (public IP) should not go through NAT fix logic
+        $var(needs_nat_fix) = 0;
+        
+        # For ACK/PRACK, require username in Request-URI (ACKs to Asterisk have no username)
         if (is_method("ACK|PRACK")) {
-            # For ACK/PRACK, only apply NAT fix if:
-            # 1. Request-URI has a username (not ACK to Asterisk)
-            # 2. Request-URI domain is a private IP (endpoint behind NAT)
-            # This ensures:
-            # - ACKs to Asterisk (no username) skip NAT fix
-            # - ACKs to endpoints behind NAT (username + private IP) get NAT fix
-            # - ACKs to public endpoints (username + public IP) skip NAT fix
-            
-            # Check if Request-URI has a username
-            # In OpenSIPS 3.x, is_user() is obsolete, so we check if Request-URI contains @ with non-empty username
-            # Pattern: sip:user@domain (has username) vs sip:domain or sip:@domain (no username)
             if ($ru =~ "^sip:[^@]+@") {
-                # Has username - check if it's a private IP (endpoint behind NAT)
-                $var(check_ip) = $rd;
-                route(CHECK_PRIVATE_IP);
-                
-                if ($var(is_private) == 1) {
-                    # Request-URI contains private IP with username - endpoint behind NAT, need NAT fix
-                    $var(msg_user) = $rU;
-                    # Use existing ENDPOINT_LOOKUP helper route
-                    $var(lookup_user) = $var(msg_user);
-                    $var(lookup_aor) = "";  # Username-only lookup
-                    route(ENDPOINT_LOOKUP);
-                    
-                    if ($var(lookup_success) == 1 && $var(endpoint_ip) != "" && $var(endpoint_ip) != "0" && $var(endpoint_ip) != "<null>") {
-                        # Set destination URI to use NAT IP from database
-                        $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
-                    } else {
-                        # Endpoint lookup failed or invalid - don't modify, use Request-URI
-                        xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed or invalid, using original Request-URI (was $ru)\n");
-                    }
-                } else {
-                    # Request-URI has username but public IP - skip NAT fix (public endpoint)
-                    xlog("RELAY: $rm - Request-URI has username but public IP ($var(check_ip)), skipping NAT fix\n");
-                }
-            } else {
-                # No username - skip NAT fix (ACK to Asterisk)
-                xlog("RELAY: $rm - Request-URI has no username, skipping NAT fix logic (Request-URI=$ru)\n");
+                $var(needs_nat_fix) = 1;
             }
         } else {
-            # For BYE and NOTIFY, use original NAT fix logic
-            # Check if Request-URI domain is a private IP address (endpoint behind NAT)
+            # BYE/NOTIFY: always check
+            $var(needs_nat_fix) = 1;
+        }
+        
+        if ($var(needs_nat_fix) == 1) {
             $var(check_ip) = $rd;
             route(CHECK_PRIVATE_IP);
             
-            if ($var(is_private) == 1) {
-                # Request-URI contains private IP - this is an endpoint behind NAT, need to fix to public NAT IP
-                $var(msg_user) = $rU;
-                if ($var(msg_user) != "") {
-                    # Use existing ENDPOINT_LOOKUP helper route instead of duplicating database queries
-                    $var(lookup_user) = $var(msg_user);
-                    $var(lookup_aor) = "";  # Username-only lookup
-                    route(ENDPOINT_LOOKUP);
-                    
-                    if ($var(lookup_success) == 1) {
-                        # Set destination URI to use NAT IP from database
-                        $du = "sip:" + $var(msg_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP: $du (from database, user=$var(msg_user), was $ru)\n");
-                    } else {
-                        xlog("L_WARN", "RELAY: $rm - Endpoint lookup failed for user=$var(msg_user), using original Request-URI\n");
-                    }
+            if ($var(is_private) == 1 && $rU != "") {
+                $var(lookup_user) = $rU;
+                $var(lookup_aor) = "";
+                route(ENDPOINT_LOOKUP);
+                
+                if ($var(lookup_success) == 1 && $var(endpoint_ip) != "" && $var(endpoint_ip) != "0" && $var(endpoint_ip) != "<null>") {
+                    $du = "sip:" + $rU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
+                    xlog("RELAY: $rm - Updated destination to NAT IP: $du (was $ru)\n");
                 }
-            } else {
-                # Request-URI contains public IP or domain (Asterisk) - don't modify, let t_relay() use transaction state
-                xlog("RELAY: $rm - Request-URI has public IP/domain ($var(check_ip)), not modifying destination\n");
             }
         }
     }
@@ -975,74 +795,20 @@ route[RELAY] {
             xlog("RELAY: $rm - t_relay() succeeded (transaction found)\n");
         }
     } else if (is_method("BYE")) {
-        # For BYE requests, handle transaction lookup failure gracefully
-        # BYE requests need special handling because t_relay() requires transaction state
-        # If transaction doesn't exist (expired), we need to route statelessly
-        # When loose_route() processes Route headers, it may modify $du
-        # Validate and fix destination URI to prevent 476 "Unresolvable destination" errors
-        if ($du == "" || $du == "0") {
+        # Validate destination URI - prefer Request-URI if $du is invalid or domain (not IP)
+        if ($du == "" || $du == "0" || $du !~ "^sip:") {
             $du = $ru;
-            xlog("RELAY: BYE - Set destination URI from Request-URI: $du (was empty)\n");
         } else {
-            # Validate $du is a valid SIP URI format
-            if ($du !~ "^sip:") {
-                xlog("L_WARN", "RELAY: BYE - Invalid destination URI format: $du, using Request-URI: $ru\n");
-                $du = $ru;
-            } else {
-                # Check if destination domain is resolvable
-                # If $du contains a domain name (not IP), it might fail DNS resolution
-                $var(dest_domain) = $(du{uri.domain});
-                if ($var(dest_domain) != "" && $var(dest_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                    # Destination is a domain name - might fail DNS
-                    # If Request-URI has an IP address, prefer that
-                    $var(ru_domain) = $rd;
-                    if ($var(ru_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        xlog("L_WARN", "RELAY: BYE - Destination is domain ($du), Request-URI has IP ($ru), using Request-URI to avoid DNS failure\n");
-                        $du = $ru;
-                    }
-                }
+            $var(dest_domain) = $(du{uri.domain});
+            if ($var(dest_domain) != "" && $var(dest_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $rd =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                $du = $ru;  # Prefer Request-URI IP over domain to avoid DNS issues
             }
         }
         
-        xlog("RELAY: BYE - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route))\n");
-        
-        # Try t_relay() first - it will use transaction state if available
-        if (!t_relay()) {
-            # t_relay() failed - transaction might not exist or expired, or destination unresolvable
-            # Log the error for debugging
-            xlog("L_WARN", "RELAY: BYE - t_relay() failed for destination $du (transaction not found or destination unresolvable?)\n");
-            
-            # If t_relay() failed due to unresolvable destination, try using Request-URI
-            if ($du != $ru) {
-                xlog("L_WARN", "RELAY: BYE - Retrying with Request-URI as destination: $ru\n");
-                $du = $ru;
-            }
-            
-            # Try to route statelessly using the destination URI
-            # Use forward() for stateless forwarding when transaction doesn't exist
-            # This handles BYE even if the INVITE transaction has expired
-            if (!forward()) {
-                xlog("L_ERR", "RELAY: BYE - forward() failed for destination $du, Request-URI=$ru\n");
-                # If forward() also fails, it's likely a DNS resolution issue
-                # Try one more time with Request-URI if different
-                if ($du != $ru) {
-                    $du = $ru;
-                    xlog("L_WARN", "RELAY: BYE - Last attempt with Request-URI: $du\n");
-                    if (!forward()) {
-                        xlog("L_ERR", "RELAY: BYE - All forwarding attempts failed, sending 500 error\n");
-                        sl_send_reply(500, "Internal Server Error");
-                        exit;
-                    }
-                    xlog("RELAY: BYE - Stateless forward succeeded with Request-URI: $du\n");
-                } else {
-                    sl_send_reply(500, "Internal Server Error");
-                    exit;
-                }
-            } else {
-                xlog("RELAY: BYE - Stateless forward succeeded to $du\n");
-            }
-        } else {
-            xlog("RELAY: BYE - t_relay() succeeded (transaction found)\n");
+        # Try t_relay() first, fallback to stateless forward if transaction expired
+        if (!t_relay() && !forward()) {
+            sl_send_reply(500, "Internal Server Error");
+            exit;
         }
     } else {
         # For other methods, use standard t_relay()
