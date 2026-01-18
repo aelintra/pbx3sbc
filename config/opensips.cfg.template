@@ -73,14 +73,21 @@ modparam("dispatcher", "options_reply_codes", "200")
 
 # --- Dialog module (required for CDR mode) ---
 modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
-modparam("dialog", "db_mode", 0)
-# db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 0 for in-memory only)
+modparam("dialog", "db_mode", 2)
+# db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 2 for cached DB - better for CDR correlation)
 
 # --- Accounting (CDR) ---
 modparam("acc", "db_url", "mysql://opensips:your-password@localhost/opensips")
 modparam("acc", "early_media", 0)
 modparam("acc", "report_cancels", 1)
 modparam("acc", "detect_direction", 1)
+# Extra fields for billing: capture From and To SIP URIs
+# Format: backend:tag->column_name;tag->column_name
+# $fu = From URI, $tu = To URI
+# This modparam tells the acc module which extra columns exist in the database
+modparam("acc", "extra_fields", "db:from_uri->from_uri;to_uri->to_uri")
+# Note: from_uri and to_uri columns are added to acc table via init-database.sh
+# These are populated via $acc_extra() in the script (see INVITE handling)
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -404,15 +411,18 @@ route[TO_DISPATCHER] {
     # The transaction module should handle this automatically, but log it
     if (is_method("INVITE")) {
         xlog("INVITE transaction created, waiting for response from $du\n");
-        # Enable dialog tracking for CDR mode
-        # dlg_manage() creates/updates dialog state for CDR correlation
-        dlg_manage();
+        # Set extra fields for billing: From and To SIP URIs
+        # These will be stored in from_uri and to_uri columns in acc table
+        $acc_extra(from_uri) = $fu;
+        $acc_extra(to_uri) = $tu;
         # Enable CDR accounting for INVITE transactions (database backend)
         # do_accounting("db", "cdr") enables CDR mode which:
+        # - Automatically creates dialog tracking (requires dialog module loaded)
         # - Tracks dialog from INVITE to BYE
         # - Calculates duration automatically
         # - Populates created timestamp
         # - Correlates INVITE and BYE into single CDR
+        # - Includes extra fields (from_uri, to_uri) for billing
         do_accounting("db", "cdr");
     }
     exit;
@@ -750,14 +760,11 @@ route[RELAY] {
     # ACK/PRACK: Only if Request-URI has username (ACKs to Asterisk have no username)
     # BYE/NOTIFY: Always check if private IP
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
-        # Update dialog state for in-dialog requests
-        # dlg_manage() updates dialog state for ACK, BYE, etc.
-        if (is_method("ACK|BYE")) {
-            dlg_manage();
-        }
         # Note: With CDR mode enabled on INVITE, we don't need do_accounting() for BYE
-        # The acc module will automatically correlate BYE with the INVITE and update the CDR
-        # with duration and termination information
+        # The acc module with dialog module will automatically:
+        # - Track dialog state for ACK, BYE, etc.
+        # - Correlate BYE with the INVITE and update the CDR
+        # - Calculate duration and termination information
         
         $var(needs_nat_fix) = 0;
         
@@ -845,13 +852,30 @@ route[RELAY] {
             exit;
         }
     } else {
-        # For other methods, use standard t_relay()
+        # For other methods (including INVITE), use standard t_relay()
         if (!t_relay()) {
             # Use sl_send_reply() since we're in request route, not reply route
             sl_send_reply(500, "Internal Server Error");
         } else {
             if (is_method("NOTIFY|OPTIONS")) {
                 xlog("RELAY: Transaction created successfully for $rm, Call-ID=$hdr(Call-ID)\n");
+            }
+            # For INVITE, enable CDR accounting (same as TO_DISPATCHER route)
+            if (is_method("INVITE")) {
+                xlog("RELAY: INVITE transaction created, waiting for response from $du\n");
+                # Set extra fields for billing: From and To SIP URIs
+                # These will be stored in from_uri and to_uri columns in acc table
+                $acc_extra(from_uri) = $fu;
+                $acc_extra(to_uri) = $tu;
+                # Enable CDR accounting for INVITE transactions (database backend)
+                # do_accounting("db", "cdr") enables CDR mode which:
+                # - Automatically creates dialog tracking (requires dialog module loaded)
+                # - Tracks dialog from INVITE to BYE
+                # - Calculates duration automatically
+                # - Populates created timestamp
+                # - Correlates INVITE and BYE into single CDR
+                # - Includes extra fields (from_uri, to_uri) for billing
+                do_accounting("db", "cdr");
             }
         }
     }
