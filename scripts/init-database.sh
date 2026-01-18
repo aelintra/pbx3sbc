@@ -31,6 +31,8 @@ fi
 # Required schema files
 SCHEMA_FILES=(
     "standard-create.sql"
+    "acc-create.sql"
+    "dialog-create.sql"
     "dispatcher-create.sql"
     "domain-create.sql"
 )
@@ -45,19 +47,64 @@ for schema_file in "${SCHEMA_FILES[@]}"; do
 done
 
 # Load core schema (standard-create.sql) - includes version table
+# Idempotent: version table uses CREATE TABLE IF NOT EXISTS
 echo "Loading core OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql"
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1 | grep -v "already exists" || true
 echo "Core schema loaded successfully."
 
+# Load accounting schema (acc, missed_calls tables)
+# Idempotent: check if table exists before loading
+echo "Loading accounting schema from ${SCHEMA_DIR}/acc-create.sql..."
+if [[ -f "${SCHEMA_DIR}/acc-create.sql" ]]; then
+    # Check if acc table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'acc';" 2>/dev/null | grep -q "acc"; then
+        echo "  ✓ acc table already exists - skipping schema load (idempotent)"
+    else
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/acc-create.sql"
+        echo "  ✓ Accounting schema loaded successfully."
+    fi
+else
+    echo "Warning: acc-create.sql not found - accounting tables will not be created"
+    echo "  You may need to install opensips-mysql-module or create acc table manually"
+fi
+
+# Load dialog schema (for CDR mode - optional, dialog can work in-memory only)
+# Idempotent: check if table exists before loading
+echo "Loading dialog schema from ${SCHEMA_DIR}/dialog-create.sql..."
+if [[ -f "${SCHEMA_DIR}/dialog-create.sql" ]]; then
+    # Check if dialog table already exists
+    if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'dialog';" 2>/dev/null | grep -q "dialog"; then
+        echo "  ✓ dialog table already exists - skipping schema load (idempotent)"
+    else
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dialog-create.sql"
+        echo "  ✓ Dialog schema loaded successfully."
+    fi
+else
+    echo "Warning: dialog-create.sql not found - dialog table will not be created"
+    echo "  Dialog module can work in-memory only (db_mode=0), so this is optional"
+fi
+
 # Load dispatcher schema
+# Idempotent: check if table exists before loading
 echo "Loading dispatcher schema from ${SCHEMA_DIR}/dispatcher-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql"
-echo "Dispatcher schema loaded successfully."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'dispatcher';" 2>/dev/null | grep -q "dispatcher"; then
+    echo "  ✓ dispatcher table already exists - skipping schema load (idempotent)"
+    echo "  Existing dispatcher entries are preserved"
+else
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/dispatcher-create.sql"
+    echo "  ✓ Dispatcher schema loaded successfully."
+fi
 
 # Load domain schema
+# Idempotent: check if table exists before loading
 echo "Loading domain schema from ${SCHEMA_DIR}/domain-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql"
-echo "Domain schema loaded successfully."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'domain';" 2>/dev/null | grep -q "domain"; then
+    echo "  ✓ domain table already exists - skipping schema load (idempotent)"
+    echo "  Existing domain entries are preserved"
+else
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql"
+    echo "  ✓ Domain schema loaded successfully."
+fi
 
 # Create custom endpoint_locations table (MySQL syntax)
 echo "Creating custom endpoint_locations table..."

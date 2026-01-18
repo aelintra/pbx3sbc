@@ -50,6 +50,10 @@ loadmodule "dispatcher.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
+# Dialog module for CDR (Call Detail Records) - must be loaded before acc module
+loadmodule "dialog.so"
+# Accounting module for CDR (Call Detail Records)
+loadmodule "acc.so"
 
 ####### Module Parameters ########
 
@@ -66,6 +70,17 @@ modparam("dispatcher", "ds_probing_threshold", 2)
 # Note: ds_inactive_threshold doesn't exist in OpenSIPS dispatcher module
 # Note: ds_ping_reply_codes is called options_reply_codes in OpenSIPS
 modparam("dispatcher", "options_reply_codes", "200")
+
+# --- Dialog module (required for CDR mode) ---
+modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
+modparam("dialog", "db_mode", 0)
+# db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 0 for in-memory only)
+
+# --- Accounting (CDR) ---
+modparam("acc", "db_url", "mysql://opensips:your-password@localhost/opensips")
+modparam("acc", "early_media", 0)
+modparam("acc", "report_cancels", 1)
+modparam("acc", "detect_direction", 1)
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -389,6 +404,16 @@ route[TO_DISPATCHER] {
     # The transaction module should handle this automatically, but log it
     if (is_method("INVITE")) {
         xlog("INVITE transaction created, waiting for response from $du\n");
+        # Enable dialog tracking for CDR mode
+        # dlg_manage() creates/updates dialog state for CDR correlation
+        dlg_manage();
+        # Enable CDR accounting for INVITE transactions (database backend)
+        # do_accounting("db", "cdr") enables CDR mode which:
+        # - Tracks dialog from INVITE to BYE
+        # - Calculates duration automatically
+        # - Populates created timestamp
+        # - Correlates INVITE and BYE into single CDR
+        do_accounting("db", "cdr");
     }
     exit;
 }
@@ -725,6 +750,15 @@ route[RELAY] {
     # ACK/PRACK: Only if Request-URI has username (ACKs to Asterisk have no username)
     # BYE/NOTIFY: Always check if private IP
     if (is_method("ACK|PRACK|BYE|NOTIFY")) {
+        # Update dialog state for in-dialog requests
+        # dlg_manage() updates dialog state for ACK, BYE, etc.
+        if (is_method("ACK|BYE")) {
+            dlg_manage();
+        }
+        # Note: With CDR mode enabled on INVITE, we don't need do_accounting() for BYE
+        # The acc module will automatically correlate BYE with the INVITE and update the CDR
+        # with duration and termination information
+        
         $var(needs_nat_fix) = 0;
         
         # For ACK/PRACK, require username in Request-URI (ACKs to Asterisk have no username)
