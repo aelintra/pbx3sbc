@@ -75,6 +75,9 @@ modparam("dispatcher", "options_reply_codes", "200")
 modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
 modparam("dialog", "db_mode", 2)
 # db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 2 for cached DB - better for CDR correlation)
+# db_update_period: How often to flush cached dialogs to DB (seconds, default 60)
+# Set to lower value for more frequent writes (useful for monitoring)
+modparam("dialog", "db_update_period", 10)
 
 # --- Accounting (CDR) ---
 modparam("acc", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -398,6 +401,24 @@ route[TO_DISPATCHER] {
     # Arm failure route to handle transaction failures
     t_on_failure("1");
 
+    # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
+    # This is required for proper dialog tracking and database persistence
+    if (is_method("INVITE") && !has_totag()) {
+        xlog("Initial INVITE detected, creating dialog for Call-ID=$hdr(Call-ID)\n");
+        # Create dialog for database persistence (required for Prometheus/Grafana monitoring)
+        # With db_mode=2, dialog will be cached in memory and written to database periodically
+        # Must be called before t_relay() for proper dialog tracking
+        if (!create_dialog()) {
+            xlog("L_WARN", "create_dialog() failed for INVITE Call-ID=$hdr(Call-ID)\n");
+        } else {
+            xlog("Dialog created successfully for Call-ID=$hdr(Call-ID)\n");
+        }
+        # Set extra fields for billing: From and To SIP URIs
+        # These will be stored in from_uri and to_uri columns in acc table
+        $acc_extra(from_uri) = $fu;
+        $acc_extra(to_uri) = $tu;
+    }
+
     # OpenSIPS transaction handling for reliable INVITE transaction management
     if (!t_relay()) {
         xlog("L_ERR", "t_relay() failed for $du method=$rm Request-URI=$ru\n");
@@ -407,17 +428,11 @@ route[TO_DISPATCHER] {
     }
 
     xlog("t_relay() succeeded for $du method=$rm, transaction created\n");
-    # For INVITE, ensure transaction stays active
-    # The transaction module should handle this automatically, but log it
-    if (is_method("INVITE")) {
-        xlog("INVITE transaction created, waiting for response from $du\n");
-        # Set extra fields for billing: From and To SIP URIs
-        # These will be stored in from_uri and to_uri columns in acc table
-        $acc_extra(from_uri) = $fu;
-        $acc_extra(to_uri) = $tu;
+    # For INVITE, enable CDR accounting after t_relay() succeeds
+    if (is_method("INVITE") && !has_totag()) {
         # Enable CDR accounting for INVITE transactions (database backend)
         # do_accounting("db", "cdr") enables CDR mode which:
-        # - Automatically creates dialog tracking (requires dialog module loaded)
+        # - Uses dialog tracking (requires dialog module loaded and create_dialog() called)
         # - Tracks dialog from INVITE to BYE
         # - Calculates duration automatically
         # - Populates created timestamp
@@ -753,6 +768,24 @@ route[RELAY] {
     if (is_method("INVITE")) {
         record_route();
         xlog("RELAY: Added Record-Route for INVITE to $du, Call-ID=$hdr(Call-ID)\n");
+        
+        # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
+        # This is required for proper dialog tracking and database persistence
+        if (!has_totag()) {
+            xlog("RELAY: Initial INVITE detected, creating dialog for Call-ID=$hdr(Call-ID)\n");
+            # Create dialog for database persistence (required for Prometheus/Grafana monitoring)
+            # With db_mode=2, dialog will be cached in memory and written to database periodically
+            # Must be called before t_relay() for proper dialog tracking
+            if (!create_dialog()) {
+                xlog("L_WARN", "RELAY: create_dialog() failed for INVITE Call-ID=$hdr(Call-ID)\n");
+            } else {
+                xlog("RELAY: Dialog created successfully for Call-ID=$hdr(Call-ID)\n");
+            }
+            # Set extra fields for billing: From and To SIP URIs
+            # These will be stored in from_uri and to_uri columns in acc table
+            $acc_extra(from_uri) = $fu;
+            $acc_extra(to_uri) = $tu;
+        }
     }
     
     # For ACKs, PRACKs, BYEs, and NOTIFYs, fix destination URI to use NAT IP from endpoint database
@@ -860,16 +893,11 @@ route[RELAY] {
             if (is_method("NOTIFY|OPTIONS")) {
                 xlog("RELAY: Transaction created successfully for $rm, Call-ID=$hdr(Call-ID)\n");
             }
-            # For INVITE, enable CDR accounting (same as TO_DISPATCHER route)
-            if (is_method("INVITE")) {
-                xlog("RELAY: INVITE transaction created, waiting for response from $du\n");
-                # Set extra fields for billing: From and To SIP URIs
-                # These will be stored in from_uri and to_uri columns in acc table
-                $acc_extra(from_uri) = $fu;
-                $acc_extra(to_uri) = $tu;
+            # For initial INVITE, enable CDR accounting after t_relay() succeeds
+            if (is_method("INVITE") && !has_totag()) {
                 # Enable CDR accounting for INVITE transactions (database backend)
                 # do_accounting("db", "cdr") enables CDR mode which:
-                # - Automatically creates dialog tracking (requires dialog module loaded)
+                # - Uses dialog tracking (requires dialog module loaded and create_dialog() called)
                 # - Tracks dialog from INVITE to BYE
                 # - Calculates duration automatically
                 # - Populates created timestamp
