@@ -23,6 +23,7 @@ See [03-Install_notes.md](03-Install_notes.md) for detailed installation instruc
 
 ## Documentation
 
+- **[Project Context](docs/PROJECT-CONTEXT.md)** - Quick start guide for understanding the project (start here!)
 - [Installation Guide](03-Install_notes.md) - Complete installation instructions
 - [Testing Guide](docs/TESTING.md) - How to test the installation
 

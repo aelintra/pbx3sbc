@@ -23,6 +23,7 @@ See [Installation Guide](03-Install_notes.md) for details.
 
 ## Documentation
 
+- **[Project Context](PROJECT-CONTEXT.md)** - ⭐ **Start here!** Quick guide to understand the project architecture, key decisions, and current state
 - **[Installation Guide](03-Install_notes.md)** - Step-by-step installation instructions
 - **[Quick Start Guide](02-QUICKSTART.md)** - Quick reference for common tasks
 - **[User Guide](USER-GUIDE.md)** - Control Panel User Guide (Domain Management, Dispatcher, etc.)
