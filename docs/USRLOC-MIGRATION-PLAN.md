@@ -688,20 +688,21 @@ if ($var(domain) != "") {
 
 **Note:** `lookup("location")` automatically sets `$du` from Contact header, so manual parsing may not be needed in most cases.
 
-#### ⚠️ OpenSIPS Version Specifics - **RESOLVE IN DAY 1**
+#### ✅ OpenSIPS Version Specifics - **RESOLVED**
 
 **Gap:** Need to verify exact OpenSIPS version in use and corresponding `usrloc` module capabilities.
 
-**Questions:**
-- What version of OpenSIPS is deployed?
-- What version of `usrloc` module is available?
-- Are there version-specific differences in API?
+**Version Confirmed:**
+- ✅ **OpenSIPS 3.6.3** (x86_64/linux) - Confirmed via `opensips -V`
+- ✅ Location table schema reference matches: `dbsource/opensips-3.6.3-sqlite3.sql`
+- ✅ Module path: `/usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
 
-**Action Required:** 
-- **Day 1 Task:** Check OpenSIPS version: `opensips -V`
-- **Day 1 Task:** Verify module exists: `ls /usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
-- **Day 1 Task:** Review module documentation for that version
-- **Status:** Will be resolved during Week 1, Day 1 (not a blocker)
+**Remaining Day 1 Tasks:**
+- [ ] Verify `usrloc` module exists at expected path
+- [ ] Review OpenSIPS 3.6.3 `usrloc` module documentation
+- [ ] Verify module API matches our planned usage
+
+**Status:** ✅ Version confirmed - OpenSIPS 3.6.3 (not a blocker)
 
 #### ⚠️ Username-Only Lookup - **CRITICAL UPDATE REQUIRED**
 
@@ -904,7 +905,7 @@ Based on research, identified risks:
 - ✅ **Contact Header Parsing:** Resolved - `lookup()` handles automatically
 - ✅ **contact_uri Field:** Resolved - `lookup()` sets `$du` automatically
 - ✅ **Diagnostic Logging:** Resolved - Multiple options available
-- ⏳ **OpenSIPS Version:** Will be resolved Day 1 (not a blocker)
+- ✅ **OpenSIPS Version:** Resolved - OpenSIPS 3.6.3 confirmed
 - ⏳ **Request-URI Construction:** Will be resolved Day 5 (not a blocker)
 - ⏳ **Module Configuration:** Will be resolved Day 3 (recommended config provided)
 - ⏳ **Performance:** Will be resolved Week 3 (not a blocker)
@@ -919,12 +920,15 @@ Based on research, identified risks:
 
 ### Week 1: Research & Setup (Days 1-5)
 
-#### Day 1: Verify Environment
-- [ ] Check OpenSIPS version: `opensips -V`
+#### Day 1: Verify Environment ✅ **VERSION CONFIRMED**
+
+- [x] Check OpenSIPS version: `opensips -V` → **OpenSIPS 3.6.3 (x86_64/linux)** ✅
 - [ ] Verify `usrloc` module exists: `ls /usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
 - [ ] Check MySQL database connection works
 - [ ] Review current `endpoint_locations` table structure
 - [ ] **Time:** 1-2 hours
+
+**Note:** OpenSIPS 3.6.3 confirmed. The location table schema in `dbsource/opensips-3.6.3-sqlite3.sql` matches this version.
 
 #### Day 2: Create Location Table
 - [ ] Find OpenSIPS location table schema (in `dbsource/opensips-3.6.3-sqlite3.sql`)
