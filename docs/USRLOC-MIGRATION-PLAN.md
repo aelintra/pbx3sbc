@@ -695,14 +695,15 @@ if ($var(domain) != "") {
 **Version Confirmed:**
 - ✅ **OpenSIPS 3.6.3** (x86_64/linux) - Confirmed via `opensips -V`
 - ✅ Location table schema reference matches: `dbsource/opensips-3.6.3-sqlite3.sql`
-- ✅ Module path: `/usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
+- ✅ **`usrloc` module confirmed** at `/usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
 
 **Remaining Day 1 Tasks:**
-- [ ] Verify `usrloc` module exists at expected path
 - [ ] Review OpenSIPS 3.6.3 `usrloc` module documentation
 - [ ] Verify module API matches our planned usage
+- [ ] Check MySQL database connection
+- [ ] Review current `endpoint_locations` table structure
 
-**Status:** ✅ Version confirmed - OpenSIPS 3.6.3 (not a blocker)
+**Status:** ✅ Version and module confirmed - OpenSIPS 3.6.3 with usrloc module available (not a blocker)
 
 #### ⚠️ Username-Only Lookup - **CRITICAL UPDATE REQUIRED**
 
@@ -920,15 +921,18 @@ Based on research, identified risks:
 
 ### Week 1: Research & Setup (Days 1-5)
 
-#### Day 1: Verify Environment ✅ **VERSION CONFIRMED**
+#### Day 1: Verify Environment ✅ **IN PROGRESS**
 
 - [x] Check OpenSIPS version: `opensips -V` → **OpenSIPS 3.6.3 (x86_64/linux)** ✅
-- [ ] Verify `usrloc` module exists: `ls /usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
+- [x] Verify `usrloc` module exists: `/usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so` ✅
 - [ ] Check MySQL database connection works
 - [ ] Review current `endpoint_locations` table structure
 - [ ] **Time:** 1-2 hours
 
-**Note:** OpenSIPS 3.6.3 confirmed. The location table schema in `dbsource/opensips-3.6.3-sqlite3.sql` matches this version.
+**Note:** 
+- OpenSIPS 3.6.3 confirmed
+- `usrloc` module confirmed at expected path
+- The location table schema in `dbsource/opensips-3.6.3-sqlite3.sql` matches this version
 
 #### Day 2: Create Location Table
 - [ ] Find OpenSIPS location table schema (in `dbsource/opensips-3.6.3-sqlite3.sql`)
