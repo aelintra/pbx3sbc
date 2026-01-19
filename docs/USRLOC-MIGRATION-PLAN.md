@@ -633,18 +633,19 @@ if ($var(domain) != "") {
 - See [WHY-USERNAME-ONLY-LOOKUP.md](WHY-USERNAME-ONLY-LOOKUP.md) for why username-only lookup is needed
 - See [MULTIPLE-DOMAINS-SAME-USERNAME.md](MULTIPLE-DOMAINS-SAME-USERNAME.md) for **CRITICAL multi-tenant requirements and required solution**
 
-#### Challenge 3: `contact_uri` Field
+#### Challenge 3: `contact_uri` Field ✅ RESOLVED
 
 **Issue:** Current code stores `contact_uri` separately (used for Request-URI construction).
 
 **Impact:** OpenSIPS stores Contact header in `contact` field. May need to construct URI differently.
 
-**Solution Approach:**
-- Use Contact header directly from `location` table
-- Or construct from `contact` field
-- Verify Request-URI construction works correctly
+**Solution:**
+- `lookup("location")` automatically sets `$du` from Contact header stored in `location` table
+- No manual `contact_uri` construction needed - `$du` is ready to use
+- For NAT scenarios, `lookup()` automatically uses `received` field if available
+- Manual extraction only needed for diagnostic logging (use `$du` or `$ct` pseudo-variables)
 
-**Status:** ⚠️ Needs investigation
+**Status:** ✅ Resolved - `lookup()` handles this automatically
 
 #### Challenge 4: Expiration Handling
 
@@ -659,18 +660,20 @@ if ($var(domain) != "") {
 
 **Status:** ✅ Understood
 
-#### Challenge 5: Diagnostic Logging
+#### Challenge 5: Diagnostic Logging ✅ RESOLVED
 
 **Issue:** Current code queries `endpoint_locations` for diagnostic logging (lines 950-968).
 
 **Impact:** Need alternative way to get endpoint IP for logging.
 
-**Solution Approach:**
-- May not need this logging (was for troubleshooting)
-- Or query `location` table directly if needed
-- Or extract from Contact header in response
+**Solution:**
+- If logging is still needed, can query `location` table directly with SQL
+- Or extract from `$du` after `lookup()`: `$var(contact_ip) = $(du{uri.host})`
+- Or extract from Contact header: `$var(contact_ip) = $ct.host`
+- **Recommendation:** Evaluate if this logging is still needed (was for troubleshooting)
+- If not needed, simply remove the diagnostic logging code
 
-**Status:** ⚠️ Needs investigation
+**Status:** ✅ Resolved - Multiple options available, decision can be made during implementation
 
 ### 5. Areas Where Knowledge Is Deficient
 
@@ -685,7 +688,7 @@ if ($var(domain) != "") {
 
 **Note:** `lookup("location")` automatically sets `$du` from Contact header, so manual parsing may not be needed in most cases.
 
-#### ⚠️ OpenSIPS Version Specifics
+#### ⚠️ OpenSIPS Version Specifics - **RESOLVE IN DAY 1**
 
 **Gap:** Need to verify exact OpenSIPS version in use and corresponding `usrloc` module capabilities.
 
@@ -694,7 +697,11 @@ if ($var(domain) != "") {
 - What version of `usrloc` module is available?
 - Are there version-specific differences in API?
 
-**Action Required:** Check OpenSIPS version and module documentation for that version.
+**Action Required:** 
+- **Day 1 Task:** Check OpenSIPS version: `opensips -V`
+- **Day 1 Task:** Verify module exists: `ls /usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
+- **Day 1 Task:** Review module documentation for that version
+- **Status:** Will be resolved during Week 1, Day 1 (not a blocker)
 
 #### ⚠️ Username-Only Lookup - **CRITICAL UPDATE REQUIRED**
 
@@ -761,7 +768,7 @@ if ($var(domain) != "") {
 - See [WHY-USERNAME-ONLY-LOOKUP.md](WHY-USERNAME-ONLY-LOOKUP.md) for why username-only lookup is needed
 - See [MULTIPLE-DOMAINS-SAME-USERNAME.md](MULTIPLE-DOMAINS-SAME-USERNAME.md) for **CRITICAL multi-tenant requirements**
 
-#### ⚠️ Request-URI Construction
+#### ⚠️ Request-URI Construction - **RESOLVE IN DAY 5**
 
 **Gap:** Need to understand how to construct Request-URI from `location` table data.
 
@@ -771,9 +778,14 @@ if ($var(domain) != "") {
 - Do we need to modify Request-URI separately?
 - How does `BUILD_ENDPOINT_URI` route need to change?
 
-**Action Required:** Test `lookup()` function and verify `$du` format.
+**Solution:**
+- `lookup("location")` automatically sets `$du` with the Contact URI from `location` table
+- Format: `$du = "sip:user@ip:port"` (from Contact header)
+- For NAT: `lookup()` automatically uses `received` field if available
+- **Day 5 Task:** Test basic lookup and verify `$du` format
+- **Status:** Will be resolved during Week 1, Day 5 (not a blocker)
 
-#### ⚠️ Performance Characteristics
+#### ⚠️ Performance Characteristics - **RESOLVE IN WEEK 3**
 
 **Gap:** Need to understand performance implications of `usrloc` module.
 
@@ -783,9 +795,13 @@ if ($var(domain) != "") {
 - How does `db_mode` affect performance?
 - What caching is available?
 
-**Action Required:** Benchmark `usrloc` functions vs current SQL queries.
+**Action Required:** 
+- **Week 3, Day 14:** Benchmark `usrloc` functions vs current SQL queries
+- **Week 3, Day 14:** Compare registration save performance
+- **Week 3, Day 14:** Document any performance differences
+- **Status:** Will be resolved during Week 3 parallel implementation (not a blocker)
 
-#### ⚠️ Module Configuration
+#### ⚠️ Module Configuration - **RESOLVE IN DAY 3**
 
 **Gap:** Need to understand optimal `usrloc` module configuration.
 
@@ -795,9 +811,14 @@ if ($var(domain) != "") {
 - Do we need `registrar` module in addition to `usrloc`?
 - What about `use_domain` parameter?
 
-**Action Required:** Research `usrloc` module parameters and configuration options.
+**Recommended Configuration:**
+- `db_mode = 2` (cached DB mode) - Best balance of performance and persistence
+- `use_domain = 1` - **REQUIRED** for multi-tenant (allows same username across domains)
+- `nat_bflag = "NAT"` - For NAT traversal support
+- **Day 3 Task:** Add module parameters to config
+- **Status:** Will be resolved during Week 1, Day 3 (not a blocker, recommended config provided)
 
-#### ⚠️ Data Migration
+#### ⚠️ Data Migration - **DECISION NEEDED**
 
 **Gap:** Need to understand how to migrate existing `endpoint_locations` data.
 
@@ -807,7 +828,17 @@ if ($var(domain) != "") {
 - How to extract Contact header from separate IP/port fields?
 - Do we need to migrate existing data or can we start fresh?
 
-**Action Required:** Design data migration script (if needed).
+**Recommendation:**
+- **Option 1 (Recommended):** Start fresh - let endpoints re-register naturally
+  - Simpler, no migration script needed
+  - Ensures clean data in new format
+  - Endpoints will re-register within their expiration window
+- **Option 2:** Migrate existing data if needed
+  - Convert DATETIME to Unix timestamp: `UNIX_TIMESTAMP(expires)`
+  - Construct Contact header: `sip:user@contact_ip:contact_port`
+  - Split AoR into username and domain
+- **Decision Point:** Week 5, Day 21 (before dropping table)
+- **Status:** Decision can be made during cleanup phase (not a blocker)
 
 ### 6. Recommended Next Steps
 
@@ -867,7 +898,18 @@ Based on research, identified risks:
 
 **Phase 0 Status:** ✅ Complete  
 **Next Phase:** Phase 1 - Module Setup & Configuration  
-**Blockers:** None (can proceed with Phase 1 while investigating knowledge gaps)
+**Blockers:** None (all remaining questions will be resolved during implementation)
+
+**Remaining Questions Status:**
+- ✅ **Contact Header Parsing:** Resolved - `lookup()` handles automatically
+- ✅ **contact_uri Field:** Resolved - `lookup()` sets `$du` automatically
+- ✅ **Diagnostic Logging:** Resolved - Multiple options available
+- ⏳ **OpenSIPS Version:** Will be resolved Day 1 (not a blocker)
+- ⏳ **Request-URI Construction:** Will be resolved Day 5 (not a blocker)
+- ⏳ **Module Configuration:** Will be resolved Day 3 (recommended config provided)
+- ⏳ **Performance:** Will be resolved Week 3 (not a blocker)
+- ⏳ **Data Migration:** Decision can be made Week 5 (not a blocker)
+- ✅ **Username-Only Lookup:** Solution designed, needs implementation (not a blocker)
 
 ---
 
