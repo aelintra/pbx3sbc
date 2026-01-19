@@ -33,6 +33,140 @@ This document outlines a comprehensive security and threat detection enhancement
 
 ## Project Phases
 
+### Phase 0: Research & Evaluation (Week 1)
+
+**Goal:** Research existing OpenSIPS security modules and community solutions before building custom implementations
+
+**Critical:** This phase must be completed before implementation to avoid reinventing wheels and creating technical debt.
+
+#### 0.1 OpenSIPS Security Modules Research
+
+**Objective:** Identify and evaluate built-in OpenSIPS modules for security features
+
+**Research Areas:**
+
+1. **Rate Limiting Modules:**
+   - `ratelimit` module - Built-in rate limiting
+   - `htable` module - Hash table for in-memory rate limiting
+   - `ipban` module - IP banning capabilities
+   - `permissions` module - IP-based access control
+   - `userblacklist` module - User-based blacklisting
+
+2. **Attack Mitigation Modules:**
+   - `pike` module - Detect and block flooding attacks
+   - `secfilter` module - Security filtering
+   - `sanity` module - SIP message sanity checks (built-in)
+   - `maxfwd` module - Max-Forwards header checking (built-in)
+
+3. **Authentication & Authorization:**
+   - `auth` module - Authentication framework
+   - `auth_db` module - Database-backed authentication
+   - `permissions` module - Access control lists
+
+4. **Statistics & Monitoring:**
+   - `statistics` module - Built-in statistics
+   - `snmpstats` module - SNMP statistics
+   - `mi_datagram` module - Management interface
+
+**Research Tasks:**
+- [ ] Review OpenSIPS 3.x module documentation for security modules
+- [ ] Test `pike` module for flood detection capabilities
+- [ ] Test `ratelimit` module for rate limiting features
+- [ ] Test `ipban` module for IP blocking functionality
+- [ ] Evaluate `htable` module for in-memory rate limiting performance
+- [ ] Document module capabilities and limitations
+- [ ] Compare module features vs. custom database approach
+
+**Deliverables:**
+- Research document: `docs/SECURITY-MODULES-RESEARCH.md`
+- Module evaluation matrix
+- Recommendations on what to use vs. build custom
+
+#### 0.2 Community Solutions Research
+
+**Objective:** Identify community-built security solutions and best practices
+
+**Research Areas:**
+
+1. **OpenSIPS Community:**
+   - OpenSIPS mailing list archives
+   - OpenSIPS GitHub repositories
+   - Community forum discussions
+   - User-contributed scripts and tools
+
+2. **SIP Security Best Practices:**
+   - RFC 3261 security considerations
+   - SIP security best practices documents
+   - Industry security guidelines
+   - Common attack patterns and mitigations
+
+3. **Integration Solutions:**
+   - Prometheus/Grafana integrations
+   - SIEM integrations
+   - Log aggregation solutions
+   - Alerting frameworks
+
+**Research Tasks:**
+- [ ] Search OpenSIPS GitHub for security-related projects
+- [ ] Review OpenSIPS mailing list for security discussions
+- [ ] Research SIP security best practices
+- [ ] Identify existing monitoring/alerting integrations
+- [ ] Document community solutions and patterns
+
+**Deliverables:**
+- Research document: `docs/COMMUNITY-SECURITY-SOLUTIONS.md`
+- List of reusable community solutions
+- Best practices compilation
+
+#### 0.3 Architecture Decision Document
+
+**Objective:** Document decisions on what to use vs. build custom
+
+**Decision Framework:**
+- Use existing module if it meets requirements
+- Build custom if no suitable module exists
+- Extend existing module if close but needs customization
+- Consider maintenance burden of custom solutions
+
+**Deliverables:**
+- Architecture Decision Record (ADR): `docs/SECURITY-ARCHITECTURE-DECISIONS.md`
+- Updated project plan based on research findings
+- Revised implementation approach
+
+#### 0.4 Proof of Concept
+
+**Objective:** Test key modules before full implementation
+
+**POC Tasks:**
+- [ ] Install and test `pike` module for flood detection
+- [ ] Install and test `ratelimit` module for rate limiting
+- [ ] Install and test `ipban` module for IP blocking
+- [ ] Evaluate performance impact of security modules
+- [ ] Test integration with existing configuration
+
+**Deliverables:**
+- POC test results
+- Performance benchmarks
+- Integration notes
+
+**Research Resources:**
+- OpenSIPS Documentation: https://opensips.org/docs/
+- OpenSIPS Modules: https://opensips.org/docs/modules/
+- OpenSIPS GitHub: https://github.com/OpenSIPS/opensips
+- OpenSIPS Mailing List: https://lists.opensips.org/
+- SIP Security RFCs: RFC 3261, RFC 3325, RFC 4474
+
+**Success Criteria:**
+- ✅ All OpenSIPS security modules evaluated
+- ✅ Community solutions researched
+- ✅ Architecture decisions documented
+- ✅ POC completed for key modules
+- ✅ Project plan updated based on findings
+
+**Note:** This research phase is critical. Do not proceed to Phase 1 implementation until research is complete and decisions are documented.
+
+---
+
 ### Phase 1: Registration Security Foundation
 
 **Goal:** Secure the registration process and track registration attempts
@@ -520,31 +654,38 @@ CREATE TABLE whitelisted_ips (
 
 ## Implementation Plan
 
-### Phase 1: Foundation (Weeks 1-2)
+### Phase 0: Research & Evaluation (Week 1)
+1. ⏳ Research OpenSIPS security modules
+2. ⏳ Research community solutions
+3. ⏳ Document architecture decisions
+4. ⏳ Complete proof of concept
+5. ⏳ Update project plan based on findings
+
+### Phase 1: Foundation (Weeks 2-3)
 1. ✅ Create project plan document
 2. ⏳ Implement registration status tracking
 3. ⏳ Implement response-based cleanup
 4. ⏳ Create failed_registrations table
 5. ⏳ Add failed registration logging
 
-### Phase 2: Rate Limiting (Weeks 3-4)
+### Phase 2: Rate Limiting (Weeks 4-5)
 1. ⏳ Implement IP-based rate limiting
 2. ⏳ Implement registration-specific rate limiting
 3. ⏳ Add flood detection
 4. ⏳ Create blocking mechanisms
 
-### Phase 3: Monitoring (Weeks 5-6)
+### Phase 3: Monitoring (Weeks 6-7)
 1. ⏳ Create security_events table
 2. ⏳ Implement security event logging
 3. ⏳ Create alerting system
 4. ⏳ Add statistics and reporting
 
-### Phase 4: Advanced Detection (Weeks 7-8)
+### Phase 4: Advanced Detection (Weeks 8-9)
 1. ⏳ Implement username enumeration detection
 2. ⏳ Add geographic anomaly detection (optional)
 3. ⏳ Implement behavioral analysis
 
-### Phase 5: IP Management (Weeks 9-10)
+### Phase 5: IP Management (Weeks 10-11)
 1. ⏳ Create IP blocking system
 2. ⏳ Add whitelisting
 3. ⏳ Implement automatic expiration
@@ -605,10 +746,18 @@ CREATE TABLE whitelisted_ips (
 - Add flood detection logic
 
 ### Module Requirements
-- May need additional OpenSIPS modules:
-  - `ipban` module (for IP blocking)
-  - `htable` module (for in-memory rate limiting)
-  - `geoip` module (optional, for geographic detection)
+
+**Note:** Module requirements will be determined during Phase 0 research. Potential modules include:
+
+- `pike` module - Flood detection (likely to use)
+- `ratelimit` module - Rate limiting (evaluate vs. custom)
+- `ipban` module - IP blocking (evaluate vs. custom)
+- `htable` module - In-memory rate limiting (evaluate vs. database)
+- `permissions` module - IP-based access control (evaluate)
+- `statistics` module - Built-in statistics (likely to use)
+- `geoip` module - Geographic detection (optional)
+
+**Research Required:** Phase 0 will determine which modules to use vs. custom implementation.
 
 ## Testing Plan
 
