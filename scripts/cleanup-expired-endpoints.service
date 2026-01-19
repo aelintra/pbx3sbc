@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenSIPS Expired Endpoint Locations Cleanup
+After=network.target mysql.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/cleanup-expired-endpoints.sh
+Environment="DB_NAME=opensips"
+Environment="DB_USER=opensips"
+Environment="DB_PASS=your-password"
+StandardOutput=journal
+StandardError=journal
