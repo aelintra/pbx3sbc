@@ -757,6 +757,78 @@ EOF
     fi
 }
 
+setup_cleanup_timer() {
+    log_info "Setting up endpoint cleanup timer..."
+    
+    # Copy cleanup script to system location
+    if [[ -f "${SCRIPT_DIR}/cleanup-expired-endpoints.sh" ]]; then
+        cp "${SCRIPT_DIR}/cleanup-expired-endpoints.sh" /usr/local/bin/ || {
+            log_warn "Failed to copy cleanup script to /usr/local/bin"
+            return 1
+        }
+        chmod +x /usr/local/bin/cleanup-expired-endpoints.sh
+        log_success "Cleanup script installed"
+    else
+        log_warn "Cleanup script not found at ${SCRIPT_DIR}/cleanup-expired-endpoints.sh"
+        return 1
+    fi
+    
+    # Copy service and timer files
+    if [[ -f "${SCRIPT_DIR}/cleanup-expired-endpoints.service" ]] && [[ -f "${SCRIPT_DIR}/cleanup-expired-endpoints.timer" ]]; then
+        # Read database credentials from saved file
+        local db_pass="your-password"
+        local cred_file="${OPENSIPS_DIR}/.mysql_credentials"
+        
+        if [[ -f "$cred_file" ]]; then
+            # Source credentials file in a subshell to get DB_PASS
+            db_pass=$(source "$cred_file" 2>/dev/null && echo "${DB_PASS:-your-password}" || echo "your-password")
+        elif [[ -n "${DB_PASSWORD:-}" ]] && [[ "${DB_PASSWORD}" != "your-password" ]]; then
+            # Fallback to DB_PASSWORD if credentials file doesn't exist yet
+            db_pass="$DB_PASSWORD"
+        fi
+        
+        # Create service file with actual database credentials
+        cat > /etc/systemd/system/cleanup-expired-endpoints.service <<EOF
+[Unit]
+Description=OpenSIPS Expired Endpoint Locations Cleanup
+After=network.target mysql.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/cleanup-expired-endpoints.sh
+Environment="DB_NAME=opensips"
+Environment="DB_USER=opensips"
+Environment="DB_PASS=${db_pass}"
+StandardOutput=journal
+StandardError=journal
+EOF
+        
+        # Copy timer file
+        cp "${SCRIPT_DIR}/cleanup-expired-endpoints.timer" /etc/systemd/system/ || {
+            log_warn "Failed to copy timer file"
+            return 1
+        }
+        
+        # Reload systemd and enable timer
+        systemctl daemon-reload || {
+            log_warn "Failed to reload systemd"
+            return 1
+        }
+        
+        systemctl enable cleanup-expired-endpoints.timer || {
+            log_warn "Failed to enable cleanup timer"
+            return 1
+        }
+        
+        log_success "Cleanup timer enabled (runs daily at 2:00 AM)"
+    else
+        log_warn "Cleanup service/timer files not found"
+        return 1
+    fi
+}
+
+
 enable_services() {
     log_info "Enabling services..."
     
@@ -764,6 +836,11 @@ enable_services() {
     systemctl enable opensips || {
         log_error "Failed to enable OpenSIPS service"
         exit 1
+    }
+    
+    # Setup cleanup timer (non-fatal if it fails)
+    setup_cleanup_timer || {
+        log_warn "Cleanup timer setup failed - you can set it up manually later"
     }
     
     log_success "Services enabled"
@@ -826,6 +903,13 @@ verify_installation() {
         echo -e "${GREEN}✓${NC} OpenSIPS service running"
     else
         echo -e "${RED}✗${NC} OpenSIPS service not running"
+    fi
+    
+    # Check cleanup timer
+    if systemctl is-enabled --quiet cleanup-expired-endpoints.timer 2>/dev/null; then
+        echo -e "${GREEN}✓${NC} Endpoint cleanup timer enabled"
+    else
+        echo -e "${YELLOW}⚠${NC} Endpoint cleanup timer not enabled"
     fi
     
     echo
