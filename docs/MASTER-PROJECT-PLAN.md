@@ -1,0 +1,666 @@
+# Master Project Plan
+
+## Overview
+
+This document provides a comprehensive overview of all planned work for the PBX3sbc project, organized by functional area and priority.
+
+**Last Updated:** January 2026  
+**Current Status:** ✅ Core functionality complete and stable
+
+## Current State
+
+### ✅ Completed Features
+
+- **Core SIP Routing:**
+  - Domain-based routing with multi-tenancy
+  - Health-aware routing via dispatcher module
+  - Bidirectional routing (endpoints ↔ Asterisk)
+  - NAT traversal for in-dialog requests (ACK/BYE/NOTIFY)
+
+- **Database & Management:**
+  - MySQL routing database
+  - Endpoint location tracking (`endpoint_locations` table)
+  - Domain and dispatcher management scripts
+  - Automated installation script
+
+- **Security (Basic):**
+  - Scanner detection (drops known scanners)
+  - Domain validation (door-knocker protection)
+  - Attack mitigation (stateless drops)
+
+- **Documentation:**
+  - Installation guides
+  - Configuration documentation
+  - Dialog state explanation
+  - Endpoint location documentation
+  - MySQL port opening procedure
+  - Endpoint cleanup procedures
+
+---
+
+## Project Areas
+
+### 1. Security & Threat Detection
+
+**Status:** 📋 Planned (Project plan created)  
+**Priority:** High  
+**Timeline:** 11 weeks (Phase 0-5)
+
+**Sub-Project:** See [SECURITY-THREAT-DETECTION-PROJECT.md](SECURITY-THREAT-DETECTION-PROJECT.md)
+
+**Overview:**
+Comprehensive security enhancement project including registration security, rate limiting, threat detection, monitoring, and IP management.
+
+**Phases:**
+- **Phase 0:** Research & Evaluation (Week 1) - Research OpenSIPS modules
+- **Phase 1:** Registration Security Foundation (Weeks 2-3)
+- **Phase 2:** Rate Limiting & Attack Mitigation (Weeks 4-5)
+- **Phase 3:** Monitoring & Alerting (Weeks 6-7)
+- **Phase 4:** Advanced Threat Detection (Weeks 8-9)
+- **Phase 5:** IP Management & Blocking (Weeks 10-11)
+
+**Key Deliverables:**
+- Registration status tracking
+- Failed registration tracking
+- Rate limiting (IP-based and registration-specific)
+- Flood detection
+- Security event logging
+- Alerting system (email/SMS/webhook)
+- IP blocking/whitelisting system
+- Threat detection tools
+
+**Dependencies:**
+- Phase 0 research must be completed first
+- Requires evaluation of OpenSIPS modules before implementation
+
+---
+
+### 2. Monitoring & Statistics
+
+**Status:** 📋 Planned  
+**Priority:** Medium-High  
+**Timeline:** 4-6 weeks
+
+**From Wishlist:**
+- Statistics - Prometheus and Grafana
+- Asterisk Node Failure notification - via email or txt
+- Doorknock and flood alerts
+
+#### 2.1 Prometheus & Grafana Integration
+
+**Objective:** Provide comprehensive statistics and monitoring dashboards
+
+**Components:**
+- Prometheus metrics exporter for OpenSIPS
+- Grafana dashboards for visualization
+- Key metrics:
+  - Call statistics (INVITE, BYE, ACK counts)
+  - Registration statistics
+  - Dispatcher health metrics
+  - Endpoint statistics
+  - Security event metrics
+  - Performance metrics (response times, errors)
+
+**Implementation:**
+- Use OpenSIPS `statistics` module
+- Create Prometheus exporter (or use existing)
+- Design Grafana dashboards
+- Set up alerting rules
+
+**Files to Create:**
+- `scripts/setup-prometheus.sh` - Prometheus installation
+- `scripts/setup-grafana.sh` - Grafana installation
+- `config/prometheus-opensips.yml` - Prometheus configuration
+- `config/grafana-dashboards/` - Dashboard JSON files
+
+**Dependencies:**
+- Security project Phase 3 (security event logging) for security metrics
+
+#### 2.2 Asterisk Node Failure Notification
+
+**Objective:** Alert when Asterisk backend nodes fail
+
+**Implementation:**
+- Monitor dispatcher health status
+- Detect when node goes from active to inactive
+- Send email/SMS notification
+- Track node downtime
+
+**Components:**
+- Health check monitoring script
+- Alert sending mechanism
+- Node status tracking
+
+**Files to Create:**
+- `scripts/monitor-asterisk-nodes.sh` - Node monitoring
+- `scripts/send-node-alert.sh` - Alert sending
+- Database table for node status history
+
+**Integration:**
+- Can leverage security alerting system (Phase 3)
+- Use dispatcher module events if available
+
+#### 2.3 Security Alerts
+
+**Objective:** Alert on security events (doorknock, floods, attacks)
+
+**Implementation:**
+- Part of Security & Threat Detection project Phase 3
+- Email/SMS/webhook alerts
+- Alert aggregation to prevent spam
+
+**Dependencies:**
+- Security project Phase 3
+
+---
+
+### 3. High Availability & Load Balancing
+
+**Status:** 📋 Planned  
+**Priority:** Medium  
+**Timeline:** 6-8 weeks
+
+**From Wishlist:**
+- OpenSIPS load balancing/failover
+
+#### 3.1 Multiple OpenSIPS Instances
+
+**Objective:** Deploy multiple OpenSIPS instances for high availability
+
+**Architecture:**
+- Multiple OpenSIPS SBC instances
+- Shared MySQL database (RDS or replicated)
+- Load balancer in front (AWS ELB, HAProxy, etc.)
+- Session replication (if needed)
+
+**Components:**
+- Database replication/synchronization
+- Load balancer configuration
+- Health checks for OpenSIPS instances
+- Session state management (if stateful features needed)
+
+**Considerations:**
+- OpenSIPS is mostly stateless (database-backed routing)
+- May need session replication for dialog state
+- Load balancer must handle SIP properly (UDP, TCP, TLS)
+
+**Files to Create:**
+- `docs/HA-DEPLOYMENT-GUIDE.md` - High availability guide
+- `config/haproxy-opensips.cfg` - HAProxy configuration
+- `scripts/setup-ha.sh` - HA setup script
+
+**Dependencies:**
+- Containerization (for easier multi-instance deployment)
+- Database replication strategy
+
+#### 3.2 Session Replication
+
+**Objective:** Share dialog state across OpenSIPS instances
+
+**Options:**
+- Use OpenSIPS clustering module
+- Use shared database for dialog state
+- Use external session store (Redis, etc.)
+
+**Research Required:**
+- Evaluate OpenSIPS clustering capabilities
+- Determine if dialog state replication needed
+- Test performance impact
+
+---
+
+### 4. TLS & WebRTC Support
+
+**Status:** 📋 Planned  
+**Priority:** Medium  
+**Timeline:** 4-6 weeks
+
+**From Wishlist:**
+- TLS from endpoint to openSIPS then TCP to Asterisk
+- WebRTC TLS support - then route to Asterisk
+
+#### 4.1 TLS Support
+
+**Objective:** Enable TLS encryption for SIP traffic
+
+**Components:**
+- TLS certificate management
+- OpenSIPS TLS configuration
+- Endpoint TLS configuration
+- Asterisk TLS support
+
+**Implementation:**
+- Configure `proto_tls` module
+- Set up certificate authority
+- Configure TLS ports (5061)
+- Update firewall rules
+
+**Files to Create:**
+- `scripts/setup-tls.sh` - TLS certificate setup
+- `docs/TLS-CONFIGURATION.md` - TLS configuration guide
+- `config/tls-certificates/` - Certificate management
+
+**Considerations:**
+- Certificate management and renewal
+- Performance impact of TLS
+- Compatibility with endpoints
+
+#### 4.2 WebRTC Support
+
+**Objective:** Support WebRTC endpoints
+
+**Components:**
+- WebRTC gateway functionality
+- TURN/STUN server integration
+- SDP handling for WebRTC
+- TLS requirement for WebRTC
+
+**Implementation:**
+- Research OpenSIPS WebRTC capabilities
+- Integrate TURN server (coturn, etc.)
+- Configure WebRTC-specific routing
+- Handle ICE candidates
+
+**Files to Create:**
+- `docs/WEBRTC-SUPPORT.md` - WebRTC configuration guide
+- `scripts/setup-turn-server.sh` - TURN server setup
+
+**Dependencies:**
+- TLS support (required for WebRTC)
+- TURN server deployment
+
+---
+
+### 5. Management Interface
+
+**Status:** 📋 Planned  
+**Priority:** Medium  
+**Timeline:** 8-12 weeks
+
+**From Wishlist:**
+- Web front-end to manage database, UFW firewall and Certificates
+- What stack?
+- Onboard or API?
+- Security and sign-in? How to manage
+- Backup/recovery model for openSIPS.cfg and MySQL database
+
+#### 5.1 Web Management Interface
+
+**Objective:** Create web-based management interface
+
+**Features:**
+- Domain management
+- Dispatcher management
+- Endpoint location viewing
+- Security event viewing
+- IP blocking/whitelisting
+- Firewall rule management
+- Certificate management
+- Statistics dashboard
+
+**Architecture Decisions Needed:**
+- **Stack Options:**
+  - Python (Flask/Django) + SQLAlchemy
+  - Node.js (Express) + Sequelize
+  - PHP (Laravel/Symfony)
+  - Go (Gin/Echo)
+  
+- **API vs. Onboard:**
+  - REST API + separate frontend (React/Vue)
+  - Server-side rendered (traditional web app)
+  - Hybrid approach
+
+- **Authentication:**
+  - Local user database
+  - LDAP/AD integration
+  - OAuth2/SAML
+  - API keys for programmatic access
+
+**Files to Create:**
+- `docs/MANAGEMENT-INTERFACE-DESIGN.md` - Architecture design
+- `api/` - API implementation (if API approach)
+- `web/` - Web frontend
+- `scripts/setup-management-interface.sh` - Installation script
+
+**Dependencies:**
+- Security project (for security features)
+- Statistics project (for dashboard)
+
+#### 5.2 Backup & Recovery
+
+**Objective:** Automated backup and recovery system
+
+**Components:**
+- OpenSIPS config backup
+- MySQL database backup
+- Automated backup scheduling
+- Recovery procedures
+- Backup verification
+
+**Implementation:**
+- Database backup script (mysqldump)
+- Config file backup
+- Backup storage (local + remote)
+- Retention policies
+- Recovery testing
+
+**Files to Create:**
+- `scripts/backup-opensips.sh` - Backup script
+- `scripts/restore-opensips.sh` - Recovery script
+- `docs/BACKUP-RECOVERY.md` - Backup/recovery guide
+- `config/backup-schedule.conf` - Backup configuration
+
+**Integration:**
+- Can be part of management interface
+- Can be standalone scripts
+
+---
+
+### 6. Containerization
+
+**Status:** 📋 Planned  
+**Priority:** Medium (after local testing)  
+**Timeline:** 4-6 weeks
+
+**From PROJECT-STATUS.md:**
+- Containerize OpenSIPS deployment
+- Multi-container architecture
+- AWS/cloud deployment ready
+
+#### 6.1 Docker Deployment
+
+**Objective:** Containerize OpenSIPS for easier deployment
+
+**Components:**
+- Dockerfile for OpenSIPS
+- Docker Compose configuration
+- Environment variable configuration
+- Secrets management
+- Health checks
+
+**Approach:**
+- Use official OpenSIPS Docker image as base
+- Multi-container: OpenSIPS + MySQL + Management Interface
+- Use RDS MySQL for production (managed)
+- Host networking mode for SIP UDP
+
+**Files to Create:**
+- `Dockerfile` - OpenSIPS container
+- `docker-compose.yml` - Multi-container setup
+- `docs/CONTAINER-DEPLOYMENT.md` - Container deployment guide
+- `.env.example` - Environment variables template
+
+**Dependencies:**
+- Complete local testing
+- Validate AWS deployment
+- Lock down configuration
+
+#### 6.2 Kubernetes Deployment (Optional)
+
+**Objective:** Kubernetes deployment for production scale
+
+**Components:**
+- Kubernetes manifests
+- Helm charts (optional)
+- Service definitions
+- Ingress configuration
+- ConfigMaps and Secrets
+
+**Files to Create:**
+- `k8s/` - Kubernetes manifests
+- `helm/` - Helm charts (if using Helm)
+- `docs/KUBERNETES-DEPLOYMENT.md` - K8s deployment guide
+
+**Dependencies:**
+- Docker deployment working
+- Kubernetes cluster available
+
+---
+
+### 7. Testing & Quality Assurance
+
+**Status:** 📋 Ongoing  
+**Priority:** High  
+**Timeline:** Continuous
+
+#### 7.1 Automated Testing
+
+**Objective:** Comprehensive test coverage
+
+**Components:**
+- Unit tests for scripts
+- Integration tests for routing
+- Security testing
+- Performance testing
+- Load testing
+
+**Files to Create:**
+- `tests/unit/` - Unit tests
+- `tests/integration/` - Integration tests
+- `tests/security/` - Security tests
+- `scripts/run-tests.sh` - Test runner
+
+#### 7.2 Test Environment
+
+**Objective:** Dedicated test environment
+
+**Components:**
+- Test SIP endpoints
+- Test Asterisk backends
+- Test database
+- Automated test scenarios
+
+**Files to Create:**
+- `docs/TEST-ENVIRONMENT.md` - Test environment setup
+- `scripts/setup-test-environment.sh` - Test environment setup
+
+---
+
+## Priority Matrix
+
+### High Priority (Next 3-6 Months)
+
+1. **Security & Threat Detection** (11 weeks)
+   - Critical for production security
+   - Foundation for other features
+
+2. **Monitoring & Statistics** (4-6 weeks)
+   - Essential for operations
+   - Overlaps with security monitoring
+
+3. **Backup & Recovery** (2-3 weeks)
+   - Critical for production
+   - Can be done in parallel
+
+### Medium Priority (6-12 Months)
+
+4. **High Availability** (6-8 weeks)
+   - Important for production reliability
+   - Depends on containerization
+
+5. **TLS & WebRTC** (4-6 weeks)
+   - Security and feature enhancement
+   - Customer requirements dependent
+
+6. **Management Interface** (8-12 weeks)
+   - Improves usability
+   - Can be phased (API first, then UI)
+
+### Lower Priority (12+ Months)
+
+7. **Containerization** (4-6 weeks)
+   - Deployment convenience
+   - Depends on testing completion
+
+8. **Kubernetes Deployment** (4-6 weeks)
+   - Advanced deployment option
+   - Only if needed for scale
+
+---
+
+## Dependencies & Sequencing
+
+### Critical Path
+
+```
+Security Research (Phase 0)
+    ↓
+Security Implementation (Phases 1-5)
+    ↓
+Monitoring & Statistics
+    ↓
+High Availability
+```
+
+### Parallel Work
+
+- **Backup & Recovery** can be done anytime
+- **TLS Support** can be done independently
+- **Management Interface** can start after Security Phase 3
+- **Containerization** can be done after local testing
+
+### Blockers
+
+- **Security Phase 0** blocks Security implementation
+- **Local Testing** blocks Containerization
+- **Security Phase 3** enhances Monitoring capabilities
+
+---
+
+## Resource Estimates
+
+### Development Time
+
+- **Security & Threat Detection:** 11 weeks
+- **Monitoring & Statistics:** 4-6 weeks
+- **High Availability:** 6-8 weeks
+- **TLS & WebRTC:** 4-6 weeks
+- **Management Interface:** 8-12 weeks
+- **Containerization:** 4-6 weeks
+- **Backup & Recovery:** 2-3 weeks
+
+**Total:** ~39-52 weeks (9-12 months) for all features
+
+### With Parallelization
+
+- **Phase 1 (Months 1-3):** Security + Backup/Recovery
+- **Phase 2 (Months 4-5):** Monitoring + TLS
+- **Phase 3 (Months 6-8):** Management Interface + Containerization
+- **Phase 4 (Months 9-12):** High Availability + WebRTC
+
+**Estimated:** 9-12 months with focused effort
+
+---
+
+## Success Metrics
+
+### Security
+- ✅ Zero successful brute force attacks
+- ✅ Flood attacks detected and blocked
+- ✅ Security events logged and alerted
+
+### Reliability
+- ✅ 99.9% uptime
+- ✅ Automatic failover working
+- ✅ Backup/recovery tested and verified
+
+### Operations
+- ✅ Statistics available via Prometheus/Grafana
+- ✅ Alerts sent for critical events
+- ✅ Management interface functional
+
+### Performance
+- ✅ No performance degradation from security checks
+- ✅ Sub-second response times
+- ✅ Handles expected load
+
+---
+
+## Risk Management
+
+### Technical Risks
+
+1. **Security Module Compatibility**
+   - **Risk:** OpenSIPS modules don't meet requirements
+   - **Mitigation:** Phase 0 research identifies alternatives
+
+2. **Performance Impact**
+   - **Risk:** Security checks slow down routing
+   - **Mitigation:** Performance testing, optimization
+
+3. **Complexity**
+   - **Risk:** Too many features, hard to maintain
+   - **Mitigation:** Phased approach, documentation
+
+### Project Risks
+
+1. **Scope Creep**
+   - **Risk:** Adding features beyond plan
+   - **Mitigation:** Stick to documented plan, review regularly
+
+2. **Resource Constraints**
+   - **Risk:** Not enough time/people
+   - **Mitigation:** Prioritize, phase delivery
+
+---
+
+## Documentation Status
+
+### ✅ Completed
+- Installation guides
+- Configuration documentation
+- Dialog state explanation
+- Endpoint location documentation
+- MySQL port opening procedure
+- Endpoint cleanup procedures
+- Security/threat detection project plan
+
+### 📋 Planned
+- Security modules research
+- Security architecture decisions
+- TLS configuration guide
+- WebRTC support guide
+- High availability deployment guide
+- Management interface design
+- Backup/recovery guide
+- Container deployment guide
+- Kubernetes deployment guide
+
+---
+
+## Next Actions
+
+### Immediate (This Week)
+1. ✅ Create master project plan (this document)
+2. ⏳ Review and prioritize project areas
+3. ⏳ Assign resources/timeline
+
+### Short Term (Next Month)
+1. ⏳ Start Security Phase 0 research
+2. ⏳ Design backup/recovery system
+3. ⏳ Plan monitoring/statistics implementation
+
+### Medium Term (Next Quarter)
+1. ⏳ Complete Security Phase 0-1
+2. ⏳ Implement backup/recovery
+3. ⏳ Begin monitoring/statistics work
+
+---
+
+## Related Documents
+
+- [Security & Threat Detection Project](SECURITY-THREAT-DETECTION-PROJECT.md)
+- [Project Status](../workingdocs/PROJECT-STATUS.md)
+- [Wishlist](../workingdocs/wishlist.md)
+- [Endpoint Location Creation](ENDPOINT-LOCATION-CREATION.md)
+- [Endpoint Cleanup](ENDPOINT-CLEANUP.md)
+
+---
+
+## Notes
+
+- This is a living document - update as priorities change
+- Review quarterly to adjust timeline and priorities
+- Focus on high-priority items first
+- Don't start new areas until current ones are stable
+- Document decisions and rationale
