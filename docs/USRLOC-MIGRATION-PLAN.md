@@ -940,11 +940,17 @@ Based on research, identified risks:
 - The location table schema in `dbsource/opensips-3.6.3-sqlite3.sql` matches this version
 
 #### Day 2: Create Location Table
-- [ ] Find OpenSIPS location table schema (in `dbsource/opensips-3.6.3-sqlite3.sql`)
-- [ ] Convert to MySQL format (INTEGER → INT, etc.)
-- [ ] Run CREATE TABLE script on MySQL
-- [ ] Verify table created: `DESCRIBE location;`
-- [ ] **Time:** 1-2 hours
+
+**SQL Script Ready:** `scripts/create-location-table.sql`
+
+**Tasks:**
+- [ ] Copy `scripts/create-location-table.sql` to OpenSIPS server
+- [ ] Run SQL script on MySQL: `mysql -u opensips -popensips opensips < create-location-table.sql`
+- [ ] Verify table created: `mysql -u opensips -popensips opensips -e "DESCRIBE location;"`
+- [ ] Verify indexes created: `mysql -u opensips -popensips opensips -e "SHOW INDEXES FROM location;"`
+- [ ] **Time:** 30 minutes - 1 hour
+
+**Note:** The SQL script has been pre-converted from SQLite to MySQL format and includes recommended indexes for multi-tenant lookups.
 
 #### Day 3: Load Modules in Config
 - [ ] Add `loadmodule "usrloc.so"` to config

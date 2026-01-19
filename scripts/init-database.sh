@@ -11,6 +11,9 @@ DB_PASS="${DB_PASS:-your-password}"
 OPENSIPS_USER="${OPENSIPS_USER:-opensips}"
 OPENSIPS_GROUP="${OPENSIPS_GROUP:-opensips}"
 
+# Get script directory (for location table creation script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root (use sudo)"
     exit 1
@@ -104,6 +107,22 @@ if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'domain';" 2
 else
     mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/domain-create.sql"
     echo "  ✓ Domain schema loaded successfully."
+fi
+
+# Create OpenSIPS location table for usrloc module
+# Idempotent: check if table exists before creating
+echo "Creating OpenSIPS location table (for usrloc module)..."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'location';" 2>/dev/null | grep -q "location"; then
+    echo "  ✓ location table already exists - skipping creation (idempotent)"
+else
+    # Use our custom location table script (converted from SQLite to MySQL)
+    if [[ -f "${SCRIPT_DIR}/create-location-table.sql" ]]; then
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCRIPT_DIR}/create-location-table.sql"
+        echo "  ✓ Location table created successfully."
+    else
+        echo "  Warning: create-location-table.sql not found at ${SCRIPT_DIR}/create-location-table.sql"
+        echo "  Location table will not be created - usrloc module migration will require manual table creation"
+    fi
 fi
 
 # Create custom endpoint_locations table (MySQL syntax)
