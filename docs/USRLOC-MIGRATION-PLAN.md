@@ -926,12 +926,17 @@ Based on research, identified risks:
 - [x] Check OpenSIPS version: `opensips -V` → **OpenSIPS 3.6.3 (x86_64/linux)** ✅
 - [x] Verify `usrloc` module exists: `/usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so` ✅
 - [ ] Check MySQL database connection works
+  - **Connection:** `mysql -u opensips -popensips -h <opensips-box-ip> opensips`
+  - **Verify:** Can connect and query tables
 - [ ] Review current `endpoint_locations` table structure
+  - **Query:** `DESCRIBE endpoint_locations;`
+  - **Verify:** Table structure matches expected schema
 - [ ] **Time:** 1-2 hours
 
 **Note:** 
 - OpenSIPS 3.6.3 confirmed
 - `usrloc` module confirmed at expected path
+- MySQL credentials: `opensips/opensips` (verify these match config)
 - The location table schema in `dbsource/opensips-3.6.3-sqlite3.sql` matches this version
 
 #### Day 2: Create Location Table
@@ -1220,12 +1225,14 @@ $var(expires_value) = $(ct{nameaddr.param,expires});
 
 2. **Configure Module Parameters**
    ```opensips
-   modparam("usrloc", "db_url", "mysql://opensips:password@localhost/opensips")
+   modparam("usrloc", "db_url", "mysql://opensips:opensips@localhost/opensips")
    modparam("usrloc", "db_mode", 2)  # Cached DB mode
    modparam("usrloc", "use_domain", 1)  # CRITICAL: Enable domain separation for multi-tenant
    modparam("usrloc", "nat_bflag", "NAT")
    # Add other parameters as needed
    ```
+   
+   **Note:** Verify MySQL credentials match your actual database configuration. Default shown: `opensips/opensips`
    
    **⚠️ CRITICAL:** `use_domain = 1` is **REQUIRED** for multi-tenant deployments:
    - Allows same username across different domains (e.g., 401@tenant-a.com, 401@tenant-b.com)
