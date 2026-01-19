@@ -167,6 +167,14 @@
   - Domain validation (door-knocker protection)
   - Method validation
 
+- **Management Interface (MVP Complete):**
+  - Web-based admin panel (Laravel + Filament)
+  - Domain and Dispatcher management (full CRUD)
+  - CDR and Dialog viewing (read-only)
+  - CDR statistics widget
+  - Authentication and user management
+  - **Repository:** `pbx3sbc-admin` (separate repository)
+
 - **Automation:**
   - Automated installation script
   - Endpoint cleanup routine (daily timer)
@@ -182,10 +190,15 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
    - IP reputation
    - Advanced monitoring
 
-2. **Management Interface** (High Priority)
-   - Web-based admin panel
-   - Domain/dispatcher management
-   - Monitoring dashboard
+2. **Management Interface** (High Priority - MVP Complete)
+   - ✅ Domain/dispatcher management (complete)
+   - ✅ CDR/Dialog viewing (complete)
+   - 📋 Endpoint location viewing
+   - 📋 Security event viewing (depends on Security project)
+   - 📋 IP blocking/whitelisting (depends on Security project)
+   - 📋 Firewall rule management
+   - 📋 Certificate management
+   - 📋 Enhanced statistics dashboard
 
 3. **Backup & Recovery** (Medium Priority)
    - Automated backups
