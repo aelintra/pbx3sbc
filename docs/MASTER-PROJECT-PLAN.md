@@ -48,6 +48,7 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 - ✅ Endpoint location creation documentation
 - ✅ Security/threat detection project plan created
 - ✅ Master project plan created
+- ✅ Usrloc migration plan created (branch: `usrloc`)
 
 **Key Fixes Implemented:**
 - ✅ NOTIFY routing for endpoints behind NAT
@@ -540,6 +541,51 @@ Comprehensive security enhancement project including registration security, rate
 **Files to Create:**
 - `docs/TEST-ENVIRONMENT.md` - Test environment setup
 - `scripts/setup-test-environment.sh` - Test environment setup
+
+---
+
+### 8. Usrloc Module Migration
+
+**Status:** 📋 Planning (Migration plan created)  
+**Priority:** Medium-High  
+**Timeline:** 5 weeks  
+**Branch:** `usrloc`
+
+**Sub-Project:** See [USRLOC-MIGRATION-PLAN.md](USRLOC-MIGRATION-PLAN.md)
+
+**Overview:**
+Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` module and `location` table. This addresses technical debt and aligns with OpenSIPS best practices for proxy-registrar pattern.
+
+**Motivation:**
+- Fix stale registration issue (currently storing before reply)
+- Reduce technical debt (remove custom table maintenance)
+- Align with OpenSIPS best practices
+- Provide better features (path support, proper expiration)
+
+**Phases:**
+- **Phase 0:** Research & Evaluation (Week 1) - Study `usrloc` module API
+- **Phase 1:** Module Setup & Configuration (Week 2) - Load module, create schema
+- **Phase 2:** Parallel Implementation (Week 3) - Implement alongside existing code
+- **Phase 3:** Migration & Testing (Week 4) - Switch to `usrloc`, remove old code
+- **Phase 4:** Cleanup & Documentation (Week 5) - Remove custom table, update docs
+
+**Key Deliverables:**
+- `usrloc` module integrated
+- Proxy-registrar pattern implemented (save on reply, not request)
+- All lookups using `lookup("location")` function
+- Custom `endpoint_locations` table removed
+- Documentation updated
+
+**Dependencies:**
+- OpenSIPS `usrloc` module (standard, should be available)
+- MySQL database (already in use)
+- Can be done independently of other projects
+
+**Impact:**
+- Reduces technical debt
+- Fixes stale registration bug
+- Improves maintainability
+- Aligns with OpenSIPS standards
 
 ---
 
