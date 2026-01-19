@@ -2,10 +2,59 @@
 
 ## Overview
 
-This document provides a comprehensive overview of all planned work for the PBX3sbc project, organized by functional area and priority.
+This document provides a comprehensive overview of all planned work for the PBX3sbc project, organized by functional area and priority. This is the single source of truth for project planning.
 
 **Last Updated:** January 2026  
+**Current Branch:** `main`  
 **Current Status:** ✅ Core functionality complete and stable
+
+## Current State
+
+### System Status
+
+**Architecture:**
+```
+SIP Endpoints → OpenSIPS SBC → Asterisk Backends
+                    ↓
+            MySQL Database
+```
+
+**Key Points:**
+- OpenSIPS acts as Session Border Controller (SBC)
+- MySQL provides routing database
+- RTP bypasses SBC (direct endpoint ↔ Asterisk)
+- Endpoint locations tracked for bidirectional routing
+
+### Current Configuration
+
+**Main Files:**
+- **OpenSIPS Config:** `config/opensips.cfg.template` (1004 lines)
+- **Database Schema:** `scripts/init-database.sh`
+- **Installation:** `install.sh` (automated installer)
+
+**Database Tables:**
+- `domain` - Domain → dispatcher_setid mapping (with `setid` column)
+- `dispatcher` - Asterisk backend destinations (OpenSIPS 3.6 version 9 schema)
+- `endpoint_locations` - Registered endpoint IP/port for routing back to endpoints
+- `acc` - Accounting/CDR records (with `from_uri`, `to_uri` columns)
+- `dialog` - Dialog state tracking
+
+### Recent Accomplishments
+
+**Latest Work:**
+- ✅ Endpoint cleanup routine with automated timer
+- ✅ Dialog state documentation
+- ✅ MySQL port opening procedure
+- ✅ Endpoint location creation documentation
+- ✅ Security/threat detection project plan created
+- ✅ Master project plan created
+
+**Key Fixes Implemented:**
+- ✅ NOTIFY routing for endpoints behind NAT
+- ✅ ACK/BYE routing with private IP detection
+- ✅ NAT traversal for in-dialog requests
+- ✅ CDR/Accounting mode working
+- ✅ Dialog state tracking
 
 ## Current State
 
@@ -649,11 +698,11 @@ High Availability
 
 ## Related Documents
 
-- [Security & Threat Detection Project](SECURITY-THREAT-DETECTION-PROJECT.md)
-- [Project Status](../workingdocs/PROJECT-STATUS.md)
-- [Wishlist](../workingdocs/wishlist.md)
-- [Endpoint Location Creation](ENDPOINT-LOCATION-CREATION.md)
-- [Endpoint Cleanup](ENDPOINT-CLEANUP.md)
+- [Security & Threat Detection Project](SECURITY-THREAT-DETECTION-PROJECT.md) - Detailed security project plan
+- [Endpoint Location Creation](ENDPOINT-LOCATION-CREATION.md) - Endpoint location handling documentation
+- [Endpoint Cleanup](ENDPOINT-CLEANUP.md) - Endpoint cleanup procedures
+- [Dialog State Explanation](DIALOG-STATE-EXPLANATION.md) - Dialog state values and troubleshooting
+- [MySQL Port Opening Procedure](MYSQL-PORT-OPENING-PROCEDURE.md) - MySQL port configuration guide
 
 ---
 
