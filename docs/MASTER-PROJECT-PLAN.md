@@ -368,6 +368,18 @@ Comprehensive security enhancement project including registration security, rate
 - 📋 **Service Management** - Manage Linux systemd services
 - 📋 **S3/Minio Object Storage Management** - Manage backup storage
 
+**🔍 Requirements to Investigate:**
+- 🔍 **Flexible Deployment** - Support both co-located (same server as OpenSIPS) and separate deployment
+  - **Current State:** Admin panel can run on same server as OpenSIPS
+  - **Requirement:** Must also support remote deployment (different server)
+  - **Potential Solution:** Containerization (Docker) for easier deployment flexibility
+  - **Investigation Needed:**
+    - Evaluate containerization approach (Docker/Docker Compose)
+    - Assess remote database connection requirements
+    - Consider network security implications (database access across servers)
+    - Evaluate alternative deployment methods (if containerization not preferred)
+  - **Dependencies:** May align with Containerization project (Section 6)
+
 **Architecture:**
 - **Stack:** Laravel 12 + Filament 3.x (TALL stack)
 - **Database:** Shared MySQL database with OpenSIPS
@@ -391,6 +403,7 @@ Comprehensive security enhancement project including registration security, rate
 - Security project Phase 3 (for security event viewing)
 - Security project Phase 5 (for IP blocking/whitelisting)
 - Statistics project (for enhanced dashboard)
+- Containerization project (for flexible deployment - optional but recommended)
 
 #### 5.2 Backup & Recovery
 
@@ -449,6 +462,14 @@ Comprehensive security enhancement project including registration security, rate
 - Multi-container: OpenSIPS + MySQL + Management Interface
 - Use RDS MySQL for production (managed)
 - Host networking mode for SIP UDP
+
+**Admin Panel Deployment Flexibility:**
+- Support both co-located (same Docker Compose stack) and separate deployment
+- Admin panel container should be able to connect to remote MySQL database
+- Enable flexible deployment scenarios:
+  - **Co-located:** Admin panel in same Docker Compose as OpenSIPS (shared network)
+  - **Separate:** Admin panel on different server/container (remote database connection)
+- Consider network security for remote database access (VPN, firewall rules, MySQL user permissions)
 
 **Files to Create:**
 - `Dockerfile` - OpenSIPS container
