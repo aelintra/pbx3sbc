@@ -411,7 +411,7 @@ Comprehensive security enhancement project including registration security, rate
 **Priority:** Medium (after local testing)  
 **Timeline:** 4-6 weeks
 
-**From PROJECT-STATUS.md:**
+**Containerization:**
 - Containerize OpenSIPS deployment
 - Multi-container architecture
 - AWS/cloud deployment ready
