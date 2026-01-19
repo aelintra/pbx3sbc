@@ -7,6 +7,8 @@
 
 ## Executive Summary
 
+**⚠️ TOP PRIORITY:** This migration is now the **highest priority** project to prevent increasing technical debt. All other major work should wait until this is complete.
+
 This document outlines the plan to migrate from our custom `endpoint_locations` table to OpenSIPS's standard `usrloc` module and `location` table. This migration will:
 
 - ✅ Fix stale registration issue (currently storing before reply)
@@ -866,6 +868,240 @@ Based on research, identified risks:
 **Phase 0 Status:** ✅ Complete  
 **Next Phase:** Phase 1 - Module Setup & Configuration  
 **Blockers:** None (can proceed with Phase 1 while investigating knowledge gaps)
+
+---
+
+## 🎯 Easy-to-Digest Migration Steps
+
+**Goal:** Break down the 5-week migration into small, manageable daily tasks.
+
+### Week 1: Research & Setup (Days 1-5)
+
+#### Day 1: Verify Environment
+- [ ] Check OpenSIPS version: `opensips -V`
+- [ ] Verify `usrloc` module exists: `ls /usr/lib/x86_64-linux-gnu/opensips/modules/usrloc.so`
+- [ ] Check MySQL database connection works
+- [ ] Review current `endpoint_locations` table structure
+- [ ] **Time:** 1-2 hours
+
+#### Day 2: Create Location Table
+- [ ] Find OpenSIPS location table schema (in `dbsource/opensips-3.6.3-sqlite3.sql`)
+- [ ] Convert to MySQL format (INTEGER → INT, etc.)
+- [ ] Run CREATE TABLE script on MySQL
+- [ ] Verify table created: `DESCRIBE location;`
+- [ ] **Time:** 1-2 hours
+
+#### Day 3: Load Modules in Config
+- [ ] Add `loadmodule "usrloc.so"` to config
+- [ ] Add `loadmodule "domain.so"` to config (if not already loaded)
+- [ ] Add module parameters (db_url, db_mode, use_domain=1)
+- [ ] Test config syntax: `opensips -C`
+- [ ] **Time:** 1-2 hours
+
+#### Day 4: Test Basic Save
+- [ ] Add `t_on_reply("handle_reply_reg")` to REGISTER route
+- [ ] Create `onreply_route[handle_reply_reg]` with `save("location")`
+- [ ] Test with one endpoint registration
+- [ ] Verify data appears in `location` table
+- [ ] **Time:** 2-3 hours
+
+#### Day 5: Test Basic Lookup
+- [ ] Create simple test route with `lookup("location", "uri", "sip:user@domain")`
+- [ ] Test with known registered endpoint
+- [ ] Verify `$du` is set correctly
+- [ ] **Time:** 2-3 hours
+
+**Week 1 Goal:** Module loads, basic save/lookup works
+
+---
+
+### Week 2: Domain Context Implementation (Days 6-10)
+
+#### Day 6: Source IP → Dispatcher Lookup
+- [ ] Create helper route: `route[GET_DOMAIN_FROM_SOURCE_IP]`
+- [ ] Query dispatcher table: `SELECT setid FROM dispatcher WHERE destination LIKE '%$si%'`
+- [ ] Test with known Asterisk source IP
+- [ ] Verify setid is returned correctly
+- [ ] **Time:** 2-3 hours
+
+#### Day 7: Dispatcher → Domain Lookup
+- [ ] Extend helper route to query domain table
+- [ ] Query: `SELECT domain FROM domain WHERE setid='...'`
+- [ ] Test end-to-end: source IP → setid → domain
+- [ ] Handle edge cases (no match, multiple matches)
+- [ ] **Time:** 2-3 hours
+
+#### Day 8: Domain-Specific Lookup Route
+- [ ] Create new route: `route[ENDPOINT_LOOKUP_USRLOC]`
+- [ ] Implement: source IP → domain → `lookup("location", "uri", "sip:user@domain")`
+- [ ] Add fallback to wildcard if domain not found (with warning log)
+- [ ] Test with single tenant
+- [ ] **Time:** 3-4 hours
+
+#### Day 9: Multi-Tenant Testing
+- [ ] Set up test: 401@tenant-a.com and 401@tenant-b.com
+- [ ] Test routing from Asterisk A (should route to tenant-a.com)
+- [ ] Test routing from Asterisk B (should route to tenant-b.com)
+- [ ] Verify no cross-tenant routing
+- [ ] **Time:** 3-4 hours
+
+#### Day 10: Integration Testing
+- [ ] Test OPTIONS from Asterisk → endpoint
+- [ ] Test NOTIFY from Asterisk → endpoint
+- [ ] Test INVITE from Asterisk → endpoint
+- [ ] Compare results with old SQL-based lookup
+- [ ] **Time:** 3-4 hours
+
+**Week 2 Goal:** Domain context working, multi-tenant routing correct
+
+---
+
+### Week 3: Parallel Implementation (Days 11-15)
+
+#### Day 11: Dual-Write Registration
+- [ ] Keep existing `endpoint_locations` INSERT
+- [ ] Add `save("location")` in onreply_route
+- [ ] Test registration: verify both tables updated
+- [ ] Compare data between tables
+- [ ] **Time:** 2-3 hours
+
+#### Day 12: Dual-Lookup Testing
+- [ ] Keep existing SQL-based lookup
+- [ ] Add new usrloc-based lookup
+- [ ] Log both results for comparison
+- [ ] Test with various scenarios (exact match, username-only, expired)
+- [ ] **Time:** 3-4 hours
+
+#### Day 13: Request-URI Construction
+- [ ] Verify `$du` from `lookup()` is correct
+- [ ] Test Request-URI construction for routing
+- [ ] Handle Contact header parsing if needed
+- [ ] Test with NAT scenarios
+- [ ] **Time:** 2-3 hours
+
+#### Day 14: Performance Comparison
+- [ ] Measure SQL lookup performance
+- [ ] Measure usrloc lookup performance
+- [ ] Compare registration save performance
+- [ ] Document any performance differences
+- [ ] **Time:** 2-3 hours
+
+#### Day 15: Edge Case Testing
+- [ ] Test expired registrations
+- [ ] Test de-registration (Expires: 0)
+- [ ] Test registration refresh
+- [ ] Test multiple contacts for same AoR
+- [ ] **Time:** 3-4 hours
+
+**Week 3 Goal:** Both implementations working, results match
+
+---
+
+### Week 4: Migration & Cutover (Days 16-20)
+
+#### Day 16: Replace Registration Code
+- [ ] Remove `endpoint_locations` INSERT from request route
+- [ ] Keep only `save("location")` in onreply_route
+- [ ] Test registration flow
+- [ ] Verify no `endpoint_locations` records created
+- [ ] **Time:** 2-3 hours
+
+#### Day 17: Replace OPTIONS/NOTIFY Lookups
+- [ ] Replace SQL lookup with usrloc lookup in OPTIONS route
+- [ ] Replace SQL lookup with usrloc lookup in NOTIFY route
+- [ ] Test both scenarios
+- [ ] **Time:** 2-3 hours
+
+#### Day 18: Replace INVITE Lookup
+- [ ] Replace SQL lookup with usrloc lookup in INVITE route
+- [ ] Test INVITE routing
+- [ ] Test with IP in Request-URI (username-only scenario)
+- [ ] **Time:** 2-3 hours
+
+#### Day 19: Remove All SQL Queries
+- [ ] Search for all `endpoint_locations` references
+- [ ] Remove all SQL queries
+- [ ] Remove `route[ENDPOINT_LOOKUP]` (old SQL-based route)
+- [ ] Test all routing scenarios
+- [ ] **Time:** 3-4 hours
+
+#### Day 20: Comprehensive Testing
+- [ ] Full end-to-end test: registration → lookup → routing
+- [ ] Test all SIP methods (REGISTER, INVITE, OPTIONS, NOTIFY, BYE, ACK)
+- [ ] Test multi-tenant scenarios
+- [ ] Test NAT scenarios
+- [ ] **Time:** 4-5 hours
+
+**Week 4 Goal:** Old code removed, only usrloc used
+
+---
+
+### Week 5: Cleanup & Documentation (Days 21-25)
+
+#### Day 21: Remove Custom Table
+- [ ] Backup `endpoint_locations` data (if needed)
+- [ ] Drop `endpoint_locations` table
+- [ ] Remove table creation from `init-database.sh`
+- [ ] Test fresh installation
+- [ ] **Time:** 1-2 hours
+
+#### Day 22: Remove Cleanup Scripts
+- [ ] Remove `cleanup-expired-endpoints.sh`
+- [ ] Remove systemd timer/service files
+- [ ] Update `install.sh` if needed
+- [ ] **Time:** 1-2 hours
+
+#### Day 23: Update Documentation
+- [ ] Update `PROJECT-CONTEXT.md` (remove endpoint_locations references)
+- [ ] Update `MASTER-PROJECT-PLAN.md` (mark migration complete)
+- [ ] Update any routing documentation
+- [ ] **Time:** 2-3 hours
+
+#### Day 24: Final Testing
+- [ ] Run full test suite
+- [ ] Test with multiple tenants
+- [ ] Test with multiple Asterisk boxes
+- [ ] Performance validation
+- [ ] **Time:** 3-4 hours
+
+#### Day 25: Code Review & Merge
+- [ ] Review all changes
+- [ ] Merge `usrloc` branch to `main`
+- [ ] Tag release
+- [ ] Update deployment documentation
+- [ ] **Time:** 2-3 hours
+
+**Week 5 Goal:** Cleanup complete, migration done
+
+---
+
+## 📋 Daily Checklist Template
+
+For each day, use this checklist:
+
+- [ ] **Morning:** Review day's goals (15 min)
+- [ ] **Work:** Complete day's tasks (2-4 hours)
+- [ ] **Test:** Verify changes work (30 min)
+- [ ] **Document:** Update notes/logs (15 min)
+- [ ] **Evening:** Review tomorrow's tasks (15 min)
+
+**Total Daily Time:** 3-5 hours
+
+---
+
+## 🚨 Risk Mitigation
+
+**If something goes wrong:**
+
+1. **Day 1-5 (Week 1):** Easy rollback - just remove module load
+2. **Day 6-10 (Week 2):** Can disable new route, use old SQL lookup
+3. **Day 11-15 (Week 3):** Both implementations running - no risk
+4. **Day 16-20 (Week 4):** Can revert to dual-write if issues
+5. **Day 21-25 (Week 5):** Can restore table from backup
+
+**Rollback Strategy:** Keep `usrloc` branch separate until fully tested, then merge.
+
+---
 
 ### 8. Contact Header Parsing - Additional Information
 
