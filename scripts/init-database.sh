@@ -11,6 +11,9 @@ DB_PASS="${DB_PASS:-your-password}"
 OPENSIPS_USER="${OPENSIPS_USER:-opensips}"
 OPENSIPS_GROUP="${OPENSIPS_GROUP:-opensips}"
 
+# Get script directory (for location table creation script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root (use sudo)"
     exit 1
@@ -106,37 +109,42 @@ else
     echo "  ✓ Domain schema loaded successfully."
 fi
 
-# Create custom endpoint_locations table (MySQL syntax)
-echo "Creating custom endpoint_locations table..."
+# Ensure domain module version entry exists in version table (required for domain module)
+echo "Ensuring domain module version entry exists..."
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
-CREATE TABLE IF NOT EXISTS endpoint_locations (
-    aor VARCHAR(255) PRIMARY KEY,
-    contact_ip VARCHAR(45) NOT NULL,
-    contact_port VARCHAR(10) NOT NULL,
-    contact_uri VARCHAR(255) NOT NULL,
-    expires DATETIME NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_endpoint_locations_expires ON endpoint_locations(expires);
+INSERT INTO version (table_name, table_version) VALUES ('domain', 4)
+ON DUPLICATE KEY UPDATE table_version = 4;
 EOF
+echo "  ✓ Domain module version entry verified."
 
-# Add contact_uri column to existing tables (if table exists but column doesn't)
-echo "Ensuring contact_uri column exists in endpoint_locations table..."
+# Create OpenSIPS location table for usrloc module
+# Idempotent: check if table exists before creating
+echo "Creating OpenSIPS location table (for usrloc module)..."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'location';" 2>/dev/null | grep -q "location"; then
+    echo "  ✓ location table already exists - skipping creation (idempotent)"
+else
+    # Use our custom location table script (converted from SQLite to MySQL)
+    if [[ -f "${SCRIPT_DIR}/create-location-table.sql" ]]; then
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCRIPT_DIR}/create-location-table.sql"
+        echo "  ✓ Location table created successfully."
+    else
+        echo "  Warning: create-location-table.sql not found at ${SCRIPT_DIR}/create-location-table.sql"
+        echo "  Location table will not be created - usrloc module migration will require manual table creation"
+    fi
+fi
+
+# Ensure location module version entry exists in version table (required for usrloc module)
+# Version 1013 is the expected version for OpenSIPS 3.6.3
+echo "Ensuring location module version entry exists..."
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-                   WHERE TABLE_SCHEMA = DATABASE() 
-                   AND TABLE_NAME = 'endpoint_locations' 
-                   AND COLUMN_NAME = 'contact_uri');
-SET @sql = IF(@col_exists = 0,
-    'ALTER TABLE endpoint_locations ADD COLUMN contact_uri VARCHAR(255) NOT NULL DEFAULT "" AFTER contact_port',
-    'SELECT "Column contact_uri already exists" AS message');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Migrate existing data: populate contact_uri from aor if empty
-UPDATE endpoint_locations SET contact_uri = CONCAT('sip:', aor) WHERE contact_uri = '' OR contact_uri IS NULL;
+INSERT INTO version (table_name, table_version) VALUES ('location', 1013)
+ON DUPLICATE KEY UPDATE table_version = 1013;
 EOF
+echo "  ✓ Location module version entry verified."
+
+# Note: endpoint_locations table creation removed - migration to location table complete
+# All endpoint location tracking now uses OpenSIPS standard location table via usrloc module
+# See scripts/create-location-table.sql for location table schema
 
 # Add setid column to domain table (if not exists)
 echo "Adding setid column to domain table..."

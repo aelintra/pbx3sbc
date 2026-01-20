@@ -54,6 +54,14 @@ loadmodule "nathelper.so"
 loadmodule "dialog.so"
 # Accounting module for CDR (Call Detail Records)
 loadmodule "acc.so"
+# User location module for endpoint registration tracking (usrloc migration)
+loadmodule "usrloc.so"
+# Signaling module (required dependency for registrar module)
+loadmodule "signaling.so"
+# Registrar module provides save() and lookup() functions (uses usrloc as backend)
+loadmodule "registrar.so"
+# Domain module for domain management (used with usrloc for multi-tenant support)
+loadmodule "domain.so"
 
 ####### Module Parameters ########
 
@@ -91,6 +99,36 @@ modparam("acc", "detect_direction", 1)
 modparam("acc", "extra_fields", "db:from_uri->from_uri;to_uri->to_uri")
 # Note: from_uri and to_uri columns are added to acc table via init-database.sh
 # These are populated via $acc_extra() in the script (see INVITE handling)
+
+# --- User location module (usrloc migration) ---
+modparam("usrloc", "db_url", "mysql://opensips:your-password@localhost/opensips")
+# db_mode: 0 = memory only, 1 = DB only, 2 = cached DB (we use 2 for cached DB - best balance)
+modparam("usrloc", "db_mode", 2)
+# use_domain: 1 = domain-aware (REQUIRED for multi-tenant - allows same username across domains)
+modparam("usrloc", "use_domain", 1)
+# nat_bflag: Flag name for NAT detection (used with nathelper module)
+modparam("usrloc", "nat_bflag", "NAT")
+# timer_interval: How often to flush cached contacts to DB (seconds, default 60)
+modparam("usrloc", "timer_interval", 10)
+# regen_broken_contactid: Regenerate invalid/broken contact_id values on startup
+# This fixes contact_id values that are out of range or invalid (e.g., from schema migration)
+modparam("usrloc", "regen_broken_contactid", 1)
+
+# --- Registrar module (provides save() and lookup() functions) ---
+# mcontact_avp: AVP name where registrar module stores modified Contact from main registrar's 200 OK reply
+# When the main registrar modifies the Contact header in its 200 OK reply, registrar module stores it here
+# This allows save() in onreply_route to use the modified Contact (if reply Contact is modified)
+# NOTE: If reply Contact is <null> or missing, save() cannot extract contact info and will fail
+modparam("registrar", "mcontact_avp", "$avp(mcontact)")
+
+# --- Domain module (multi-tenant support) ---
+modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
+# db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 2 for cached DB)
+modparam("domain", "db_mode", 2)
+# domain_table: Name of the domain table (default: "domain")
+modparam("domain", "domain_table", "domain")
+# domain_col: Column name for domain (default: "domain")
+modparam("domain", "domain_col", "domain")
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -202,46 +240,83 @@ route {
                         $var(endpoint_user) = $rU;
                     }
                     
-                    # Try to get domain from To header, but if it's an IP, use username-only lookup
+                    # Try to get domain from To header
                     $var(to_domain) = $(tu{uri.domain});
+                    $var(lookup_uri) = "";
+                    
+                    # Check if To header domain is an IP address (not a domain name)
                     if ($var(to_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        # To header has IP, not domain - will use username-only lookup
-                        $var(endpoint_aor) = "";
+                        # To header has IP, not domain - determine domain from Asterisk source IP
+                        # This is CRITICAL for multi-tenant deployments (same extension numbers across customers)
+                        route(GET_DOMAIN_FROM_SOURCE_IP);
+                        if ($var(domain_detection_success) == 1) {
+                            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+                            xlog("OPTIONS/NOTIFY: To header has IP ($var(to_domain)), determined domain from source IP: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
+                        } else {
+                            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@*";
+                            xlog("L_WARN", "OPTIONS/NOTIFY: To header has IP ($var(to_domain)), but could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+                        }
                     } else if ($var(to_domain) != "") {
-                        # To header has domain - use for exact match
-                        $var(endpoint_aor) = $var(endpoint_user) + "@" + $var(to_domain);
+                        # To header has domain - use domain-specific lookup (CORRECT for multi-tenant)
+                        $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(to_domain);
+                        xlog("OPTIONS/NOTIFY: Using domain-specific lookup: $var(lookup_uri)\n");
                     } else {
-                        # No domain in To header - will use username-only lookup
-                        $var(endpoint_aor) = "";
+                        # No domain in To header - try to determine from source IP
+                        route(GET_DOMAIN_FROM_SOURCE_IP);
+                        if ($var(domain_detection_success) == 1) {
+                            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+                            xlog("OPTIONS/NOTIFY: No domain in To header, determined domain from source IP: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
+                        } else {
+                            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@*";
+                            xlog("L_WARN", "OPTIONS/NOTIFY: No domain in To header and could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+                        }
                     }
                     
-                    xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
+                    xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint: $var(lookup_uri) (user: $var(endpoint_user))\n");
                     
-                    # Use helper route to look up endpoint location
-                    $var(lookup_user) = $var(endpoint_user);
-                    $var(lookup_aor) = $var(endpoint_aor);
-                    route(ENDPOINT_LOOKUP);
+                    # Use OpenSIPS lookup() function to find endpoint in location table
+                    # lookup() uses Request-URI to find contacts, so we need to set it first
+                    # Save original Request-URI
+                    $var(original_ru) = $ru;
                     
-                    xlog("OPTIONS/NOTIFY: After ENDPOINT_LOOKUP, lookup_success=$var(lookup_success), endpoint_ip=$var(endpoint_ip), endpoint_port=$var(endpoint_port)\n");
-                    
-                    # Check if endpoint was found
-                    if ($var(lookup_success) == 1) {
-                        # Get username from Request-URI or To header for destination URI
-                        $var(target_user) = $tU;
-                        if ($var(target_user) == "") {
-                            $var(target_user) = $rU;
+                    # Check if we have a wildcard lookup (contains @*)
+                    if ($var(lookup_uri) =~ "@\\*") {
+                        # Wildcard lookup - need to use SQL query for now
+                        # TODO: Improve this to determine domain from dispatcher setid
+                        xlog("OPTIONS/NOTIFY: Wildcard lookup detected, using SQL fallback\n");
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                        if (sql_query($var(query), "$avp(contact_uri)") && $(avp(contact_uri)[0]) != "") {
+                            $du = $(avp(contact_uri)[0]);
+                            $ru = $du;
+                            xlog("OPTIONS/NOTIFY: SQL lookup found contact: $du\n");
+                            route(RELAY);
+                            exit;
+                        } else {
+                            $ru = $var(original_ru);
+                            xlog("OPTIONS/NOTIFY: SQL lookup returned no results\n");
                         }
+                    } else {
+                        # Domain-specific lookup - set Request-URI and use lookup()
+                        $ru = $var(lookup_uri);
                         
-                        # For OPTIONS/NOTIFY, use simple URI construction (no domain fallback needed)
-                        # Set endpoint_user for BUILD_ENDPOINT_URI
-                        $var(endpoint_user) = $var(target_user);
-                        # Clear AoR to force simple IP-based Request-URI
-                        $var(endpoint_aor) = "";
-                        route(BUILD_ENDPOINT_URI);
-                        
-                        xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru, Call-ID=$hdr(Call-ID)\n");
-                        route(RELAY);
-                        exit;
+                        # lookup() sets $du automatically if contact found
+                        if (lookup("location")) {
+                            # Contact found - $du is set automatically by lookup()
+                            xlog("OPTIONS/NOTIFY: lookup() found contact, $du=$du\n");
+                            
+                            # Request-URI is already set to destination by lookup()
+                            xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru, Call-ID=$hdr(Call-ID)\n");
+                            route(RELAY);
+                            exit;
+                        } else {
+                            # Restore original Request-URI
+                            $ru = $var(original_ru);
+                            xlog("OPTIONS/NOTIFY: lookup() returned FALSE - no contact found for $var(lookup_uri)\n");
+                        }
                     }
                     
                     # Endpoint lookup failed - handle fallback
@@ -280,28 +355,27 @@ route {
         xlog("OPTIONS/NOTIFY from $si - Request-URI doesn't look like endpoint, continuing normal routing\n");
     }
     
-    # ---- Handle REGISTER to track endpoint locations ----
+    # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
     if (is_method("REGISTER")) {
         if ($hdr(Contact) != "") {
-            $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
-            $var(endpoint_ip) = $si;
-            if ($sp != "" && $sp != "0") {
-                $var(endpoint_port) = $sp;
-            } else {
-                $var(endpoint_port) = "5060";
-            }
-            
+            # Fix NAT in REGISTER request (needed for proper Contact header handling)
+            # This updates Contact header with public IP if behind NAT
             fix_nated_register();
-            if ($hdr(Expires) != "" && $hdr(Expires) != "0") {
-                $var(expires_int) = $hdr(Expires);
-            } else {
-                $var(expires_int) = "3600";
-            }
-            $var(contact_uri) = "sip:" + $tU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
             
-            $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, contact_uri, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(endpoint_ip) + "', '" + $var(endpoint_port) + "', '" + $var(contact_uri) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(endpoint_ip) + "', contact_port='" + $var(endpoint_port) + "', contact_uri='" + $var(contact_uri) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
-            sql_query($var(query), "$avp(reg_result)");
-            xlog("REGISTER: Stored endpoint $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires $var(expires_int)s)\n");
+            # Store original Contact header (with NAT fixes) in AVP for diagnostic purposes
+            # NOTE: save() extracts Contact from the REPLY, not the request
+            # If reply Contact is <null>, save() cannot work (this is a limitation of proxy-registrar mode)
+            # We store request Contact here only for logging/diagnostics
+            $avp(reg_contact) = $hdr(Contact);
+            
+            # Arm reply handler to save location only on successful registration (2xx)
+            # This follows OpenSIPS proxy-registrar pattern: save AFTER successful reply
+            # The save() function will use contact information from the 200 OK reply
+            # (including any modifications from the main registrar) via mcontact_avp
+            # If reply Contact is <null>, it will use $avp(mcontact) from the request
+            t_on_reply("handle_reply_reg");
+            
+            xlog("REGISTER: Request from $si:$sp, To=$tU@$(tu{uri.domain}), Contact=$hdr(Contact), will save location on 2xx reply\n");
         }
     }
 
@@ -331,25 +405,46 @@ route[DOMAIN_CHECK] {
         # Extract username from Request-URI
         $var(endpoint_user) = $rU;
         
-        # Use helper route to look up endpoint location (AoR, IP, and port)
-        $var(lookup_user) = $var(endpoint_user);
-        $var(lookup_aor) = "";  # Start with username-only lookup
-        route(ENDPOINT_LOOKUP);
+        # Determine domain from Asterisk source IP (CRITICAL for multi-tenant support)
+        # This ensures we route to the correct customer when same extension numbers exist across domains
+        route(GET_DOMAIN_FROM_SOURCE_IP);
+        $var(original_ru) = $ru;
         
-        # Check if endpoint was found
-        if ($var(lookup_success) == 1) {
-            xlog("Endpoint lookup result: AoR=$var(endpoint_aor), IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
+        if ($var(domain_detection_success) == 1) {
+            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+            xlog("INVITE: Determined domain from source IP $si: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
             
-            # Build destination URI and Request-URI using helper route
-            route(BUILD_ENDPOINT_URI);
-            
-            xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru (endpoint lookup)\n");
-            route(RELAY);
-            exit;
+            # Set Request-URI and use lookup() function
+            $ru = $var(lookup_uri);
+            if (lookup("location")) {
+                # Contact found - $du is set automatically by lookup()
+                xlog("INVITE: lookup() found contact: $du for user $var(endpoint_user)@$var(domain_from_source)\n");
+                xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
+                route(RELAY);
+                exit;
+            } else {
+                # Domain-specific lookup failed
+                $ru = $var(original_ru);
+                xlog("L_WARN", "INVITE: Domain-specific lookup failed for $var(endpoint_user)@$var(domain_from_source) (source IP $si)\n");
+            }
+        } else {
+            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+            xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+            $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(contact_uri)") && $(avp(contact_uri)[0]) != "") {
+                $du = $(avp(contact_uri)[0]);
+                $ru = $du;
+                xlog("INVITE: SQL wildcard lookup found contact: $du for user $var(endpoint_user)\n");
+                xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
+                route(RELAY);
+                exit;
+            }
         }
         
         # If endpoint lookup failed, log and send 404
-        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in database\n");
+        $ru = $var(original_ru);
+        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in location table\n");
         sl_send_reply(404, "Endpoint Not Found");
         exit;
     }
@@ -567,170 +662,63 @@ route[WITHINDLG] {
 
 ####### Helper Routes ########
 
-# Endpoint lookup helper route
-# Looks up endpoint location from database by username and/or AoR
+# Domain detection helper route (multi-tenant support)
+# Determines domain from Asterisk source IP for proper multi-tenant routing
 # 
 # Input variables:
-#   $var(lookup_user) - Username to look up (required)
-#   $var(lookup_aor)  - Optional AoR for exact match (e.g., "user@domain.com")
+#   $si - Source IP (automatically available, no need to set)
 #
 # Output variables:
-#   $var(endpoint_ip)   - Endpoint IP address if found
-#   $var(endpoint_port) - Endpoint port if found (defaults to 5060)
-#   $var(endpoint_aor)  - Full AoR if found (e.g., "user@domain.com")
-#   $var(lookup_success) - 1 if endpoint found, 0 if not found
+#   $var(domain_from_source) - Domain name if found (empty if not found)
+#   $var(domain_detection_success) - 1 if domain found, 0 if not found
 #
 # Usage:
-#   $var(lookup_user) = "40004";
-#   $var(lookup_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
-#   route(ENDPOINT_LOOKUP);
-#   if ($var(lookup_success) == 1) {
-#       # Use $var(endpoint_ip), $var(endpoint_port), $var(endpoint_aor)
+#   route(GET_DOMAIN_FROM_SOURCE_IP);
+#   if ($var(domain_detection_success) == 1) {
+#       # Use $var(domain_from_source) for domain-specific lookup
 #   }
-route[ENDPOINT_LOOKUP] {
-    $var(endpoint_ip) = "";
-    $var(endpoint_port) = "";
-    $var(endpoint_aor) = "";
-    $var(contact_uri) = "";
-    $var(lookup_success) = 0;
+#
+# Logic:
+#   1. Query dispatcher table to find setid for source IP
+#   2. Query domain table to find domain for that setid
+#   3. Returns domain if found, empty if not found
+route[GET_DOMAIN_FROM_SOURCE_IP] {
+    $var(domain_from_source) = "";
+    $var(domain_detection_success) = 0;
     
-    if ($var(lookup_user) == "" || $var(lookup_user) == "0" || $var(lookup_user) == "<null>") {
+    # Step 1: Find dispatcher setid for this source IP
+    # Dispatcher destinations are stored as "sip:IP:port" (e.g., "sip:10.0.1.10:5060")
+    # We match the IP part using LIKE with proper delimiters to avoid substring matches
+    # Match pattern: sip:IP: or sip:IP followed by end of string
+    # This ensures we match the exact IP, not a substring (e.g., 10.0.1.10 vs 10.0.1.100)
+    $var(query) = "SELECT setid FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    if (!sql_query($var(query), "$avp(source_setid)")) {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Query failed for source IP $si\n");
         return;
     }
     
-    # Try exact AoR match first (if provided)
-    if ($var(lookup_aor) != "") {
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
-            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-            if (sql_query($var(query), "$avp(endpoint_port)")) {
-                $var(endpoint_port) = $(avp(endpoint_port)[0]);
-            }
-            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-            if (sql_query($var(query), "$avp(contact_uri)")) {
-                $var(contact_uri) = $(avp(contact_uri)[0]);
-            }
-            $var(endpoint_aor) = $var(lookup_aor);
-        }
-    }
-    
-    # Fallback: username-only lookup
-    if ($var(endpoint_ip) == "") {
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
-            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_port)")) {
-                $var(endpoint_port) = $(avp(endpoint_port)[0]);
-            }
-            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(contact_uri)")) {
-                $var(contact_uri) = $(avp(contact_uri)[0]);
-            }
-            $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_aor)")) {
-                $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
-            }
-        }
-    }
-    
-    if ($var(endpoint_ip) != "") {
-        route(VALIDATE_ENDPOINT);
-        if ($var(contact_uri) == "" && $var(endpoint_aor) != "") {
-            $var(contact_uri) = "sip:" + $var(endpoint_aor);
-        }
-        $var(lookup_success) = 1;
-    }
-    return;
-}
-
-# Endpoint validation helper route
-# Validates endpoint IP and port, sets defaults
-# 
-# Input variables:
-#   $var(endpoint_ip)   - Endpoint IP address (required)
-#   $var(endpoint_port) - Endpoint port (optional, defaults to 5060)
-#
-# Output variables:
-#   $var(endpoint_ip)   - Validated IP (unchanged if valid)
-#   $var(endpoint_port) - Validated port (defaults to 5060 if empty/invalid)
-#
-# Usage:
-#   $var(endpoint_ip) = "192.168.1.100";
-#   $var(endpoint_port) = "";  # Will be set to 5060
-#   route(VALIDATE_ENDPOINT);
-route[VALIDATE_ENDPOINT] {
-    # Validate IP is not empty
-    if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
-        xlog("L_ERR", "VALIDATE_ENDPOINT: endpoint_ip is empty or invalid\n");
+    $var(setid) = $(avp(source_setid)[0]);
+    if ($var(setid) == "" || $var(setid) == "0") {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: No dispatcher setid found for source IP $si\n");
         return;
     }
     
-    # Set default port if empty or invalid
-    if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-        $var(endpoint_port) = "5060";
+    # Step 2: Find domain for this setid
+    $var(query) = "SELECT domain FROM domain WHERE setid='" + $var(setid) + "' AND enabled=1 LIMIT 1";
+    if (!sql_query($var(query), "$avp(source_domain)")) {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Domain query failed for setid $var(setid)\n");
+        return;
     }
     
-    # Route returns normally to caller (no exit needed)
-}
-
-# Build endpoint URI helper route
-# Constructs destination URI ($du) and Request-URI ($ru) for routing to endpoints
-# Uses stored contact_uri for Request-URI to ensure it matches Contact URI from REGISTER
-#
-# Input variables:
-#   $var(endpoint_user)   - Username for the endpoint (required)
-#   $var(endpoint_ip)     - Endpoint IP address (required)
-#   $var(endpoint_port)   - Endpoint port (required, should be validated)
-#   $var(endpoint_aor)    - Full AoR (user@domain) if available (optional)
-#   $var(contact_uri)     - Stored Contact URI format (from REGISTER) for Request-URI matching (optional)
-#
-# Output variables:
-#   $du - Destination URI (sip:user@ip:port) for routing
-#   $ru - Request-URI (uses stored contact_uri if available, otherwise fallback to AoR format)
-#
-# Usage:
-#   $var(endpoint_user) = "40004";
-#   $var(endpoint_ip) = "192.168.1.100";
-#   $var(endpoint_port) = "5060";
-#   $var(endpoint_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
-#   $var(contact_uri) = "sip:40004@pbx3sbc.vcloudpbx.com";  # Optional, from ENDPOINT_LOOKUP
-#   route(BUILD_ENDPOINT_URI);
-route[BUILD_ENDPOINT_URI] {
-    # Build destination URI with IP:port for routing (NAT traversal)
-    $du = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-    
-    # Use stored contact_uri if available (ensures Request-URI matches Contact URI from REGISTER)
-    # This fixes the "broken registrar" issue for Snom and other endpoints
-    if ($var(contact_uri) != "" && $var(contact_uri) != "0") {
-        $ru = $var(contact_uri);
-        xlog("BUILD_ENDPOINT_URI: Using stored Contact-URI for Request-URI: $ru\n");
-    } else if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-        # Fallback: AoR has domain (not IP), use it directly
-        $ru = "sip:" + $var(endpoint_aor);
-        xlog("BUILD_ENDPOINT_URI: Using AoR directly in Request-URI (fallback): $ru\n");
+    $var(domain_from_source) = $(avp(source_domain)[0]);
+    if ($var(domain_from_source) != "") {
+        $var(domain_detection_success) = 1;
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Found domain $var(domain_from_source) for source IP $si (setid $var(setid))\n");
     } else {
-        # Last resort: extract domain from To header or use IP
-        $var(endpoint_domain) = "";
-        if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@(.+)") {
-            $var(endpoint_domain) = $re;
-        }
-        # Try To header as fallback
-        if (($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") && $(tu{uri.domain}) != "" && $(tu{uri.domain}) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-            $var(endpoint_domain) = $(tu{uri.domain});
-        }
-        if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-            $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
-            xlog("BUILD_ENDPOINT_URI: Using extracted domain in Request-URI (fallback): $ru\n");
-        } else {
-            # Last resort: use IP if domain not found (shouldn't happen with proper registration)
-            xlog("L_WARN", "BUILD_ENDPOINT_URI: Cannot determine domain, using IP in Request-URI (last resort): $du\n");
-            $ru = $du;
-        }
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: No domain found for setid $var(setid) (source IP $si)\n");
     }
     
-    # Route returns normally to caller (no exit needed)
+    return;
 }
 
 # Check if IP address is private (RFC 1918)
@@ -816,13 +804,68 @@ route[RELAY] {
             route(CHECK_PRIVATE_IP);
             
             if ($var(is_private) == 1 && $rU != "") {
-                $var(lookup_user) = $rU;
-                $var(lookup_aor) = "";
-                route(ENDPOINT_LOOKUP);
+                # Use location table for NAT handling (migrated from endpoint_locations)
+                # Extract username and domain from Request-URI
+                $var(nat_lookup_user) = $rU;
+                $var(nat_lookup_domain) = $rd;
                 
-                if ($var(lookup_success) == 1 && $var(endpoint_ip) != "" && $var(endpoint_ip) != "0" && $var(endpoint_ip) != "<null>") {
-                    $du = "sip:" + $rU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                    xlog("RELAY: $rm - Updated destination to NAT IP: $du (was $ru)\n");
+                # Check if domain is an IP address (not a domain name)
+                if ($var(nat_lookup_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Domain is IP - try to determine domain from source IP
+                    route(GET_DOMAIN_FROM_SOURCE_IP);
+                    if ($var(domain_detection_success) == 1) {
+                        $var(nat_lookup_domain) = $var(domain_from_source);
+                    }
+                }
+                
+                # Query location table for contact information
+                # First try received field (NAT traversal), then fallback to contact field
+                $var(nat_contact_found) = 0;
+                
+                if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Domain-specific lookup (preferred for multi-tenant)
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                } else {
+                    # Fallback: username-only lookup (wildcard)
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                }
+                
+                # Try received field first (NAT traversal)
+                if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "") {
+                    # received field contains IP:port from NAT traversal
+                    if ($(avp(nat_received)[0]) =~ "^([^:]+):([0-9]+)") {
+                        $var(nat_ip) = $re;
+                        $var(nat_port) = $(re[1]);
+                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
+                        $var(nat_contact_found) = 1;
+                    }
+                }
+                
+                # Fallback to contact field if received not available
+                if ($var(nat_contact_found) == 0) {
+                    if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    } else {
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    }
+                    
+                    if (sql_query($var(query), "$avp(nat_contact)") && $(avp(nat_contact)[0]) != "") {
+                        # Extract IP:port from contact field
+                        $var(contact_uri) = $(avp(nat_contact)[0]);
+                        # Contact format: sip:user@ip:port or <sip:user@ip:port>
+                        if ($var(contact_uri) =~ "@([^:>]+):([0-9]+)") {
+                            $var(nat_ip) = $re;
+                            $var(nat_port) = $(re[1]);
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                            xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                        } else if ($var(contact_uri) =~ "@([^:>]+)") {
+                            # No port in contact, use default 5060
+                            $var(nat_ip) = $re;
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                            xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                        }
+                    }
                 }
             }
         }
@@ -920,7 +963,11 @@ onreply_route {
     # fix_nated_contact() fixes Contact headers in responses
     # fix_nated_sdp() with "rewrite-media-ip" flag rewrites the media IP address (c= line) in SDP
     # This ensures Asterisk receives the public NAT IP instead of private IP for RTP
-    fix_nated_contact();
+    # CRITICAL: Do NOT fix Contact header for REGISTER responses - the Contact header contains
+    # the endpoint's contact information from Asterisk, and we must preserve it for save() to work
+    if (!is_method("REGISTER")) {
+        fix_nated_contact();
+    }
     if ($hdr(Content-Type) =~ "application/sdp") {
         fix_nated_sdp("rewrite-media-ip");
         xlog("Fixed NAT in SDP for response $rs from $si\n");
@@ -945,24 +992,58 @@ onreply_route {
         
         # Diagnostic logging: Check endpoint IPs for SDP troubleshooting
         # This helps diagnose RTP issues regardless of whether call is from Asterisk or endpoint
+        # Updated to use location table (migrated from endpoint_locations)
         if ($var(to_user) != "") {
-            # Look up endpoint IP from database for the callee (To header)
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                if ($(avp(endpoint_ip)[0]) != "") {
-                    $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                    xlog("Callee endpoint IP from database: $var(endpoint_ip) (user=$var(to_user))\n");
+            # Look up endpoint contact from location table for the callee (To header)
+            # Use received field if available (NAT), otherwise extract from contact field
+            $var(query) = "SELECT received FROM location WHERE username='" + $var(to_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(endpoint_received)")) {
+                if ($(avp(endpoint_received)[0]) != "") {
+                    # received field contains IP:port
+                    if ($(avp(endpoint_received)[0]) =~ "^([^:]+)") {
+                        $var(endpoint_ip) = $re;
+                        xlog("Callee endpoint IP from location table (received): $var(endpoint_ip) (user=$var(to_user))\n");
+                    }
+                } else {
+                    # Fallback to contact field
+                    $var(query) = "SELECT contact FROM location WHERE username='" + $var(to_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    if (sql_query($var(query), "$avp(endpoint_contact)")) {
+                        if ($(avp(endpoint_contact)[0]) != "") {
+                            $var(contact_uri) = $(avp(endpoint_contact)[0]);
+                            # Extract IP from contact: sip:user@ip:port
+                            if ($var(contact_uri) =~ "@([^:>]+)") {
+                                $var(endpoint_ip) = $re;
+                                xlog("Callee endpoint IP from location table (contact): $var(endpoint_ip) (user=$var(to_user))\n");
+                            }
+                        }
+                    }
                 }
             }
         }
         
         # Also check the caller's endpoint IP
         if ($var(from_user) != "") {
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(caller_ip)")) {
-                if ($(avp(caller_ip)[0]) != "") {
-                    $var(caller_ip) = $(avp(caller_ip)[0]);
-                    xlog("Caller endpoint IP from database: $var(caller_ip) (user=$var(from_user))\n");
+            $var(query) = "SELECT received FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(caller_received)")) {
+                if ($(avp(caller_received)[0]) != "") {
+                    # received field contains IP:port
+                    if ($(avp(caller_received)[0]) =~ "^([^:]+)") {
+                        $var(caller_ip) = $re;
+                        xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user))\n");
+                    }
+                } else {
+                    # Fallback to contact field
+                    $var(query) = "SELECT contact FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    if (sql_query($var(query), "$avp(caller_contact)")) {
+                        if ($(avp(caller_contact)[0]) != "") {
+                            $var(contact_uri) = $(avp(caller_contact)[0]);
+                            # Extract IP from contact: sip:user@ip:port
+                            if ($var(contact_uri) =~ "@([^:>]+)") {
+                                $var(caller_ip) = $re;
+                                xlog("Caller endpoint IP from location table (contact): $var(caller_ip) (user=$var(from_user))\n");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -982,6 +1063,71 @@ onreply_route {
         exit;
     }
     # If we get here, exit to let transaction module handle it
+    exit;
+}
+
+# --- REGISTER reply handler (usrloc migration) ---
+# This handler saves endpoint locations only on successful registration (2xx)
+# Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
+# --- REGISTER reply handler (usrloc migration) ---
+# This handler saves endpoint locations only on successful registration (2xx)
+# Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
+# The save() function uses contact information from the 200 OK reply (via mcontact_avp)
+# which includes any modifications made by the main registrar (e.g., expiration changes)
+onreply_route[handle_reply_reg] {
+    if (is_method("REGISTER")) {
+        # Only save location on successful registration (2xx response)
+        if (t_check_status("2[0-9][0-9]")) {
+            # DIAGNOSTIC: Log all relevant values before calling save()
+            xlog("REGISTER: === DIAGNOSTIC INFO BEFORE save() ===\n");
+            xlog("REGISTER: Response: $rs $rr\n");
+            xlog("REGISTER: To URI: $tu\n");
+            xlog("REGISTER: To User: $tU\n");
+            xlog("REGISTER: To Domain: $(tu{uri.domain})\n");
+            xlog("REGISTER: Reply Contact header: [$hdr(Contact)]\n");
+            xlog("REGISTER: Reply Expires header: [$hdr(Expires)]\n");
+            xlog("REGISTER: Request Contact (stored for diagnostics): [$avp(reg_contact)]\n");
+            xlog("REGISTER: Modified Contact AVP (from registrar module): [$avp(mcontact)]\n");
+            xlog("REGISTER: Source IP:Port: $si:$sp\n");
+            xlog("REGISTER: Call-ID: $hdr(Call-ID)\n");
+            
+            # Check if Contact is actually null/empty
+            # CRITICAL: save() extracts contact from the REPLY, not the request
+            # If reply Contact is <null>, save() cannot work - this is a limitation of proxy-registrar mode
+            if ($hdr(Contact) == "") {
+                xlog("REGISTER: ERROR: Reply Contact header is empty/null - save() cannot extract contact info!\n");
+                xlog("REGISTER: save() requires Contact header in the 200 OK reply to work\n");
+                xlog("REGISTER: This registration will NOT be saved to location table\n");
+                # Don't call save() if reply Contact is missing - it will fail silently
+                exit;
+            }
+            
+            # save("location") saves contact to location table using usrloc module
+            # For proxy-registrar mode, save() extracts contact details from the 200 OK REPLY (not the request)
+            # Since we're in onreply_route, save() won't generate a reply (transaction already handling it)
+            # - Contact header from the 200 OK reply (must be present - if <null>, save() cannot work)
+            # - AOR from $tu (To URI) - automatically extracted
+            # - Expiration from Expires header or Contact expires parameter in reply
+            # - Source IP/port from original request (preserved by transaction)
+            # - Domain separation (username@domain as key) - from $tu
+            # Returns true on success, false on failure
+            # NOTE: If reply Contact is <null>, save() cannot extract contact info and will fail silently
+            xlog("REGISTER: Calling save(\"location\")...\n");
+            
+            if (save("location")) {
+                $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
+                xlog("REGISTER: save(\"location\") returned TRUE for $var(endpoint_aor) (response $rs $rr)\n");
+                xlog("REGISTER: Note: With db_mode=2 (cached DB), writes may be delayed up to timer_interval seconds\n");
+            } else {
+                xlog("L_ERR", "REGISTER: save(\"location\") returned FALSE for $tU@$(tu{uri.domain}) (response $rs $rr)\n");
+                xlog("L_ERR", "REGISTER: This means save() failed - check usrloc logs for database errors\n");
+            }
+        } else {
+            # Registration failed (401, 403, etc.) - do NOT save location
+            # This fixes the stale registration bug - failed registrations don't create records
+            xlog("REGISTER: Failed registration ($rs $rr) for $tU@$(tu{uri.domain}), not saving location\n");
+        }
+    }
     exit;
 }
 

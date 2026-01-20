@@ -48,6 +48,7 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 - ✅ Endpoint location creation documentation
 - ✅ Security/threat detection project plan created
 - ✅ Master project plan created
+- ✅ Usrloc migration plan created (branch: `usrloc`)
 
 **Key Fixes Implemented:**
 - ✅ NOTIFY routing for endpoints behind NAT
@@ -543,43 +544,97 @@ Comprehensive security enhancement project including registration security, rate
 
 ---
 
+### 8. Usrloc Module Migration ⚠️ **TOP PRIORITY**
+
+**Status:** 📋 Planning (Migration plan created)  
+**Priority:** 🔴 **HIGHEST** - Must be done first to avoid increasing technical debt  
+**Timeline:** 5 weeks  
+**Branch:** `usrloc`
+
+**Sub-Project:** See [USRLOC-MIGRATION-PLAN.md](USRLOC-MIGRATION-PLAN.md)
+
+**Overview:**
+Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` module and `location` table. This addresses technical debt and aligns with OpenSIPS best practices for proxy-registrar pattern.
+
+**Motivation:**
+- Fix stale registration issue (currently storing before reply)
+- Reduce technical debt (remove custom table maintenance)
+- Align with OpenSIPS best practices
+- Provide better features (path support, proper expiration)
+
+**Phases:**
+- **Phase 0:** Research & Evaluation (Week 1) - Study `usrloc` module API
+- **Phase 1:** Module Setup & Configuration (Week 2) - Load module, create schema
+- **Phase 2:** Parallel Implementation (Week 3) - Implement alongside existing code
+- **Phase 3:** Migration & Testing (Week 4) - Switch to `usrloc`, remove old code
+- **Phase 4:** Cleanup & Documentation (Week 5) - Remove custom table, update docs
+
+**Key Deliverables:**
+- `usrloc` module integrated
+- Proxy-registrar pattern implemented (save on reply, not request)
+- All lookups using `lookup("location")` function
+- Custom `endpoint_locations` table removed
+- Documentation updated
+
+**Dependencies:**
+- OpenSIPS `usrloc` module (standard, should be available)
+- MySQL database (already in use)
+- Can be done independently of other projects
+
+**Impact:**
+- Reduces technical debt
+- Fixes stale registration bug
+- Improves maintainability
+- Aligns with OpenSIPS standards
+
+---
+
 ## Priority Matrix
 
 ### High Priority (Next 3-6 Months)
 
-1. **Security & Threat Detection** (11 weeks)
+1. **Usrloc Module Migration** (5 weeks) ⚠️ **DO THIS FIRST**
+   - **CRITICAL:** Prevents increasing technical debt
+   - Fixes stale registration bug
+   - Reduces technical debt (removes custom table)
+   - Aligns with OpenSIPS best practices
+   - Must complete before other major work
+
+2. **Security & Threat Detection** (11 weeks)
    - Critical for production security
    - Foundation for other features
+   - Can start after usrloc migration
 
-2. **Monitoring & Statistics** (4-6 weeks)
+3. **Monitoring & Statistics** (4-6 weeks)
    - Essential for operations
    - Overlaps with security monitoring
 
-3. **Backup & Recovery** (2-3 weeks)
+4. **Backup & Recovery** (2-3 weeks)
    - Critical for production
    - Can be done in parallel
 
 ### Medium Priority (6-12 Months)
 
-4. **High Availability** (6-8 weeks)
+5. **High Availability** (6-8 weeks)
    - Important for production reliability
    - Depends on containerization
 
-5. **TLS & WebRTC** (4-6 weeks)
+6. **TLS & WebRTC** (4-6 weeks)
    - Security and feature enhancement
    - Customer requirements dependent
 
-6. **Management Interface** (8-12 weeks)
+7. **Management Interface** (8-12 weeks)
    - Improves usability
    - Can be phased (API first, then UI)
+   - Note: Endpoint location viewing feature depends on usrloc migration
 
 ### Lower Priority (12+ Months)
 
-7. **Containerization** (4-6 weeks)
+8. **Containerization** (4-6 weeks)
    - Deployment convenience
    - Depends on testing completion
 
-8. **Kubernetes Deployment** (4-6 weeks)
+9. **Kubernetes Deployment** (4-6 weeks)
    - Advanced deployment option
    - Only if needed for scale
 
@@ -590,6 +645,8 @@ Comprehensive security enhancement project including registration security, rate
 ### Critical Path
 
 ```
+Usrloc Module Migration (5 weeks) ⚠️ DO THIS FIRST
+    ↓
 Security Research (Phase 0)
     ↓
 Security Implementation (Phases 1-5)
@@ -601,13 +658,14 @@ High Availability
 
 ### Parallel Work
 
-- **Backup & Recovery** can be done anytime
-- **TLS Support** can be done independently
-- **Management Interface** can start after Security Phase 3
-- **Containerization** can be done after local testing
+- **Backup & Recovery** can be done anytime (but wait until after usrloc migration)
+- **TLS Support** can be done independently (but wait until after usrloc migration)
+- **Management Interface** can start after Security Phase 3 (endpoint viewing depends on usrloc migration)
+- **Containerization** can be done after local testing (but wait until after usrloc migration)
 
 ### Blockers
 
+- **⚠️ Usrloc Migration** blocks other major work (to avoid increasing technical debt)
 - **Security Phase 0** blocks Security implementation
 - **Local Testing** blocks Containerization
 - **Security Phase 3** enhances Monitoring capabilities
@@ -628,14 +686,15 @@ High Availability
 
 **Total:** ~39-52 weeks (9-12 months) for all features
 
-### With Parallelization
+### With Parallelization (Updated Priority)
 
-- **Phase 1 (Months 1-3):** Security + Backup/Recovery
-- **Phase 2 (Months 4-5):** Monitoring + TLS
-- **Phase 3 (Months 6-8):** Management Interface + Containerization
-- **Phase 4 (Months 9-12):** High Availability + WebRTC
+- **Phase 0 (Weeks 1-5):** Usrloc Module Migration ⚠️ **DO THIS FIRST**
+- **Phase 1 (Months 2-4):** Security + Backup/Recovery
+- **Phase 2 (Months 5-6):** Monitoring + TLS
+- **Phase 3 (Months 7-9):** Management Interface + Containerization
+- **Phase 4 (Months 10-12):** High Availability + WebRTC
 
-**Estimated:** 9-12 months with focused effort
+**Estimated:** 10-13 months with focused effort (includes usrloc migration first)
 
 ---
 
@@ -719,13 +778,13 @@ High Availability
 
 ### Immediate (This Week)
 1. ✅ Create master project plan (this document)
-2. ⏳ Review and prioritize project areas
-3. ⏳ Assign resources/timeline
+2. ✅ Prioritize usrloc migration as top priority
+3. ⏳ Start usrloc migration Phase 0 (research)
 
 ### Short Term (Next Month)
-1. ⏳ Start Security Phase 0 research
-2. ⏳ Design backup/recovery system
-3. ⏳ Plan monitoring/statistics implementation
+1. ⏳ Complete usrloc migration Phase 0-1 (research + module setup)
+2. ⏳ Begin usrloc migration Phase 2 (parallel implementation)
+3. ⏳ Plan usrloc migration Phase 3 (migration & testing)
 
 ### Medium Term (Next Quarter)
 1. ⏳ Complete Security Phase 0-1
