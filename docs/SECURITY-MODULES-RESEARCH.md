@@ -79,18 +79,57 @@ Research and evaluate OpenSIPS built-in security modules to determine what can b
 
 ### 2. IP Management & Blocking
 
-#### `ipban` Module
+#### IP Banning (No Dedicated Module)
 **Purpose:** IP banning capabilities
 
-**Availability:** ❌ **NOT FOUND** (not available in OpenSIPS 3.6.3)
+**Availability:** ✅ **AVAILABLE via built-in functions** (no dedicated `ipban` module)
+
+**Key Finding:** OpenSIPS 3.6 does not have a dedicated `ipban` module. IP banning is achieved using built-in logic and scripting.
+
+**Implementation Approaches:**
+
+1. **Using `permissions` Module:**
+   - Can use `permissions` module with database-backed ACLs
+   - Supports allow/deny lists
+   - Can block IPs via deny rules
+
+2. **Custom Scripting Approach:**
+   - Use `$si` (source IP) pseudo-variable
+   - Check against banned IP list (database or script variable)
+   - Use `drop()` to discard message silently
+   - Use `sl_send_reply(403, "Forbidden")` to send rejection
+
+3. **Database-Driven Blocking:**
+   - Store banned IPs in database table
+   - Query database using `sql_query()` or `sql` module
+   - Check IP against banned list
+   - Take action based on result
+
+**Example Implementation:**
+```opensips
+route {
+    # Check if source IP is banned
+    $var(query) = "SELECT COUNT(*) FROM banned_ips WHERE ip='" + $si + "' AND enabled=1";
+    if (sql_query($var(query), "$avp(ban_count)") && $(avp(ban_count)[0]) > 0) {
+        sl_send_reply(403, "Forbidden IP");
+        exit;
+    }
+    # ... rest of routing logic
+}
+```
+
+**Alternative Approaches:**
+- Use `permissions` module with database ACLs
+- Use `pike` module for automatic blocking based on flood detection
+- Use `htable` module (if available) for in-memory IP tracking
 
 **Research Questions:**
-- [x] Does it exist in OpenSIPS 3.6.3? ❌ No
-- [ ] Alternative: Can `pike` module provide IP banning?
-- [ ] Alternative: Can `permissions` module provide IP blocking?
-- [ ] Do we need custom implementation?
+- [x] Does dedicated ipban module exist? ❌ No
+- [x] Can we implement IP banning? ✅ Yes, via custom scripting or permissions module
+- [ ] What's the best approach for our use case? (needs evaluation)
+- [ ] Should we use permissions module or custom database approach? (needs decision)
 
-**Status:** ⚠️ Need alternative solution
+**Status:** ✅ Implementation approach identified - needs design decision
 
 #### `permissions` Module
 **Purpose:** IP-based access control
@@ -279,8 +318,18 @@ ratelimit.so     ✅ Available
 - **auth_aaa.so** - AAA authentication framework
 
 ### Missing Modules ❌
-- **ipban.so** - Not available, but `permissions` module can provide IP blocking
+- **ipban.so** - Not available (IP banning done via custom scripting or `permissions` module)
 - **htable.so** - Not found (may be built-in or have different name)
+
+### IP Banning Implementation Options
+
+Since there's no dedicated `ipban` module, we have three options:
+
+1. **`permissions` Module** - Use database-backed ACLs for IP blocking
+2. **Custom Scripting** - Use `$si` checks with database queries and `drop()`/`sl_send_reply()`
+3. **`pike` Module** - Automatic blocking based on flood detection thresholds
+
+**Recommendation:** Evaluate `permissions` module first (most standard approach), fallback to custom scripting if needed.
 
 ### Key Findings
 
