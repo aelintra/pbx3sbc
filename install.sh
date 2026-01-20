@@ -3,7 +3,7 @@
 # OpenSIPS SIP Edge Router Installation Script
 # Installs and configures OpenSIPS with MySQL routing database
 #
-# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--advertised-ip <IP>] [--preferlan] [--db-password <PASSWORD>]
+# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--skip-prometheus] [--advertised-ip <IP>] [--preferlan] [--db-password <PASSWORD>]
 #
 
 set -euo pipefail
@@ -29,6 +29,7 @@ CONFIG_DIR="${INSTALL_DIR}/config"
 SKIP_DEPS=false
 SKIP_FIREWALL=false
 SKIP_DB=false
+SKIP_PROMETHEUS=false
 ADVERTISED_IP=""
 PREFER_LAN=false
 DB_PASSWORD=""
@@ -46,6 +47,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-db)
             SKIP_DB=true
+            shift
+            ;;
+        --skip-prometheus)
+            SKIP_PROMETHEUS=true
             shift
             ;;
         --advertised-ip)
@@ -216,6 +221,13 @@ install_dependencies() {
         else
             log_warn "MySQL module not found - check OpenSIPS module installation"
         fi
+        
+        # Verify HTTP modules (httpd and prometheus) are available
+        if opensips -m 2>/dev/null | grep -qE "(httpd|prometheus)"; then
+            log_success "HTTP modules (httpd/prometheus) are available"
+        else
+            log_warn "HTTP modules (httpd/prometheus) not found - check opensips-http-modules package installation"
+        fi
     else
         log_error "OpenSIPS installation failed - opensips command not found"
         exit 1
@@ -355,6 +367,16 @@ configure_firewall() {
     
     # Allow RTP range (for endpoints, not handled by OpenSIPS but good to document)
     add_ufw_rule_if_missing "10000:20000/udp" "RTP range"
+    
+    # Allow Prometheus and Node Exporter (if installed)
+    if [[ "$SKIP_PROMETHEUS" != true ]]; then
+        # Prometheus web UI (restrict to localhost in production)
+        add_ufw_rule_if_missing "9090/tcp" "Prometheus web UI"
+        # Node Exporter metrics (restrict to localhost in production)
+        add_ufw_rule_if_missing "9100/tcp" "Node Exporter metrics"
+        # OpenSIPS Prometheus module endpoint (if exposed externally)
+        add_ufw_rule_if_missing "8888/tcp" "OpenSIPS Prometheus metrics"
+    fi
     
     log_success "Firewall configured"
     log_warn "Firewall rules applied. Ensure SSH access is working before disconnecting!"
@@ -828,6 +850,250 @@ EOF
     fi
 }
 
+install_prometheus() {
+    if [[ "$SKIP_PROMETHEUS" == true ]]; then
+        log_info "Skipping Prometheus installation"
+        return
+    fi
+    
+    log_info "Installing Prometheus and Node Exporter..."
+    
+    # Check if Prometheus is already installed
+    if command -v prometheus &> /dev/null; then
+        log_info "Prometheus already installed: $(prometheus --version 2>&1 | head -n1)"
+    else
+        # Create Prometheus user
+        if ! id -u prometheus &>/dev/null; then
+            useradd --no-create-home --shell /bin/false prometheus || {
+                log_error "Failed to create prometheus user"
+                exit 1
+            }
+        fi
+        
+        # Create directories
+        mkdir -p /etc/prometheus
+        mkdir -p /var/lib/prometheus
+        chown prometheus:prometheus /etc/prometheus
+        chown prometheus:prometheus /var/lib/prometheus
+        
+        # Download Prometheus
+        cd /tmp
+        PROMETHEUS_VERSION="2.51.2"  # Update to latest version as needed
+        log_info "Downloading Prometheus ${PROMETHEUS_VERSION}..."
+        
+        if [[ ! -f "prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" ]]; then
+            wget -q "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" || {
+                log_error "Failed to download Prometheus"
+                exit 1
+            }
+        fi
+        
+        # Extract
+        tar xf "prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+        cd "prometheus-${PROMETHEUS_VERSION}.linux-amd64"
+        
+        # Copy binaries
+        cp prometheus /usr/local/bin/
+        cp promtool /usr/local/bin/
+        chown prometheus:prometheus /usr/local/bin/prometheus
+        chown prometheus:prometheus /usr/local/bin/promtool
+        
+        # Copy configuration files
+        cp -r consoles /etc/prometheus
+        cp -r console_libraries /etc/prometheus
+        chown -R prometheus:prometheus /etc/prometheus/consoles
+        chown -R prometheus:prometheus /etc/prometheus/console_libraries
+        
+        log_success "Prometheus ${PROMETHEUS_VERSION} installed"
+    fi
+    
+    # Install Node Exporter
+    if command -v node_exporter &> /dev/null; then
+        log_info "Node Exporter already installed: $(node_exporter --version 2>&1 | head -n1)"
+    else
+        # Create node_exporter user
+        if ! id -u node_exporter &>/dev/null; then
+            useradd --no-create-home --shell /bin/false node_exporter || {
+                log_error "Failed to create node_exporter user"
+                exit 1
+            }
+        fi
+        
+        # Download Node Exporter
+        cd /tmp
+        NODE_EXPORTER_VERSION="1.7.0"  # Update to latest version as needed
+        log_info "Downloading Node Exporter ${NODE_EXPORTER_VERSION}..."
+        
+        if [[ ! -f "node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz" ]]; then
+            wget -q "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz" || {
+                log_error "Failed to download Node Exporter"
+                exit 1
+            }
+        fi
+        
+        # Extract
+        tar xf "node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
+        cd "node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64"
+        
+        # Copy binary
+        cp node_exporter /usr/local/bin/
+        chown node_exporter:node_exporter /usr/local/bin/node_exporter
+        
+        log_success "Node Exporter ${NODE_EXPORTER_VERSION} installed"
+    fi
+}
+
+configure_prometheus() {
+    if [[ "$SKIP_PROMETHEUS" == true ]]; then
+        log_info "Skipping Prometheus configuration"
+        return
+    fi
+    
+    log_info "Configuring Prometheus..."
+    
+    # Create Prometheus configuration
+    cat > /etc/prometheus/prometheus.yml <<'PROMETHEUS_EOF'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'pbx3sbc'
+    environment: 'production'
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load alert rules
+rule_files:
+  - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # OpenSIPS statistics (from Prometheus module)
+  - job_name: 'opensips'
+    static_configs:
+      - targets: ['localhost:8888']  # OpenSIPS HTTP endpoint (Prometheus module)
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'opensips-sbc'
+
+  # Node Exporter (system metrics - required for Grafana dashboards)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']  # Node Exporter default port
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    scrape_timeout: 10s
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+PROMETHEUS_EOF
+    
+    # Create basic alert rules
+    cat > /etc/prometheus/alerts.yml <<'ALERTS_EOF'
+groups:
+  - name: opensips_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(opensips_core_drop_requests[5m]) / rate(opensips_core_rcv_requests[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }}"
+
+      - alert: NoActiveDestinations
+        expr: opensips_dispatcher_active_destinations == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No active dispatcher destinations"
+          description: "All Asterisk backends are down"
+
+      - alert: HighActiveTransactions
+        expr: opensips_tm_active_transactions > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of active transactions"
+          description: "Active transactions: {{ $value }}"
+ALERTS_EOF
+    
+    chown prometheus:prometheus /etc/prometheus/prometheus.yml
+    chown prometheus:prometheus /etc/prometheus/alerts.yml
+    chmod 640 /etc/prometheus/prometheus.yml
+    chmod 640 /etc/prometheus/alerts.yml
+    
+    # Create Prometheus systemd service
+    cat > /etc/systemd/system/prometheus.service <<'SERVICE_EOF'
+[Unit]
+Description=Prometheus Monitoring System
+Documentation=https://prometheus.io/docs/introduction/overview/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+ExecStart=/usr/local/bin/prometheus \
+    --config.file=/etc/prometheus/prometheus.yml \
+    --storage.tsdb.path=/var/lib/prometheus/ \
+    --storage.tsdb.retention.time=30d \
+    --web.console.templates=/etc/prometheus/consoles \
+    --web.console.libraries=/etc/prometheus/console_libraries \
+    --web.listen-address=0.0.0.0:9090 \
+    --web.enable-lifecycle
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    
+    # Create Node Exporter systemd service
+    cat > /etc/systemd/system/node_exporter.service <<'NODE_SERVICE_EOF'
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=node_exporter
+Group=node_exporter
+ExecStart=/usr/local/bin/node_exporter \
+    --web.listen-address=0.0.0.0:9100 \
+    --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+NODE_SERVICE_EOF
+    
+    # Reload systemd
+    systemctl daemon-reload
+    
+    log_success "Prometheus configuration created"
+}
 
 enable_services() {
     log_info "Enabling services..."
@@ -837,6 +1103,17 @@ enable_services() {
         log_error "Failed to enable OpenSIPS service"
         exit 1
     }
+    
+    # Enable Prometheus and Node Exporter if installed
+    if [[ "$SKIP_PROMETHEUS" != true ]]; then
+        systemctl enable prometheus || {
+            log_warn "Failed to enable Prometheus service"
+        }
+        
+        systemctl enable node_exporter || {
+            log_warn "Failed to enable Node Exporter service"
+        }
+    fi
     
     # Setup cleanup timer (non-fatal if it fails)
     setup_cleanup_timer || {
@@ -862,6 +1139,36 @@ start_services() {
         log_success "OpenSIPS started"
     else
         log_error "OpenSIPS failed to start. Check logs: journalctl -u opensips"
+    fi
+    
+    # Start Prometheus and Node Exporter if installed
+    if [[ "$SKIP_PROMETHEUS" != true ]]; then
+        # Start Node Exporter first (Prometheus depends on it)
+        systemctl start node_exporter || {
+            log_warn "Failed to start Node Exporter"
+        } || true
+        
+        sleep 1
+        
+        # Start Prometheus
+        systemctl start prometheus || {
+            log_warn "Failed to start Prometheus"
+        } || true
+        
+        sleep 2
+        
+        # Check status
+        if systemctl is-active --quiet node_exporter; then
+            log_success "Node Exporter started"
+        else
+            log_warn "Node Exporter failed to start. Check logs: journalctl -u node_exporter"
+        fi
+        
+        if systemctl is-active --quiet prometheus; then
+            log_success "Prometheus started"
+        else
+            log_warn "Prometheus failed to start. Check logs: journalctl -u prometheus"
+        fi
     fi
 }
 
@@ -912,6 +1219,33 @@ verify_installation() {
         echo -e "${YELLOW}⚠${NC} Endpoint cleanup timer not enabled"
     fi
     
+    # Check Prometheus and Node Exporter if installed
+    if [[ "$SKIP_PROMETHEUS" != true ]]; then
+        if command -v prometheus &> /dev/null; then
+            echo -e "${GREEN}✓${NC} Prometheus installed: $(prometheus --version 2>&1 | head -n1)"
+        else
+            echo -e "${RED}✗${NC} Prometheus not found"
+        fi
+        
+        if command -v node_exporter &> /dev/null; then
+            echo -e "${GREEN}✓${NC} Node Exporter installed: $(node_exporter --version 2>&1 | head -n1)"
+        else
+            echo -e "${RED}✗${NC} Node Exporter not found"
+        fi
+        
+        if systemctl is-active --quiet prometheus 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Prometheus service running"
+        else
+            echo -e "${YELLOW}⚠${NC} Prometheus service not running"
+        fi
+        
+        if systemctl is-active --quiet node_exporter 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Node Exporter service running"
+        else
+            echo -e "${YELLOW}⚠${NC} Node Exporter service not running"
+        fi
+    fi
+    
     echo
     echo "=== Next Steps ==="
     echo
@@ -951,10 +1285,12 @@ main() {
     
     install_dependencies
     install_opensips_cli
+    install_prometheus
     create_user
     create_directories
     setup_helper_scripts
     configure_firewall
+    configure_prometheus
     
     # Get database password early so it can be used in config creation
     if [[ "$SKIP_DB" != true ]] && [[ -z "$DB_PASSWORD" ]]; then
@@ -986,6 +1322,12 @@ main() {
     log_info "Configuration files:"
     echo "  - OpenSIPS: ${OPENSIPS_DIR}/opensips.cfg"
     echo "  - Database: MySQL database 'opensips'"
+    if [[ "$SKIP_PROMETHEUS" != true ]]; then
+        echo "  - Prometheus: /etc/prometheus/prometheus.yml"
+        echo "  - Prometheus Alerts: /etc/prometheus/alerts.yml"
+        echo "  - Prometheus Web UI: http://localhost:9090"
+        echo "  - Node Exporter: http://localhost:9100/metrics"
+    fi
     echo
 }
 
