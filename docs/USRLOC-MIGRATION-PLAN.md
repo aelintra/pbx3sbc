@@ -1,8 +1,9 @@
 # Usrloc Module Migration Plan
 
 **Branch:** `usrloc`  
-**Status:** 📋 Planning Phase  
+**Status:** ✅ **COMPLETE** (Multi-tenant testing pending)  
 **Created:** January 2026  
+**Completed:** January 2026  
 **Related:** [OpenSIPS Proxy Registration Blog Post](https://blog.opensips.org/2016/12/13/how-to-proxy-sip-registrations/)
 
 ## Executive Summary
@@ -899,8 +900,11 @@ Based on research, identified risks:
 ---
 
 **Phase 0 Status:** ✅ Complete  
-**Next Phase:** Phase 1 - Module Setup & Configuration  
-**Blockers:** None (all remaining questions will be resolved during implementation)
+**Phase 1 Status:** ✅ Complete  
+**Phase 2 Status:** ✅ Complete  
+**Phase 3 Status:** ✅ Complete  
+**Phase 4 Status:** ✅ Complete (except table drop - optional)  
+**Migration Status:** ✅ **COMPLETE** (Multi-tenant testing pending)
 
 **Remaining Questions Status:**
 - ✅ **Contact Header Parsing:** Resolved - `lookup()` handles automatically
@@ -1615,22 +1619,57 @@ $var(expires_value) = $(ct{nameaddr.param,expires});
 - ✅ `save("location")` working correctly - registrations saving to location table
 - ✅ Failed registrations (401) correctly NOT creating records
 - ✅ Proxy-registrar pattern implemented in `onreply_route[handle_reply_reg]`
+- ✅ `lookup("location")` implemented for OPTIONS/NOTIFY routing
+- ✅ INVITE routing updated to use location table
+- ✅ REGISTER Contact header preserved correctly (fixed fix_nated_contact() issue)
 
-**🔧 KEY FIX:**
-- Changed `contact_id` from `INT UNSIGNED` to `BIGINT UNSIGNED` to handle UUID-based Call-ID hashes
-- Snom phones use UUID format Call-IDs which produce hash values exceeding INT UNSIGNED max (4,294,967,295)
-- Actual contact_id value: `3617797875662073346` (way beyond INT range)
+**🔧 KEY FIXES:**
+1. **contact_id overflow:** Changed from `INT UNSIGNED` to `BIGINT UNSIGNED` to handle UUID-based Call-ID hashes
+   - Snom phones use UUID format Call-IDs which produce hash values exceeding INT UNSIGNED max
+   - Actual contact_id value: `3617797875662073346` (way beyond INT range)
+2. **REGISTER Contact header:** Excluded REGISTER responses from `fix_nated_contact()` to preserve endpoint Contact
+3. **lookup() implementation:** Replaced SQL queries with `lookup("location")` function for OPTIONS/NOTIFY/INVITE routing
 
-**📋 NEXT STEPS:**
-- Implement `lookup("location")` function to replace SQL queries
-- Test domain-specific lookups
-- Remove old endpoint_locations code
+**📋 NEXT STEPS (Optional Improvements):**
+- Improve domain detection for multi-tenant (determine domain from dispatcher setid)
+- Remove old endpoint_locations SQL queries (if still present)
+- Test with multiple domains/tenants
 
 **📚 See:** `workingdocs/SESSION-SUMMARY-USRLOC-SAVE-FIX.md` for detailed session notes
 
 ---
 
-**Status:** 🚧 In Progress - save() working, lookup() pending  
-**Next Steps:** Implement lookup() function for OPTIONS/NOTIFY routing  
+**Status:** ✅ **MIGRATION COMPLETE** - All code migrated, cleanup done  
+**Testing Status:** ⚠️ Single-tenant tested ✅ | Multi-tenant testing pending  
+**Next Steps:** Multi-tenant testing with second server  
 **Branch:** `usrloc`  
-**Last Updated:** January 19, 2026
+**Last Updated:** January 2026
+
+---
+
+## ✅ Migration Complete Summary
+
+**Date Completed:** January 2026
+
+### What Was Completed
+
+1. ✅ **Location table created** with `BIGINT UNSIGNED` contact_id (fixes UUID Call-ID hash overflow)
+2. ✅ **Modules loaded:** usrloc, registrar, domain, signaling
+3. ✅ **save() function working** - Registrations saving to location table in `onreply_route`
+4. ✅ **lookup() function working** - OPTIONS/NOTIFY/INVITE routing using `lookup("location")`
+5. ✅ **Domain detection implemented** - `GET_DOMAIN_FROM_SOURCE_IP` route for multi-tenant support
+6. ✅ **NAT handling migrated** - RELAY route now uses location table
+7. ✅ **Diagnostic logging migrated** - Uses location table queries
+8. ✅ **All endpoint_locations code removed** - No active references remain
+9. ✅ **Installer updated** - No longer creates endpoint_locations table
+
+### Testing Status
+
+- ✅ **Single-tenant:** Tested and working
+- ⚠️ **Multi-tenant:** Pending (requires second server setup)
+
+### Remaining Work
+
+- ⏳ Multi-tenant testing with multiple domains/tenants
+- ⏳ Verify domain detection works correctly in production
+- ⏳ Optional: Drop endpoint_locations table from existing installations (when ready)
