@@ -8,9 +8,9 @@
 
 ## Executive Summary
 
-**⚠️ TOP PRIORITY:** This migration is now the **highest priority** project to prevent increasing technical debt. All other major work should wait until this is complete.
+**✅ STATUS: MIGRATION COMPLETE** (Multi-tenant testing pending)
 
-This document outlines the plan to migrate from our custom `endpoint_locations` table to OpenSIPS's standard `usrloc` module and `location` table. This migration will:
+This document outlines the migration from our custom `endpoint_locations` table to OpenSIPS's standard `usrloc` module and `location` table. This migration:
 
 - ✅ Fix stale registration issue (currently storing before reply)
 - ✅ Reduce technical debt (remove custom table maintenance)
