@@ -62,6 +62,10 @@ loadmodule "signaling.so"
 loadmodule "registrar.so"
 # Domain module for domain management (used with usrloc for multi-tenant support)
 loadmodule "domain.so"
+# HTTP server module (required for Prometheus module)
+loadmodule "httpd.so"
+# Prometheus module for metrics export (requires opensips-prometheus-module package)
+loadmodule "prometheus.so"
 
 ####### Module Parameters ########
 
@@ -129,6 +133,59 @@ modparam("domain", "db_mode", 2)
 modparam("domain", "domain_table", "domain")
 # domain_col: Column name for domain (default: "domain")
 modparam("domain", "domain_col", "domain")
+
+# --- HTTP Server (Required for Prometheus module) ---
+# Configure HTTP server for Prometheus metrics endpoint
+# Listen on all interfaces, port 8888
+modparam("httpd", "ip", "0.0.0.0")
+modparam("httpd", "port", 8888)
+# Note: For localhost-only access, use: modparam("httpd", "ip", "127.0.0.1")
+
+# --- Prometheus Module (Metrics Export) ---
+# Metrics endpoint path (default: /metrics)
+# Access at: http://localhost:8888/metrics (or http://<server-ip>:8888/metrics)
+modparam("prometheus", "root", "metrics")
+# Metric prefix (default: opensips) - prepended to all metric names
+modparam("prometheus", "prefix", "opensips")
+# Group mode: 1 = include group in metric name (e.g., opensips_core_rcv_requests)
+# Group mode: 0 = exclude group (e.g., opensips_rcv_requests)
+modparam("prometheus", "group_mode", 1)
+# Export statistics (can be defined multiple times)
+# Syntax: "group:" exports all stats in that group, or specific stat names like "active_dialogs"
+# You can mix groups and specific stat names in the same modparam call
+#
+# Example: modparam("prometheus", "statistics", "active_dialogs load: stats:")
+#   - Exports specific stat "active_dialogs"
+#   - Exports all stats in "load" group
+#   - Exports all stats in "stats" group
+#
+# Current configuration uses group-based exports (recommended for comprehensive monitoring):
+# Core statistics (all core stats)
+modparam("prometheus", "statistics", "core:")
+# Transaction statistics (all transaction stats)
+modparam("prometheus", "statistics", "tm:")
+# Dialog statistics (all dialog stats)
+modparam("prometheus", "statistics", "dialog:")
+# Dispatcher statistics (all dispatcher stats)
+modparam("prometheus", "statistics", "dispatcher:")
+# User location statistics (all usrloc stats)
+modparam("prometheus", "statistics", "usrloc:")
+# Accounting statistics (all accounting stats)
+modparam("prometheus", "statistics", "acc:")
+
+# Alternative: Export specific statistics only (uncomment to use instead of groups above)
+# This approach exports only selected metrics (useful for reducing metric volume)
+# Uncomment the lines below and comment out the group-based exports above if needed:
+# modparam("prometheus", "statistics", "core:rcv_requests core:rcv_replies core:drop_requests")
+# modparam("prometheus", "statistics", "tm:active_transactions tm:transactions")
+# modparam("prometheus", "statistics", "dialog:active_dialogs dialog:early_dialogs")
+# modparam("prometheus", "statistics", "dispatcher:active_destinations dispatcher:inactive_destinations")
+# modparam("prometheus", "statistics", "usrloc:registered_users")
+# modparam("prometheus", "statistics", "acc:acc_requests")
+
+# Or export ALL statistics (uncomment to enable - exports everything)
+# modparam("prometheus", "statistics", "all")
+# Note: If "all" is specified, other statistics parameters are ignored
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -833,12 +890,15 @@ route[RELAY] {
                 # Try received field first (NAT traversal)
                 if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "") {
                     # received field contains IP:port from NAT traversal
-                    if ($(avp(nat_received)[0]) =~ "^([^:]+):([0-9]+)") {
+                    # Extract IP and port using separate regex matches
+                    if ($(avp(nat_received)[0]) =~ "^([^:]+):") {
                         $var(nat_ip) = $re;
-                        $var(nat_port) = $(re[1]);
-                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
-                        $var(nat_contact_found) = 1;
+                        if ($(avp(nat_received)[0]) =~ ":([0-9]+)$") {
+                            $var(nat_port) = $re;
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                            xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
+                            $var(nat_contact_found) = 1;
+                        }
                     }
                 }
                 
@@ -854,11 +914,19 @@ route[RELAY] {
                         # Extract IP:port from contact field
                         $var(contact_uri) = $(avp(nat_contact)[0]);
                         # Contact format: sip:user@ip:port or <sip:user@ip:port>
-                        if ($var(contact_uri) =~ "@([^:>]+):([0-9]+)") {
+                        # Extract IP first
+                        if ($var(contact_uri) =~ "@([^:>]+):") {
                             $var(nat_ip) = $re;
-                            $var(nat_port) = $(re[1]);
-                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                            xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            # Extract port
+                            if ($var(contact_uri) =~ ":([0-9]+)") {
+                                $var(nat_port) = $re;
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            } else {
+                                # No port in contact, use default 5060
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                            }
                         } else if ($var(contact_uri) =~ "@([^:>]+)") {
                             # No port in contact, use default 5060
                             $var(nat_ip) = $re;
