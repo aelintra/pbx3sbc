@@ -240,46 +240,83 @@ route {
                         $var(endpoint_user) = $rU;
                     }
                     
-                    # Try to get domain from To header, but if it's an IP, use username-only lookup
+                    # Try to get domain from To header
                     $var(to_domain) = $(tu{uri.domain});
+                    $var(lookup_uri) = "";
+                    
+                    # Check if To header domain is an IP address (not a domain name)
                     if ($var(to_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        # To header has IP, not domain - will use username-only lookup
-                        $var(endpoint_aor) = "";
+                        # To header has IP, not domain - determine domain from Asterisk source IP
+                        # This is CRITICAL for multi-tenant deployments (same extension numbers across customers)
+                        route(GET_DOMAIN_FROM_SOURCE_IP);
+                        if ($var(domain_detection_success) == 1) {
+                            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+                            xlog("OPTIONS/NOTIFY: To header has IP ($var(to_domain)), determined domain from source IP: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
+                        } else {
+                            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@*";
+                            xlog("L_WARN", "OPTIONS/NOTIFY: To header has IP ($var(to_domain)), but could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+                        }
                     } else if ($var(to_domain) != "") {
-                        # To header has domain - use for exact match
-                        $var(endpoint_aor) = $var(endpoint_user) + "@" + $var(to_domain);
+                        # To header has domain - use domain-specific lookup (CORRECT for multi-tenant)
+                        $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(to_domain);
+                        xlog("OPTIONS/NOTIFY: Using domain-specific lookup: $var(lookup_uri)\n");
                     } else {
-                        # No domain in To header - will use username-only lookup
-                        $var(endpoint_aor) = "";
+                        # No domain in To header - try to determine from source IP
+                        route(GET_DOMAIN_FROM_SOURCE_IP);
+                        if ($var(domain_detection_success) == 1) {
+                            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+                            xlog("OPTIONS/NOTIFY: No domain in To header, determined domain from source IP: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
+                        } else {
+                            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+                            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@*";
+                            xlog("L_WARN", "OPTIONS/NOTIFY: No domain in To header and could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+                        }
                     }
                     
-                    xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint AoR: $var(endpoint_aor) (user: $var(endpoint_user))\n");
+                    xlog("OPTIONS/NOTIFY from Asterisk $si, looking up endpoint: $var(lookup_uri) (user: $var(endpoint_user))\n");
                     
-                    # Use helper route to look up endpoint location
-                    $var(lookup_user) = $var(endpoint_user);
-                    $var(lookup_aor) = $var(endpoint_aor);
-                    route(ENDPOINT_LOOKUP);
+                    # Use OpenSIPS lookup() function to find endpoint in location table
+                    # lookup() uses Request-URI to find contacts, so we need to set it first
+                    # Save original Request-URI
+                    $var(original_ru) = $ru;
                     
-                    xlog("OPTIONS/NOTIFY: After ENDPOINT_LOOKUP, lookup_success=$var(lookup_success), endpoint_ip=$var(endpoint_ip), endpoint_port=$var(endpoint_port)\n");
-                    
-                    # Check if endpoint was found
-                    if ($var(lookup_success) == 1) {
-                        # Get username from Request-URI or To header for destination URI
-                        $var(target_user) = $tU;
-                        if ($var(target_user) == "") {
-                            $var(target_user) = $rU;
+                    # Check if we have a wildcard lookup (contains @*)
+                    if ($var(lookup_uri) =~ "@\\*") {
+                        # Wildcard lookup - need to use SQL query for now
+                        # TODO: Improve this to determine domain from dispatcher setid
+                        xlog("OPTIONS/NOTIFY: Wildcard lookup detected, using SQL fallback\n");
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                        if (sql_query($var(query), "$avp(contact_uri)") && $(avp(contact_uri)[0]) != "") {
+                            $du = $(avp(contact_uri)[0]);
+                            $ru = $du;
+                            xlog("OPTIONS/NOTIFY: SQL lookup found contact: $du\n");
+                            route(RELAY);
+                            exit;
+                        } else {
+                            $ru = $var(original_ru);
+                            xlog("OPTIONS/NOTIFY: SQL lookup returned no results\n");
                         }
+                    } else {
+                        # Domain-specific lookup - set Request-URI and use lookup()
+                        $ru = $var(lookup_uri);
                         
-                        # For OPTIONS/NOTIFY, use simple URI construction (no domain fallback needed)
-                        # Set endpoint_user for BUILD_ENDPOINT_URI
-                        $var(endpoint_user) = $var(target_user);
-                        # Clear AoR to force simple IP-based Request-URI
-                        $var(endpoint_aor) = "";
-                        route(BUILD_ENDPOINT_URI);
-                        
-                        xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru, Call-ID=$hdr(Call-ID)\n");
-                        route(RELAY);
-                        exit;
+                        # lookup() sets $du automatically if contact found
+                        if (lookup("location")) {
+                            # Contact found - $du is set automatically by lookup()
+                            xlog("OPTIONS/NOTIFY: lookup() found contact, $du=$du\n");
+                            
+                            # Request-URI is already set to destination by lookup()
+                            xlog("Routing $rm from Asterisk $si to endpoint $du, Request-URI=$ru, Call-ID=$hdr(Call-ID)\n");
+                            route(RELAY);
+                            exit;
+                        } else {
+                            # Restore original Request-URI
+                            $ru = $var(original_ru);
+                            xlog("OPTIONS/NOTIFY: lookup() returned FALSE - no contact found for $var(lookup_uri)\n");
+                        }
                     }
                     
                     # Endpoint lookup failed - handle fallback
@@ -368,25 +405,46 @@ route[DOMAIN_CHECK] {
         # Extract username from Request-URI
         $var(endpoint_user) = $rU;
         
-        # Use helper route to look up endpoint location (AoR, IP, and port)
-        $var(lookup_user) = $var(endpoint_user);
-        $var(lookup_aor) = "";  # Start with username-only lookup
-        route(ENDPOINT_LOOKUP);
+        # Determine domain from Asterisk source IP (CRITICAL for multi-tenant support)
+        # This ensures we route to the correct customer when same extension numbers exist across domains
+        route(GET_DOMAIN_FROM_SOURCE_IP);
+        $var(original_ru) = $ru;
         
-        # Check if endpoint was found
-        if ($var(lookup_success) == 1) {
-            xlog("Endpoint lookup result: AoR=$var(endpoint_aor), IP=$var(endpoint_ip), Port=$var(endpoint_port)\n");
+        if ($var(domain_detection_success) == 1) {
+            # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
+            $var(lookup_uri) = "sip:" + $var(endpoint_user) + "@" + $var(domain_from_source);
+            xlog("INVITE: Determined domain from source IP $si: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
             
-            # Build destination URI and Request-URI using helper route
-            route(BUILD_ENDPOINT_URI);
-            
-            xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru (endpoint lookup)\n");
-            route(RELAY);
-            exit;
+            # Set Request-URI and use lookup() function
+            $ru = $var(lookup_uri);
+            if (lookup("location")) {
+                # Contact found - $du is set automatically by lookup()
+                xlog("INVITE: lookup() found contact: $du for user $var(endpoint_user)@$var(domain_from_source)\n");
+                xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
+                route(RELAY);
+                exit;
+            } else {
+                # Domain-specific lookup failed
+                $ru = $var(original_ru);
+                xlog("L_WARN", "INVITE: Domain-specific lookup failed for $var(endpoint_user)@$var(domain_from_source) (source IP $si)\n");
+            }
+        } else {
+            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+            xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
+            $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(contact_uri)") && $(avp(contact_uri)[0]) != "") {
+                $du = $(avp(contact_uri)[0]);
+                $ru = $du;
+                xlog("INVITE: SQL wildcard lookup found contact: $du for user $var(endpoint_user)\n");
+                xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
+                route(RELAY);
+                exit;
+            }
         }
         
         # If endpoint lookup failed, log and send 404
-        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in database\n");
+        $ru = $var(original_ru);
+        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in location table\n");
         sl_send_reply(404, "Endpoint Not Found");
         exit;
     }
@@ -603,6 +661,65 @@ route[WITHINDLG] {
 }
 
 ####### Helper Routes ########
+
+# Domain detection helper route (multi-tenant support)
+# Determines domain from Asterisk source IP for proper multi-tenant routing
+# 
+# Input variables:
+#   $si - Source IP (automatically available, no need to set)
+#
+# Output variables:
+#   $var(domain_from_source) - Domain name if found (empty if not found)
+#   $var(domain_detection_success) - 1 if domain found, 0 if not found
+#
+# Usage:
+#   route(GET_DOMAIN_FROM_SOURCE_IP);
+#   if ($var(domain_detection_success) == 1) {
+#       # Use $var(domain_from_source) for domain-specific lookup
+#   }
+#
+# Logic:
+#   1. Query dispatcher table to find setid for source IP
+#   2. Query domain table to find domain for that setid
+#   3. Returns domain if found, empty if not found
+route[GET_DOMAIN_FROM_SOURCE_IP] {
+    $var(domain_from_source) = "";
+    $var(domain_detection_success) = 0;
+    
+    # Step 1: Find dispatcher setid for this source IP
+    # Dispatcher destinations are stored as "sip:IP:port" (e.g., "sip:10.0.1.10:5060")
+    # We match the IP part using LIKE with proper delimiters to avoid substring matches
+    # Match pattern: sip:IP: or sip:IP followed by end of string
+    # This ensures we match the exact IP, not a substring (e.g., 10.0.1.10 vs 10.0.1.100)
+    $var(query) = "SELECT setid FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    if (!sql_query($var(query), "$avp(source_setid)")) {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Query failed for source IP $si\n");
+        return;
+    }
+    
+    $var(setid) = $(avp(source_setid)[0]);
+    if ($var(setid) == "" || $var(setid) == "0") {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: No dispatcher setid found for source IP $si\n");
+        return;
+    }
+    
+    # Step 2: Find domain for this setid
+    $var(query) = "SELECT domain FROM domain WHERE setid='" + $var(setid) + "' AND enabled=1 LIMIT 1";
+    if (!sql_query($var(query), "$avp(source_domain)")) {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Domain query failed for setid $var(setid)\n");
+        return;
+    }
+    
+    $var(domain_from_source) = $(avp(source_domain)[0]);
+    if ($var(domain_from_source) != "") {
+        $var(domain_detection_success) = 1;
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: Found domain $var(domain_from_source) for source IP $si (setid $var(setid))\n");
+    } else {
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: No domain found for setid $var(setid) (source IP $si)\n");
+    }
+    
+    return;
+}
 
 # Endpoint lookup helper route
 # Looks up endpoint location from database by username and/or AoR
@@ -957,7 +1074,11 @@ onreply_route {
     # fix_nated_contact() fixes Contact headers in responses
     # fix_nated_sdp() with "rewrite-media-ip" flag rewrites the media IP address (c= line) in SDP
     # This ensures Asterisk receives the public NAT IP instead of private IP for RTP
-    fix_nated_contact();
+    # CRITICAL: Do NOT fix Contact header for REGISTER responses - the Contact header contains
+    # the endpoint's contact information from Asterisk, and we must preserve it for save() to work
+    if (!is_method("REGISTER")) {
+        fix_nated_contact();
+    }
     if ($hdr(Content-Type) =~ "application/sdp") {
         fix_nated_sdp("rewrite-media-ip");
         xlog("Fixed NAT in SDP for response $rs from $si\n");
