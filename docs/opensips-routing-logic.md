@@ -59,11 +59,11 @@ When a REGISTER request arrives:
    - Calls `fix_nated_register()` to fix Contact header for NAT traversal
    - Ensures Asterisk receives correct public IP information
 
-3. **Store in database**:
-   - Table: `endpoint_locations`
-   - Stores: `aor`, `contact_ip`, `contact_port`, `expires`
-   - Uses `INSERT OR REPLACE` to update existing entries
-   - Expiration time calculated as: `datetime('now', '+N seconds')` using SQLite syntax
+3. **Store in database** (Current - usrloc module):
+   - Table: `location` (OpenSIPS usrloc module)
+   - Uses `save("location")` function in `onreply_route` when 200 OK received
+   - Stores: `username`, `domain`, `contact`, `received`, `expires` (Unix timestamp)
+   - **Note:** Migrated from custom `endpoint_locations` table - see `docs/USRLOC-MIGRATION-PLAN.md`
 
 4. **Continue normal routing**:
    - REGISTER is then forwarded to Asterisk backend via dispatcher
@@ -101,8 +101,9 @@ When an OPTIONS or NOTIFY request arrives:
    - Extract username from To header or Request-URI
    - Use `route[ENDPOINT_LOOKUP]` helper route
    - Tries exact AoR match first, then username-only match
-   - Query `endpoint_locations` table for matching entry
-   - Check that entry hasn't expired: `expires > datetime('now')`
+   - Use `lookup("location")` function (usrloc module) to find endpoint
+   - Sets `$du` automatically if endpoint found
+   - Expiration handled automatically by usrloc module
 
 3. **Route to endpoint**:
    - Use `route[BUILD_ENDPOINT_URI]` to construct destination URI
@@ -119,26 +120,23 @@ When an OPTIONS or NOTIFY request arrives:
 
 ## Database Schema
 
-### endpoint_locations Table
+### location Table (OpenSIPS usrloc Module) ✅ **MIGRATED**
 
-```sql
-CREATE TABLE endpoint_locations (
-    aor TEXT PRIMARY KEY,           -- Address of Record: user@domain
-    contact_ip TEXT NOT NULL,       -- Endpoint's actual IP address
-    contact_port TEXT NOT NULL,     -- Endpoint's port (usually 5060)
-    expires TEXT NOT NULL           -- Expiration time (SQLite datetime)
-);
+**Current Implementation:** Uses OpenSIPS standard `location` table from `usrloc` module.
 
-CREATE INDEX idx_endpoint_locations_expires ON endpoint_locations(expires);
-```
+**Key Columns:**
+- `username` - Username part of AoR
+- `domain` - Domain part of AoR
+- `contact` - Contact URI (sip:user@ip:port)
+- `received` - Received IP:port (for NAT traversal)
+- `expires` - Expiration timestamp (Unix timestamp)
+- `last_modified` - Last update time
 
-**Example data:**
-```
-aor: H5CCvFpY@example.com
-contact_ip: 10.0.1.200
-contact_port: 45891
-expires: 2024-12-23 21:45:00
-```
+**Usage:**
+- `save("location")` - Store endpoint location (called in onreply_route on 200 OK)
+- `lookup("location")` - Find endpoint location (sets $du automatically)
+
+**Note:** Migrated from custom `endpoint_locations` table - see `docs/USRLOC-MIGRATION-PLAN.md` for migration details and `workingdocs/SIMPLIFIED-APPROACH.md` for historical context.
 
 ## Complete Flow Example
 
@@ -158,7 +156,7 @@ expires: 2024-12-23 21:45:00
 3. OpenSIPS fixes NAT: fix_nated_register()
    - Updates Contact header with public IP
    ↓
-4. OpenSIPS stores in endpoint_locations table
+4. OpenSIPS stores in `location` table using `save("location")` (on 200 OK response)
    ↓
 5. OpenSIPS looks up domain → dispatcher set ID
    ↓
@@ -270,11 +268,11 @@ OpenSIPS uses the `nathelper` module to fix NAT issues:
 
 **Possible causes:**
 1. Endpoint location not stored in database
-   - Check: `SELECT * FROM endpoint_locations WHERE aor='user@domain';`
+   - Check: `SELECT username, domain, contact, received, expires FROM location WHERE username='user' AND domain='domain' AND expires > UNIX_TIMESTAMP();`
    - Solution: Verify REGISTER is being processed correctly
 
 2. Endpoint location expired
-   - Check: `SELECT * FROM endpoint_locations WHERE expires > datetime('now');`
+   - Check: `SELECT username, domain, contact, expires FROM location WHERE expires > UNIX_TIMESTAMP();`
    - Solution: Endpoint needs to re-register before expiration
 
 3. OPTIONS not being routed
@@ -295,7 +293,11 @@ sudo journalctl -u opensips -f | grep OPTIONS
 
 **Verify database:**
 ```bash
-sqlite3 /etc/opensips/opensips.db "SELECT * FROM endpoint_locations;"
+# Check location table (usrloc module)
+mysql -u opensips -p opensips -e "SELECT username, domain, contact, received, expires FROM location WHERE expires > UNIX_TIMESTAMP();"
+
+# Or use OpenSIPS MI command
+opensipsctl ul show
 ```
 
 ## Configuration Parameters
@@ -327,7 +329,7 @@ The routing database is located at:
 This database contains:
 - `sip_domains`: Domain to dispatcher set mappings
 - `dispatcher`: Asterisk backend destinations
-- `endpoint_locations`: Endpoint IP/port tracking (custom table, we do NOT use the OpenSIPS `location` table)
+- `location`: Endpoint contact tracking (OpenSIPS usrloc module) ✅ **MIGRATED from endpoint_locations**
 - Standard OpenSIPS tables (version, etc.)
 
 ## Future Enhancements

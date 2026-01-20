@@ -1,8 +1,12 @@
 # Endpoint Location Record Creation
 
+**⚠️ HISTORICAL DOCUMENT** - This document describes the **old approach** using custom `endpoint_locations` table.
+
+**Current Status:** ✅ **MIGRATED** - System now uses OpenSIPS `usrloc` module and `location` table. See `docs/USRLOC-MIGRATION-PLAN.md` for migration details.
+
 ## Overview
 
-This document explains when `endpoint_locations` records are created, the current behavior, implications, and future security considerations.
+This document explains when `endpoint_locations` records were created in the **old implementation**. The current system uses OpenSIPS `save("location")` function which stores records only after successful 200 OK responses (proxy-registrar pattern).
 
 ## Current Behavior
 

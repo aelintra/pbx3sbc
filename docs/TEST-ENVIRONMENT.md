@@ -111,7 +111,7 @@ Phone (40004/40005) → NAT (203.0.113.1) → Internet → OpenSIPS (198.51.100.
 ```
 - Phone sends REGISTER to OpenSIPS
 - OpenSIPS extracts Contact header and source IP
-- Stores endpoint location in `endpoint_locations` table
+- Stores endpoint location in `location` table (OpenSIPS usrloc module) using `save("location")`
 - Forwards REGISTER to Asterisk (if needed)
 
 ### 2. Phone-to-Phone Call (via Asterisk)
@@ -215,8 +215,8 @@ VALUES (10, 'sip:198.51.100.2:5060', 0, '1', 0, 'Asterisk PBX - Public IP');
 ## Testing Scenarios
 
 ### 1. Registration Test
-- Phone 40004 registers → Verify in `endpoint_locations` table
-- Phone 40005 registers → Verify in `endpoint_locations` table
+- Phone 40004 registers → Verify in `location` table (usrloc module)
+- Phone 40005 registers → Verify in `location` table (usrloc module)
 - Check OpenSIPS logs for successful registration
 
 ### 2. Phone-to-Phone Call
@@ -260,7 +260,7 @@ VALUES (10, 'sip:198.51.100.2:5060', 0, '1', 0, 'Asterisk PBX - Public IP');
    - Verify Asterisk is listening on port 5060
 
 4. **Endpoint Lookup Fails**
-   - Check `endpoint_locations` table has entries
+   - Check `location` table has entries: `SELECT username, domain, contact FROM location WHERE expires > UNIX_TIMESTAMP();`
    - Verify AoR format matches (user@domain)
    - Check expires timestamps are valid
 

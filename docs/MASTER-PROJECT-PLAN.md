@@ -35,7 +35,7 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 **Database Tables:**
 - `domain` - Domain → dispatcher_setid mapping (with `setid` column)
 - `dispatcher` - Asterisk backend destinations (OpenSIPS 3.6 version 9 schema)
-- `endpoint_locations` - Registered endpoint IP/port for routing back to endpoints
+- `location` - Registered endpoint contact information (OpenSIPS usrloc module) ✅ **MIGRATED**
 - `acc` - Accounting/CDR records (with `from_uri`, `to_uri` columns)
 - `dialog` - Dialog state tracking
 
@@ -69,7 +69,7 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 
 - **Database & Management:**
   - MySQL routing database
-  - Endpoint location tracking (`endpoint_locations` table)
+  - Endpoint location tracking (`location` table via usrloc module) ✅ **MIGRATED**
   - Domain and dispatcher management scripts
   - Automated installation script
 
@@ -134,22 +134,31 @@ Comprehensive security enhancement project including registration security, rate
 
 ### 2. Monitoring & Statistics
 
-**Status:** 📋 Planned  
+**Status:** ✅ **Metrics Collection Complete** (Grafana deferred)  
 **Priority:** Medium-High  
-**Timeline:** 4-6 weeks
+**Timeline:** Metrics collection complete, Grafana deferred
 
 **From Wishlist:**
-- Statistics - Prometheus and Grafana
-- Asterisk Node Failure notification - via email or txt
-- Doorknock and flood alerts
+- ✅ Statistics - Prometheus metrics collection (complete)
+- 📋 Grafana dashboards (deferred to future step)
+- 📋 Asterisk Node Failure notification - via email or txt
+- 📋 Doorknock and flood alerts
 
-#### 2.1 Prometheus & Grafana Integration
+#### 2.1 Prometheus & Grafana Integration ✅ **Metrics Collection Complete**
 
 **Objective:** Provide comprehensive statistics and monitoring dashboards
 
+**Status:**
+- ✅ Prometheus metrics export (OpenSIPS built-in module) - **COMPLETE**
+- ✅ Prometheus server installation - **COMPLETE**
+- ✅ Node Exporter installation - **COMPLETE**
+- 📋 Grafana dashboards - **DEFERRED** (Prometheus UI sufficient for now)
+
 **Components:**
-- Prometheus metrics exporter for OpenSIPS
-- Grafana dashboards for visualization
+- ✅ Prometheus metrics exporter for OpenSIPS (built-in module)
+- ✅ Prometheus server for metrics collection
+- ✅ Node Exporter for system metrics
+- 📋 Grafana dashboards for visualization (deferred)
 - Key metrics:
   - Call statistics (INVITE, BYE, ACK counts)
   - Registration statistics
@@ -544,37 +553,38 @@ Comprehensive security enhancement project including registration security, rate
 
 ---
 
-### 8. Usrloc Module Migration ⚠️ **TOP PRIORITY**
+### 8. Usrloc Module Migration ✅ **COMPLETE**
 
-**Status:** 📋 Planning (Migration plan created)  
-**Priority:** 🔴 **HIGHEST** - Must be done first to avoid increasing technical debt  
-**Timeline:** 5 weeks  
-**Branch:** `usrloc`
+**Status:** ✅ **COMPLETE** - Migration finished and tested  
+**Priority:** ✅ Completed  
+**Timeline:** Completed  
+**Branch:** Merged to `main`
 
 **Sub-Project:** See [USRLOC-MIGRATION-PLAN.md](USRLOC-MIGRATION-PLAN.md)
 
 **Overview:**
-Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` module and `location` table. This addresses technical debt and aligns with OpenSIPS best practices for proxy-registrar pattern.
+✅ **Migration Complete:** Migrated from custom `endpoint_locations` table to OpenSIPS standard `usrloc` module and `location` table. This addresses technical debt and aligns with OpenSIPS best practices for proxy-registrar pattern.
 
-**Motivation:**
-- Fix stale registration issue (currently storing before reply)
-- Reduce technical debt (remove custom table maintenance)
-- Align with OpenSIPS best practices
-- Provide better features (path support, proper expiration)
+**Benefits Achieved:**
+- ✅ Fixed stale registration issue (now storing only on 200 OK reply)
+- ✅ Reduced technical debt (removed custom table maintenance)
+- ✅ Aligned with OpenSIPS best practices (proxy-registrar pattern)
+- ✅ Better features (path support, proper expiration, flags)
+- ✅ Built-in multi-tenant support
 
-**Phases:**
-- **Phase 0:** Research & Evaluation (Week 1) - Study `usrloc` module API
-- **Phase 1:** Module Setup & Configuration (Week 2) - Load module, create schema
-- **Phase 2:** Parallel Implementation (Week 3) - Implement alongside existing code
-- **Phase 3:** Migration & Testing (Week 4) - Switch to `usrloc`, remove old code
-- **Phase 4:** Cleanup & Documentation (Week 5) - Remove custom table, update docs
+**Completed Phases:**
+- ✅ **Phase 0:** Research & Evaluation - Studied `usrloc` module API
+- ✅ **Phase 1:** Module Setup & Configuration - Loaded module, created schema
+- ✅ **Phase 2:** Parallel Implementation - Implemented alongside existing code
+- ✅ **Phase 3:** Migration & Testing - Switched to `usrloc`, removed old code
+- ✅ **Phase 4:** Cleanup & Documentation - Updated documentation
 
 **Key Deliverables:**
-- `usrloc` module integrated
-- Proxy-registrar pattern implemented (save on reply, not request)
-- All lookups using `lookup("location")` function
-- Custom `endpoint_locations` table removed
-- Documentation updated
+- ✅ `usrloc` module integrated
+- ✅ Proxy-registrar pattern implemented (save on reply, not request)
+- ✅ All lookups using `lookup("location")` function
+- ✅ Custom `endpoint_locations` table references removed from code
+- ✅ Documentation updated
 
 **Dependencies:**
 - OpenSIPS `usrloc` module (standard, should be available)
@@ -593,7 +603,7 @@ Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` m
 
 ### High Priority (Next 3-6 Months)
 
-1. **Usrloc Module Migration** (5 weeks) ⚠️ **DO THIS FIRST**
+1. ✅ **Usrloc Module Migration** - **COMPLETE**
    - **CRITICAL:** Prevents increasing technical debt
    - Fixes stale registration bug
    - Reduces technical debt (removes custom table)
@@ -603,7 +613,7 @@ Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` m
 2. **Security & Threat Detection** (11 weeks)
    - Critical for production security
    - Foundation for other features
-   - Can start after usrloc migration
+   - ✅ Can start now (usrloc migration complete)
 
 3. **Monitoring & Statistics** (4-6 weeks)
    - Essential for operations
@@ -645,7 +655,7 @@ Migration from custom `endpoint_locations` table to OpenSIPS standard `usrloc` m
 ### Critical Path
 
 ```
-Usrloc Module Migration (5 weeks) ⚠️ DO THIS FIRST
+✅ Usrloc Module Migration - COMPLETE
     ↓
 Security Research (Phase 0)
     ↓
@@ -658,14 +668,14 @@ High Availability
 
 ### Parallel Work
 
-- **Backup & Recovery** can be done anytime (but wait until after usrloc migration)
-- **TLS Support** can be done independently (but wait until after usrloc migration)
-- **Management Interface** can start after Security Phase 3 (endpoint viewing depends on usrloc migration)
-- **Containerization** can be done after local testing (but wait until after usrloc migration)
+- **Backup & Recovery** can be done anytime ✅ (usrloc migration complete)
+- **TLS Support** can be done independently ✅ (usrloc migration complete)
+- **Management Interface** can start after Security Phase 3 (endpoint viewing now possible with usrloc module)
+- **Containerization** can be done after local testing ✅ (usrloc migration complete)
 
 ### Blockers
 
-- **⚠️ Usrloc Migration** blocks other major work (to avoid increasing technical debt)
+- ✅ **Usrloc Migration** complete - No longer blocking other work
 - **Security Phase 0** blocks Security implementation
 - **Local Testing** blocks Containerization
 - **Security Phase 3** enhances Monitoring capabilities
@@ -688,7 +698,7 @@ High Availability
 
 ### With Parallelization (Updated Priority)
 
-- **Phase 0 (Weeks 1-5):** Usrloc Module Migration ⚠️ **DO THIS FIRST**
+- ✅ **Phase 0:** Usrloc Module Migration - **COMPLETE**
 - **Phase 1 (Months 2-4):** Security + Backup/Recovery
 - **Phase 2 (Months 5-6):** Monitoring + TLS
 - **Phase 3 (Months 7-9):** Management Interface + Containerization
@@ -779,12 +789,12 @@ High Availability
 ### Immediate (This Week)
 1. ✅ Create master project plan (this document)
 2. ✅ Prioritize usrloc migration as top priority
-3. ⏳ Start usrloc migration Phase 0 (research)
+3. ✅ Complete usrloc migration - **COMPLETE**
 
 ### Short Term (Next Month)
-1. ⏳ Complete usrloc migration Phase 0-1 (research + module setup)
-2. ⏳ Begin usrloc migration Phase 2 (parallel implementation)
-3. ⏳ Plan usrloc migration Phase 3 (migration & testing)
+1. ✅ Usrloc migration complete - All phases finished
+2. 📋 Focus on core system features
+3. 📋 Security & Threat Detection project
 
 ### Medium Term (Next Quarter)
 1. ⏳ Complete Security Phase 0-1

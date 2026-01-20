@@ -426,7 +426,7 @@ flowchart TD
 3. **Endpoint Detection**: Checks if Request-URI domain is an IP address (regex pattern)
 4. **Domain Lookup**: Queries `domain` table to find dispatcher setid
 5. **Dispatcher Selection**: Uses `ds_select_dst()` to find healthy Asterisk backend
-6. **Endpoint Lookup**: Queries `endpoint_locations` table for registered endpoint IP/port
+6. **Endpoint Lookup**: Uses `lookup("location")` function (usrloc module) to find registered endpoint IP/port
 7. **NAT Traversal**: Uses `nathelper` module to fix Contact headers and SDP in responses
 8. **PRACK Support**: Handles PRACK requests for 100rel (reliable provisional responses)
 9. **Username Detection**: Uses regex `^sip:[^@]+@` to detect username in Request-URI (OpenSIPS 3.x compatible, `is_user()` is obsolete)
@@ -437,7 +437,7 @@ flowchart TD
 
 - **domain**: Maps domain names to dispatcher set IDs (uses `setid` column)
 - **dispatcher**: Contains Asterisk backend destinations with health status
-- **endpoint_locations**: Stores registered endpoint IP/port information, AoR, and Contact URI
+- **location**: Stores registered endpoint contact information (OpenSIPS usrloc module) ✅ **MIGRATED**
 
 ## Helper Route Dependencies
 

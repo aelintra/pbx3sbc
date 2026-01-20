@@ -1,8 +1,12 @@
 # Endpoint Location Cleanup
 
+**⚠️ NOTE:** This document references the old `endpoint_locations` table. The current system uses OpenSIPS `location` table (usrloc module) which handles expiration automatically. This cleanup script may still be needed for legacy installations or can be updated to work with the `location` table.
+
 ## Overview
 
-The `endpoint_locations` table stores endpoint registration information (IP, port, expiration time). While expired entries are automatically filtered out of queries using `expires > NOW()`, they remain in the database until explicitly deleted.
+The `endpoint_locations` table (old implementation) stored endpoint registration information (IP, port, expiration time). While expired entries are automatically filtered out of queries using `expires > NOW()`, they remain in the database until explicitly deleted.
+
+**Current System:** Uses OpenSIPS `location` table (usrloc module) which handles expiration automatically via `timer_interval` parameter.
 
 The cleanup script removes expired endpoint location records to:
 - Reduce database size
