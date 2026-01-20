@@ -67,8 +67,8 @@
        │  Database   │
        │  - domains  │
        │  - dispatcher│
-       │  - endpoint_│
-       │    locations│
+       │  - location │
+       │    (usrloc) │
        │  - acc (CDR)│
        │  - dialog   │
        └─────────────┘
@@ -84,7 +84,7 @@
 
 2. **Outbound (Asterisk → Endpoint):**
    - OPTIONS/NOTIFY/INVITE arrives from Asterisk
-   - Endpoint location looked up in `endpoint_locations` table
+   - Endpoint location looked up using `lookup("location")` function (usrloc module)
    - Request routed directly to endpoint IP:port
 
 3. **In-Dialog (ACK/BYE):**
@@ -96,17 +96,20 @@
 
 ## Key Design Decisions
 
-### 1. Custom `endpoint_locations` Table (Not OpenSIPS `location` Table)
+### 1. OpenSIPS `usrloc` Module and `location` Table ✅ **MIGRATED**
 
-**Decision:** Use custom `endpoint_locations` table with direct SQL queries instead of OpenSIPS `usrloc`/`registrar` modules.
+**Decision:** Use OpenSIPS standard `usrloc` module and `location` table (migrated from custom `endpoint_locations` table).
 
 **Why:**
-- Simpler code (direct SQL vs module functions)
-- Full control over schema
-- No extra module dependencies
-- Easier to understand and maintain
+- ✅ Standard OpenSIPS approach (best practices)
+- ✅ Built-in multi-tenant support (domain-aware lookups)
+- ✅ Proper proxy-registrar pattern (store only on successful registration)
+- ✅ Better features (path support, proper expiration, flags)
+- ✅ Reduced technical debt (no custom table maintenance)
 
-**See:** `workingdocs/SIMPLIFIED-APPROACH.md`
+**Migration Status:** ✅ Complete - See `docs/USRLOC-MIGRATION-PLAN.md` and `workingdocs/SESSION-SUMMARY-USRLOC-LOOKUP-COMPLETE.md`
+
+**Note:** Previously used custom `endpoint_locations` table (see `workingdocs/SIMPLIFIED-APPROACH.md` for historical context)
 
 ### 2. Domain → Dispatcher Linking via `setid` Column
 
@@ -241,10 +244,11 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 - Columns: `setid`, `destination`, `flags`, `priority`, `weight`, `attrs`
 - Used for: Load balancing to Asterisk backends
 
-**`endpoint_locations`**
-- Registered endpoint IP/port information
-- Columns: `aor`, `contact_ip`, `contact_port`, `contact_uri`, `expires`
-- Used for: Routing back to endpoints (OPTIONS/NOTIFY/INVITE)
+**`location`** (OpenSIPS usrloc module)
+- Registered endpoint contact information
+- Columns: `username`, `domain`, `contact`, `received`, `expires`, `q`, `callid`, `cseq`, `last_modified`, `flags`, `cflags`, `user_agent`, `socket`, `methods`, `ruid`, `instance`, `reg_id`, `server_id`, `connection_id`, `tcpconn_id`, `keepalive`, `last_keepalive`, `ka_interval`, `attr`
+- Used for: Routing back to endpoints (OPTIONS/NOTIFY/INVITE) via `lookup("location")` function
+- **Note:** Migrated from custom `endpoint_locations` table - see `docs/USRLOC-MIGRATION-PLAN.md`
 
 **`acc`**
 - Accounting/CDR records
@@ -316,8 +320,8 @@ sudo ./scripts/add-dispatcher.sh 10 sip:10.0.1.11:5060 0 0
 # View OpenSIPS service status
 sudo ./scripts/view-status.sh
 
-# Check endpoint locations
-mysql -u opensips -p opensips -e "SELECT * FROM endpoint_locations;"
+# Check endpoint locations (usrloc location table)
+mysql -u opensips -p opensips -e "SELECT username, domain, contact, received, expires FROM location WHERE expires > UNIX_TIMESTAMP();"
 
 # Check recent CDRs
 mysql -u opensips -p opensips -e "SELECT * FROM acc ORDER BY created DESC LIMIT 10;"
@@ -337,7 +341,11 @@ mysql -u opensips -p opensips -e "SELECT * FROM acc ORDER BY created DESC LIMIT 
 
 3. **Verify endpoint registration:**
    ```bash
-   mysql -u opensips -p opensips -e "SELECT * FROM endpoint_locations WHERE aor LIKE '1000@%';"
+   # Check location table (usrloc module)
+   mysql -u opensips -p opensips -e "SELECT username, domain, contact, received, expires FROM location WHERE username='1000' AND expires > UNIX_TIMESTAMP();"
+   
+   # Or use OpenSIPS MI command
+   opensipsctl ul show
    ```
 
 4. **Check dialog states:**
@@ -360,13 +368,22 @@ OpenSIPS dialog states (from `dialog` table):
 
 **See:** `docs/DIALOG-STATE-EXPLANATION.md`
 
-### Endpoint Location Creation
+### Endpoint Location Creation ✅ **UPDATED - Proxy-Registrar Pattern**
 
-Endpoint locations are created **immediately** when a REGISTER request arrives, **before** it's forwarded to Asterisk. This happens regardless of whether Asterisk accepts the registration.
+Endpoint locations are created using OpenSIPS `save("location")` function **only after** receiving a successful 200 OK response from Asterisk (proxy-registrar pattern).
 
-**Why:** We need endpoint location info for routing OPTIONS/NOTIFY back to endpoints, even if Asterisk hasn't processed the REGISTER yet.
+**Implementation:**
+- `save("location")` called in `onreply_route` when REGISTER receives 200 OK
+- Respects Asterisk's expiration decisions
+- No stale registrations (failed registrations don't create records)
+- Uses standard OpenSIPS `usrloc` module and `location` table
 
-**See:** `docs/ENDPOINT-LOCATION-CREATION.md`
+**Why:** Follows OpenSIPS best practices - only store locations for successful registrations.
+
+**See:** 
+- `docs/USRLOC-MIGRATION-PLAN.md` - Migration details
+- `workingdocs/SESSION-SUMMARY-USRLOC-LOOKUP-COMPLETE.md` - Implementation summary
+- `docs/ENDPOINT-LOCATION-CREATION.md` - Historical context (old approach)
 
 ### NAT Traversal
 
