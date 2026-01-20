@@ -248,23 +248,36 @@ From `config/opensips.cfg.template`, these modules are already in use:
 
 ### Registration Security
 - **Need:** Track registration failures
+  - **Solution:** Custom database table + `onreply_route` tracking
+  - **Modules:** `auth_db` for authentication, custom tracking for failures
 - **Need:** Rate limit registration attempts
+  - **Solution:** `ratelimit` module with REGISTER-specific limits
 - **Need:** Block IPs after threshold failures
+  - **Solution:** Custom database tracking + `permissions` module or custom scripting
 
 ### Rate Limiting
 - **Need:** IP-based rate limiting
+  - **Solution:** `ratelimit` module
 - **Need:** Registration-specific rate limiting
+  - **Solution:** `ratelimit` module with method filtering
 - **Need:** Method-specific rate limiting (INVITE, REGISTER, etc.)
+  - **Solution:** `ratelimit` module supports method-based limits
 
 ### Attack Mitigation
 - **Need:** Flood detection
+  - **Solution:** `pike` module
 - **Need:** Automatic IP blocking
+  - **Solution:** `pike` module (automatic) or `permissions` module (manual) or custom scripting
 - **Need:** Whitelist support
+  - **Solution:** `permissions` module allow lists or custom scripting
 
 ### Monitoring
 - **Need:** Security event statistics
+  - **Solution:** `statistics` module + custom database logging
 - **Need:** Failed registration tracking
+  - **Solution:** Custom database table + `onreply_route` tracking
 - **Need:** Attack pattern detection
+  - **Solution:** `pike` module events + custom database analysis
 
 ## Evaluation Criteria
 
