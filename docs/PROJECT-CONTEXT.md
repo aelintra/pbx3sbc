@@ -167,6 +167,15 @@
   - Domain validation (door-knocker protection)
   - Method validation
 
+- **Monitoring & Metrics (✅ Complete):**
+  - Prometheus metrics export via built-in OpenSIPS module
+  - Prometheus server for metrics collection and storage
+  - Node Exporter for system metrics (CPU, memory, disk, network)
+  - Real-time statistics collection (core, dialog, transaction, dispatcher, usrloc, acc)
+  - Historical metrics storage (30-day retention)
+  - Automated installation via `install.sh` script
+  - **See:** `docs/PROMETHEUS-GRAFANA-PLAN.md` and `docs/PROMETHEUS-INSTALL-UBUNTU.md`
+
 - **Management Interface (MVP Complete):**
   - Web-based admin panel (Laravel + Filament)
   - Domain and Dispatcher management (full CRUD)
@@ -176,7 +185,7 @@
   - **Repository:** `pbx3sbc-admin` (separate repository)
 
 - **Automation:**
-  - Automated installation script
+  - Automated installation script (includes Prometheus & Node Exporter)
   - Endpoint cleanup routine (daily timer)
   - Database initialization scripts
 
@@ -190,7 +199,15 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
    - IP reputation
    - Advanced monitoring
 
-2. **Management Interface** (High Priority - MVP Complete)
+2. **Monitoring & Visualization** (Medium Priority - Metrics Collection Complete)
+   - ✅ Prometheus metrics export (complete)
+   - ✅ Prometheus server installation (complete)
+   - ✅ Node Exporter installation (complete)
+   - 📋 Grafana dashboards (optional - can use Prometheus UI)
+   - 📋 Alerting rules configuration
+   - 📋 Custom metrics and dashboards
+
+3. **Management Interface** (High Priority - MVP Complete)
    - ✅ Domain/dispatcher management (complete)
    - ✅ CDR/Dialog viewing (complete)
    - 📋 Endpoint location viewing
@@ -198,13 +215,13 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
    - 📋 IP blocking/whitelisting (depends on Security project)
    - 📋 Firewall rule management
    - 📋 Certificate management
-   - 📋 Enhanced statistics dashboard
+   - 📋 Enhanced statistics dashboard (can leverage Prometheus data)
 
-3. **Backup & Recovery** (Medium Priority)
+4. **Backup & Recovery** (Medium Priority)
    - Automated backups
    - Recovery procedures
 
-4. **Containerization** (Medium Priority)
+5. **Containerization** (Medium Priority)
    - Docker deployment
    - Kubernetes (optional)
 
@@ -269,6 +286,10 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 - **`docs/ENDPOINT-LOCATION-CREATION.md`** - When endpoint_location records are created
 - **`docs/DIALOG-STATE-EXPLANATION.md`** - Dialog state values and meanings
 - **`docs/SECURITY-THREAT-DETECTION-PROJECT.md`** - Security project plan
+- **`docs/PROMETHEUS-GRAFANA-PLAN.md`** - Prometheus & Grafana deployment plan
+- **`docs/PROMETHEUS-INSTALL-UBUNTU.md`** - Prometheus installation guide
+- **`docs/STATISTICS-OVERVIEW.md`** - Statistics collection overview
+- **`docs/TEST-DEPLOYMENT-CHECKLIST.md`** - Test deployment checklist
 
 ### Working Documents
 

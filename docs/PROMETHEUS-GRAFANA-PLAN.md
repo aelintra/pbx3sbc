@@ -2,6 +2,8 @@
 
 **Date:** January 2026  
 **Branch:** `stats`  
+**Status:** ✅ **Phase 1 & 3 Complete** - Prometheus and Node Exporter deployed and operational  
+**Grafana Status:** 📋 **Deferred** - Will be implemented in a future step after core system completion  
 **Purpose:** Plan deployment of Prometheus and Grafana for OpenSIPS statistics collection and visualization
 
 ## Overview
@@ -70,6 +72,74 @@ Deploy Prometheus and Grafana to collect, store, and visualize OpenSIPS real-tim
 - Node Exporter exposes system metrics (required for Grafana dashboards)
 - Prometheus scrapes both sources
 - Grafana visualizes combined metrics
+
+---
+
+## Deployment Status
+
+**Last Updated:** January 2026  
+**Test Deployment:** ✅ **Successful**
+
+### ✅ Completed Components
+
+1. **OpenSIPS Prometheus Module** ✅
+   - Module installed: `opensips-prometheus-module` package
+   - Configuration active in `opensips.cfg.template`
+   - Metrics endpoint operational: `http://localhost:8888/metrics`
+   - All statistics groups exporting: `core:`, `tm:`, `dialog:`, `dispatcher:`, `usrloc:`, `acc:`
+   - Verified: Metrics accessible and in Prometheus format
+
+2. **Prometheus Server** ✅
+   - Installed: Prometheus v2.51.2
+   - Service running: `systemctl status prometheus`
+   - Web UI accessible: `http://localhost:9090`
+   - Configuration: `/etc/prometheus/prometheus.yml`
+   - Scraping OpenSIPS: ✅ Target UP
+   - Scraping Node Exporter: ✅ Target UP
+   - Data retention: 30 days
+
+3. **Node Exporter** ✅
+   - Installed: Node Exporter v1.7.0
+   - Service running: `systemctl status node_exporter`
+   - Metrics endpoint: `http://localhost:9100/metrics`
+   - System metrics: CPU, memory, disk, network
+
+4. **Automated Installation** ✅
+   - Installer script updated: `install.sh` includes Prometheus & Node Exporter
+   - Package installation: `opensips-prometheus-module` added
+   - Service configuration: Systemd services created automatically
+   - Firewall rules: Ports 9090, 9100, 8888 configured
+
+### 📋 Pending Components (Deferred)
+
+1. **Grafana** 📋 **DEFERRED - Future Step**
+   - Status: Deferred - Will be implemented after core system completion
+   - Decision: Local vs Cloud deployment (see decision section)
+   - Dashboard: OpenSIPS template (ID 6935) ready for import when needed
+   - **Note:** Prometheus UI provides sufficient monitoring for current needs
+
+2. **Alerting** (Optional)
+   - Status: Basic alert rules configured in `alerts.yml`
+   - Alertmanager: Not configured (optional)
+   - **Note:** Can be enhanced in future if needed
+
+### 🧪 Test Results
+
+**Test Deployment Date:** January 20, 2026  
+**Test Server:** 192.168.1.58
+
+**Verification Results:**
+- ✅ OpenSIPS metrics endpoint: `curl http://localhost:8888/metrics` - Working
+- ✅ Prometheus targets: All targets UP (opensips, node, prometheus)
+- ✅ Prometheus queries: `opensips_core_rcv_requests` - Returning data (257 requests)
+- ✅ Node Exporter: Metrics accessible
+- ✅ Service status: All services running and enabled
+
+**Metrics Verified:**
+- Core statistics: `opensips_core_rcv_requests` = 257
+- Dialog statistics: `opensips_dialog_active_dialogs` = 0
+- Transaction statistics: All `tm:*` metrics available
+- System metrics: Node Exporter providing CPU, memory, disk metrics
 
 ---
 
@@ -650,9 +720,13 @@ curl http://localhost:8888/metrics
 - ✅ Metrics being collected
 - ✅ Data retention policy configured
 
-### Phase 4: Grafana Deployment
+### Phase 4: Grafana Deployment 📋 **DEFERRED - Future Step**
+
+**Status:** 📋 **Deferred** - Will be implemented after core system completion
 
 **Goal:** Deploy Grafana for visualization
+
+**Note:** Prometheus UI provides sufficient monitoring capabilities for now. Grafana deployment will be prioritized after core system features are complete.
 
 1. **Install Grafana**
    ```bash
@@ -1013,9 +1087,9 @@ groups:
 
 ## Deployment Timeline
 
-### ✅ **Automated Installation (Day 1)**
+### ✅ **Automated Installation (Day 1)** - **COMPLETE**
 
-**Status:** Fully automated via `install.sh` script
+**Status:** ✅ Fully automated via `install.sh` script - **Successfully tested**
 
 **What Happens:**
 1. Run `sudo ./install.sh` (or with `--skip-prometheus` to skip Prometheus)
@@ -1029,19 +1103,24 @@ groups:
 
 **Time Required:** ~10-15 minutes (mostly download time)
 
-### Week 1: Verification & Testing
-- Verify OpenSIPS metrics endpoint: `curl http://localhost:8888/metrics`
-- Verify Node Exporter metrics: `curl http://localhost:9100/metrics`
-- Verify Prometheus scraping: Check Prometheus UI at `http://localhost:9090`
-- Test queries in Prometheus UI
-- Verify all services are running: `systemctl status prometheus node_exporter opensips`
+**Test Results:** ✅ All components installed and verified working (January 20, 2026)
 
-### Week 2: Grafana Deployment (Optional - Local or Cloud)
+### ✅ Week 1: Verification & Testing - **COMPLETE**
+- ✅ Verify OpenSIPS metrics endpoint: `curl http://localhost:8888/metrics` - Working
+- ✅ Verify Node Exporter metrics: `curl http://localhost:9100/metrics` - Working
+- ✅ Verify Prometheus scraping: Check Prometheus UI at `http://localhost:9090` - All targets UP
+- ✅ Test queries in Prometheus UI - Queries returning data
+- ✅ Verify all services are running: `systemctl status prometheus node_exporter opensips` - All active
+
+### Week 2: Grafana Deployment 📋 **DEFERRED - Future Step**
+- **Status:** Deferred - Will be implemented after core system completion
 - Deploy Grafana server (local or cloud - see decision section above)
 - Configure Prometheus datasource
 - Import OpenSIPS dashboard template (ID 6935)
 - Verify all panels populate
 - Create custom dashboards (optional)
+
+**Note:** Prometheus UI (`http://localhost:9090`) provides sufficient monitoring capabilities for current needs. Grafana will be prioritized once core system features are complete.
 
 ### Week 3: Alerting & Polish (Optional)
 - Configure additional alert rules

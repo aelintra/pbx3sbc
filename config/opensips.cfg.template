@@ -64,7 +64,7 @@ loadmodule "registrar.so"
 loadmodule "domain.so"
 # HTTP server module (required for Prometheus module)
 loadmodule "httpd.so"
-# Prometheus module for metrics export
+# Prometheus module for metrics export (requires opensips-prometheus-module package)
 loadmodule "prometheus.so"
 
 ####### Module Parameters ########
@@ -135,11 +135,11 @@ modparam("domain", "domain_table", "domain")
 modparam("domain", "domain_col", "domain")
 
 # --- HTTP Server (Required for Prometheus module) ---
-# Configure HTTP server socket for Prometheus metrics endpoint
-# Syntax: socket = "http:IP:PORT" (OpenSIPS 3.x unified socket syntax)
-# Alternative syntax (also valid): modparam("httpd", "ip", "0.0.0.0"); modparam("httpd", "port", 8888)
-modparam("httpd", "socket", "http:0.0.0.0:8888")  # Listen on all interfaces, port 8888
-# Note: For localhost-only access, use: modparam("httpd", "socket", "http:127.0.0.1:8888")
+# Configure HTTP server for Prometheus metrics endpoint
+# Listen on all interfaces, port 8888
+modparam("httpd", "ip", "0.0.0.0")
+modparam("httpd", "port", 8888)
+# Note: For localhost-only access, use: modparam("httpd", "ip", "127.0.0.1")
 
 # --- Prometheus Module (Metrics Export) ---
 # Metrics endpoint path (default: /metrics)
@@ -890,12 +890,15 @@ route[RELAY] {
                 # Try received field first (NAT traversal)
                 if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "") {
                     # received field contains IP:port from NAT traversal
-                    if ($(avp(nat_received)[0]) =~ "^([^:]+):([0-9]+)") {
+                    # Extract IP and port using separate regex matches
+                    if ($(avp(nat_received)[0]) =~ "^([^:]+):") {
                         $var(nat_ip) = $re;
-                        $var(nat_port) = $(re[1]);
-                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
-                        $var(nat_contact_found) = 1;
+                        if ($(avp(nat_received)[0]) =~ ":([0-9]+)$") {
+                            $var(nat_port) = $re;
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                            xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
+                            $var(nat_contact_found) = 1;
+                        }
                     }
                 }
                 
@@ -911,11 +914,19 @@ route[RELAY] {
                         # Extract IP:port from contact field
                         $var(contact_uri) = $(avp(nat_contact)[0]);
                         # Contact format: sip:user@ip:port or <sip:user@ip:port>
-                        if ($var(contact_uri) =~ "@([^:>]+):([0-9]+)") {
+                        # Extract IP first
+                        if ($var(contact_uri) =~ "@([^:>]+):") {
                             $var(nat_ip) = $re;
-                            $var(nat_port) = $(re[1]);
-                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                            xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            # Extract port
+                            if ($var(contact_uri) =~ ":([0-9]+)") {
+                                $var(nat_port) = $re;
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            } else {
+                                # No port in contact, use default 5060
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                            }
                         } else if ($var(contact_uri) =~ "@([^:>]+)") {
                             # No port in contact, use default 5060
                             $var(nat_ip) = $re;

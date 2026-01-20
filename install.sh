@@ -201,6 +201,7 @@ install_dependencies() {
         opensips-mysql-module \
         opensips-mysql-dbschema \
         opensips-http-modules \
+        opensips-prometheus-module \
         curl \
         wget \
         ufw \
@@ -226,7 +227,7 @@ install_dependencies() {
         if opensips -m 2>/dev/null | grep -qE "(httpd|prometheus)"; then
             log_success "HTTP modules (httpd/prometheus) are available"
         else
-            log_warn "HTTP modules (httpd/prometheus) not found - check opensips-http-modules package installation"
+            log_warn "HTTP modules (httpd/prometheus) not found - check opensips-http-modules and opensips-prometheus-module package installation"
         fi
     else
         log_error "OpenSIPS installation failed - opensips command not found"
