@@ -1,7 +1,7 @@
 # Usrloc Migration - Quick Reference for Next Session
 
-**Last Updated:** January 19, 2026  
-**Status:** save() working ✅ | lookup() pending ⏳
+**Last Updated:** January 20, 2026  
+**Status:** save() working ✅ | lookup() working ✅ | INVITE routing working ✅
 
 ## What's Done ✅
 
@@ -64,21 +64,20 @@ onreply_route[handle_reply_reg] {
 }
 ```
 
-## Next Task: Implement lookup()
+## ✅ Completed: lookup() Implementation
 
-**Current State:** OPTIONS/NOTIFY routing uses SQL queries to `endpoint_locations` table
+**Status:** OPTIONS/NOTIFY/INVITE routing now uses `lookup("location")` function
 
-**Target:** Replace with `lookup("location")` function
-
-**Locations to Update:**
-- `config/opensips.cfg.template` ~line 603 (ENDPOINT_LOOKUP route)
-- `config/opensips.cfg.template` ~line 950 (OPTIONS/NOTIFY routing)
+**Implementation:**
+- OPTIONS/NOTIFY routing: Uses `lookup("location")` for domain-specific lookups, SQL fallback for wildcard
+- INVITE routing: Uses SQL query to `location` table (wildcard lookup for username-only)
+- Both working correctly - routing to endpoints successfully
 
 **Key Points:**
-- `lookup("location")` sets `$du` automatically
-- Must use domain-specific lookup: `lookup("location", "uri", "sip:user@domain")`
+- `lookup("location")` sets `$du` automatically when contact found
+- Domain-specific lookup: Set Request-URI to `sip:user@domain`, then call `lookup("location")`
+- Wildcard lookup: SQL query to `location` table for username-only searches
 - Returns true if contact found, false otherwise
-- Handles multiple contacts (load balancing)
 
 ## Files Modified Today
 
