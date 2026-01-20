@@ -109,6 +109,14 @@ else
     echo "  ✓ Domain schema loaded successfully."
 fi
 
+# Ensure domain module version entry exists in version table (required for domain module)
+echo "Ensuring domain module version entry exists..."
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+INSERT INTO version (table_name, table_version) VALUES ('domain', 4)
+ON DUPLICATE KEY UPDATE table_version = 4;
+EOF
+echo "  ✓ Domain module version entry verified."
+
 # Create OpenSIPS location table for usrloc module
 # Idempotent: check if table exists before creating
 echo "Creating OpenSIPS location table (for usrloc module)..."
@@ -124,6 +132,15 @@ else
         echo "  Location table will not be created - usrloc module migration will require manual table creation"
     fi
 fi
+
+# Ensure location module version entry exists in version table (required for usrloc module)
+# Version 1013 is the expected version for OpenSIPS 3.6.3
+echo "Ensuring location module version entry exists..."
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+INSERT INTO version (table_name, table_version) VALUES ('location', 1013)
+ON DUPLICATE KEY UPDATE table_version = 1013;
+EOF
+echo "  ✓ Location module version entry verified."
 
 # Create custom endpoint_locations table (MySQL syntax)
 echo "Creating custom endpoint_locations table..."

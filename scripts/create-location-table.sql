@@ -4,7 +4,7 @@
 -- Table version: 1013
 
 CREATE TABLE IF NOT EXISTS location (
-    contact_id INT PRIMARY KEY AUTO_INCREMENT NOT NULL,
+    contact_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY NOT NULL,
     username CHAR(64) DEFAULT '' NOT NULL,
     domain CHAR(64) DEFAULT NULL,
     contact TEXT NOT NULL,
@@ -27,19 +27,19 @@ CREATE TABLE IF NOT EXISTS location (
 
 -- Indexes for efficient lookups
 -- Index on username+domain for domain-specific lookups (critical for multi-tenant)
-CREATE INDEX location_account_idx ON location (username, domain);
+CREATE INDEX IF NOT EXISTS location_account_idx ON location (username, domain);
 
 -- Index on expires for cleanup queries
-CREATE INDEX location_expires_idx ON location (expires);
+CREATE INDEX IF NOT EXISTS location_expires_idx ON location (expires);
 
 -- Index on domain for domain-based queries
-CREATE INDEX location_domain_idx ON location (domain);
+CREATE INDEX IF NOT EXISTS location_domain_idx ON location (domain);
 
 -- Index on username for username-only queries (though we prefer domain-specific)
-CREATE INDEX location_username_idx ON location (username);
+CREATE INDEX IF NOT EXISTS location_username_idx ON location (username);
 
 -- Index on last_modified for maintenance queries
-CREATE INDEX location_last_modified_idx ON location (last_modified);
+CREATE INDEX IF NOT EXISTS location_last_modified_idx ON location (last_modified);
 
 -- Verify table was created
 -- DESCRIBE location;

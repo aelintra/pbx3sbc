@@ -54,6 +54,14 @@ loadmodule "nathelper.so"
 loadmodule "dialog.so"
 # Accounting module for CDR (Call Detail Records)
 loadmodule "acc.so"
+# User location module for endpoint registration tracking (usrloc migration)
+loadmodule "usrloc.so"
+# Signaling module (required dependency for registrar module)
+loadmodule "signaling.so"
+# Registrar module provides save() and lookup() functions (uses usrloc as backend)
+loadmodule "registrar.so"
+# Domain module for domain management (used with usrloc for multi-tenant support)
+loadmodule "domain.so"
 
 ####### Module Parameters ########
 
@@ -91,6 +99,36 @@ modparam("acc", "detect_direction", 1)
 modparam("acc", "extra_fields", "db:from_uri->from_uri;to_uri->to_uri")
 # Note: from_uri and to_uri columns are added to acc table via init-database.sh
 # These are populated via $acc_extra() in the script (see INVITE handling)
+
+# --- User location module (usrloc migration) ---
+modparam("usrloc", "db_url", "mysql://opensips:your-password@localhost/opensips")
+# db_mode: 0 = memory only, 1 = DB only, 2 = cached DB (we use 2 for cached DB - best balance)
+modparam("usrloc", "db_mode", 2)
+# use_domain: 1 = domain-aware (REQUIRED for multi-tenant - allows same username across domains)
+modparam("usrloc", "use_domain", 1)
+# nat_bflag: Flag name for NAT detection (used with nathelper module)
+modparam("usrloc", "nat_bflag", "NAT")
+# timer_interval: How often to flush cached contacts to DB (seconds, default 60)
+modparam("usrloc", "timer_interval", 10)
+# regen_broken_contactid: Regenerate invalid/broken contact_id values on startup
+# This fixes contact_id values that are out of range or invalid (e.g., from schema migration)
+modparam("usrloc", "regen_broken_contactid", 1)
+
+# --- Registrar module (provides save() and lookup() functions) ---
+# mcontact_avp: AVP name where registrar module stores modified Contact from main registrar's 200 OK reply
+# When the main registrar modifies the Contact header in its 200 OK reply, registrar module stores it here
+# This allows save() in onreply_route to use the modified Contact (if reply Contact is modified)
+# NOTE: If reply Contact is <null> or missing, save() cannot extract contact info and will fail
+modparam("registrar", "mcontact_avp", "$avp(mcontact)")
+
+# --- Domain module (multi-tenant support) ---
+modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
+# db_mode: 0 = no DB, 1 = DB only, 2 = cached DB (we use 2 for cached DB)
+modparam("domain", "db_mode", 2)
+# domain_table: Name of the domain table (default: "domain")
+modparam("domain", "domain_table", "domain")
+# domain_col: Column name for domain (default: "domain")
+modparam("domain", "domain_col", "domain")
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -280,28 +318,27 @@ route {
         xlog("OPTIONS/NOTIFY from $si - Request-URI doesn't look like endpoint, continuing normal routing\n");
     }
     
-    # ---- Handle REGISTER to track endpoint locations ----
+    # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
     if (is_method("REGISTER")) {
         if ($hdr(Contact) != "") {
-            $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
-            $var(endpoint_ip) = $si;
-            if ($sp != "" && $sp != "0") {
-                $var(endpoint_port) = $sp;
-            } else {
-                $var(endpoint_port) = "5060";
-            }
-            
+            # Fix NAT in REGISTER request (needed for proper Contact header handling)
+            # This updates Contact header with public IP if behind NAT
             fix_nated_register();
-            if ($hdr(Expires) != "" && $hdr(Expires) != "0") {
-                $var(expires_int) = $hdr(Expires);
-            } else {
-                $var(expires_int) = "3600";
-            }
-            $var(contact_uri) = "sip:" + $tU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
             
-            $var(query) = "INSERT INTO endpoint_locations (aor, contact_ip, contact_port, contact_uri, expires) VALUES ('" + $var(endpoint_aor) + "', '" + $var(endpoint_ip) + "', '" + $var(endpoint_port) + "', '" + $var(contact_uri) + "', DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)) ON DUPLICATE KEY UPDATE contact_ip='" + $var(endpoint_ip) + "', contact_port='" + $var(endpoint_port) + "', contact_uri='" + $var(contact_uri) + "', expires=DATE_ADD(NOW(), INTERVAL " + $var(expires_int) + " SECOND)";
-            sql_query($var(query), "$avp(reg_result)");
-            xlog("REGISTER: Stored endpoint $var(endpoint_aor) -> $var(endpoint_ip):$var(endpoint_port) (expires $var(expires_int)s)\n");
+            # Store original Contact header (with NAT fixes) in AVP for diagnostic purposes
+            # NOTE: save() extracts Contact from the REPLY, not the request
+            # If reply Contact is <null>, save() cannot work (this is a limitation of proxy-registrar mode)
+            # We store request Contact here only for logging/diagnostics
+            $avp(reg_contact) = $hdr(Contact);
+            
+            # Arm reply handler to save location only on successful registration (2xx)
+            # This follows OpenSIPS proxy-registrar pattern: save AFTER successful reply
+            # The save() function will use contact information from the 200 OK reply
+            # (including any modifications from the main registrar) via mcontact_avp
+            # If reply Contact is <null>, it will use $avp(mcontact) from the request
+            t_on_reply("handle_reply_reg");
+            
+            xlog("REGISTER: Request from $si:$sp, To=$tU@$(tu{uri.domain}), Contact=$hdr(Contact), will save location on 2xx reply\n");
         }
     }
 
@@ -982,6 +1019,71 @@ onreply_route {
         exit;
     }
     # If we get here, exit to let transaction module handle it
+    exit;
+}
+
+# --- REGISTER reply handler (usrloc migration) ---
+# This handler saves endpoint locations only on successful registration (2xx)
+# Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
+# --- REGISTER reply handler (usrloc migration) ---
+# This handler saves endpoint locations only on successful registration (2xx)
+# Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
+# The save() function uses contact information from the 200 OK reply (via mcontact_avp)
+# which includes any modifications made by the main registrar (e.g., expiration changes)
+onreply_route[handle_reply_reg] {
+    if (is_method("REGISTER")) {
+        # Only save location on successful registration (2xx response)
+        if (t_check_status("2[0-9][0-9]")) {
+            # DIAGNOSTIC: Log all relevant values before calling save()
+            xlog("REGISTER: === DIAGNOSTIC INFO BEFORE save() ===\n");
+            xlog("REGISTER: Response: $rs $rr\n");
+            xlog("REGISTER: To URI: $tu\n");
+            xlog("REGISTER: To User: $tU\n");
+            xlog("REGISTER: To Domain: $(tu{uri.domain})\n");
+            xlog("REGISTER: Reply Contact header: [$hdr(Contact)]\n");
+            xlog("REGISTER: Reply Expires header: [$hdr(Expires)]\n");
+            xlog("REGISTER: Request Contact (stored for diagnostics): [$avp(reg_contact)]\n");
+            xlog("REGISTER: Modified Contact AVP (from registrar module): [$avp(mcontact)]\n");
+            xlog("REGISTER: Source IP:Port: $si:$sp\n");
+            xlog("REGISTER: Call-ID: $hdr(Call-ID)\n");
+            
+            # Check if Contact is actually null/empty
+            # CRITICAL: save() extracts contact from the REPLY, not the request
+            # If reply Contact is <null>, save() cannot work - this is a limitation of proxy-registrar mode
+            if ($hdr(Contact) == "") {
+                xlog("REGISTER: ERROR: Reply Contact header is empty/null - save() cannot extract contact info!\n");
+                xlog("REGISTER: save() requires Contact header in the 200 OK reply to work\n");
+                xlog("REGISTER: This registration will NOT be saved to location table\n");
+                # Don't call save() if reply Contact is missing - it will fail silently
+                exit;
+            }
+            
+            # save("location") saves contact to location table using usrloc module
+            # For proxy-registrar mode, save() extracts contact details from the 200 OK REPLY (not the request)
+            # Since we're in onreply_route, save() won't generate a reply (transaction already handling it)
+            # - Contact header from the 200 OK reply (must be present - if <null>, save() cannot work)
+            # - AOR from $tu (To URI) - automatically extracted
+            # - Expiration from Expires header or Contact expires parameter in reply
+            # - Source IP/port from original request (preserved by transaction)
+            # - Domain separation (username@domain as key) - from $tu
+            # Returns true on success, false on failure
+            # NOTE: If reply Contact is <null>, save() cannot extract contact info and will fail silently
+            xlog("REGISTER: Calling save(\"location\")...\n");
+            
+            if (save("location")) {
+                $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
+                xlog("REGISTER: save(\"location\") returned TRUE for $var(endpoint_aor) (response $rs $rr)\n");
+                xlog("REGISTER: Note: With db_mode=2 (cached DB), writes may be delayed up to timer_interval seconds\n");
+            } else {
+                xlog("L_ERR", "REGISTER: save(\"location\") returned FALSE for $tU@$(tu{uri.domain}) (response $rs $rr)\n");
+                xlog("L_ERR", "REGISTER: This means save() failed - check usrloc logs for database errors\n");
+            }
+        } else {
+            # Registration failed (401, 403, etc.) - do NOT save location
+            # This fixes the stale registration bug - failed registrations don't create records
+            xlog("REGISTER: Failed registration ($rs $rr) for $tU@$(tu{uri.domain}), not saving location\n");
+        }
+    }
     exit;
 }
 

@@ -388,7 +388,7 @@ The `usrloc` module is OpenSIPS's standard user-location storage facility. It ma
 
 ```sql
 CREATE TABLE location (
-    contact_id INTEGER PRIMARY KEY AUTO_INCREMENT NOT NULL,
+    contact_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY NOT NULL,  -- FIXED: Must be BIGINT for UUID Call-ID hashes
     username CHAR(64) DEFAULT '' NOT NULL,        -- Username part of AoR
     domain CHAR(64) DEFAULT NULL,                  -- Domain part of AoR
     contact TEXT NOT NULL,                         -- Full Contact header
@@ -1607,7 +1607,30 @@ $var(expires_value) = $(ct{nameaddr.param,expires});
 
 ---
 
-**Status:** 📋 Planning Complete - Ready for Research Phase  
-**Next Steps:** Begin Phase 0 research and evaluation  
+## Quick Status Update (Jan 19, 2026)
+
+**✅ COMPLETED:**
+- ✅ Location table created with `BIGINT UNSIGNED` contact_id (fixes UUID Call-ID hash overflow)
+- ✅ usrloc, registrar, domain, signaling modules loaded
+- ✅ `save("location")` working correctly - registrations saving to location table
+- ✅ Failed registrations (401) correctly NOT creating records
+- ✅ Proxy-registrar pattern implemented in `onreply_route[handle_reply_reg]`
+
+**🔧 KEY FIX:**
+- Changed `contact_id` from `INT UNSIGNED` to `BIGINT UNSIGNED` to handle UUID-based Call-ID hashes
+- Snom phones use UUID format Call-IDs which produce hash values exceeding INT UNSIGNED max (4,294,967,295)
+- Actual contact_id value: `3617797875662073346` (way beyond INT range)
+
+**📋 NEXT STEPS:**
+- Implement `lookup("location")` function to replace SQL queries
+- Test domain-specific lookups
+- Remove old endpoint_locations code
+
+**📚 See:** `workingdocs/SESSION-SUMMARY-USRLOC-SAVE-FIX.md` for detailed session notes
+
+---
+
+**Status:** 🚧 In Progress - save() working, lookup() pending  
+**Next Steps:** Implement lookup() function for OPTIONS/NOTIFY routing  
 **Branch:** `usrloc`  
-**Last Updated:** January 2026
+**Last Updated:** January 19, 2026
