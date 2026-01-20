@@ -721,172 +721,6 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     return;
 }
 
-# Endpoint lookup helper route
-# Looks up endpoint location from database by username and/or AoR
-# 
-# Input variables:
-#   $var(lookup_user) - Username to look up (required)
-#   $var(lookup_aor)  - Optional AoR for exact match (e.g., "user@domain.com")
-#
-# Output variables:
-#   $var(endpoint_ip)   - Endpoint IP address if found
-#   $var(endpoint_port) - Endpoint port if found (defaults to 5060)
-#   $var(endpoint_aor)  - Full AoR if found (e.g., "user@domain.com")
-#   $var(lookup_success) - 1 if endpoint found, 0 if not found
-#
-# Usage:
-#   $var(lookup_user) = "40004";
-#   $var(lookup_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
-#   route(ENDPOINT_LOOKUP);
-#   if ($var(lookup_success) == 1) {
-#       # Use $var(endpoint_ip), $var(endpoint_port), $var(endpoint_aor)
-#   }
-route[ENDPOINT_LOOKUP] {
-    $var(endpoint_ip) = "";
-    $var(endpoint_port) = "";
-    $var(endpoint_aor) = "";
-    $var(contact_uri) = "";
-    $var(lookup_success) = 0;
-    
-    if ($var(lookup_user) == "" || $var(lookup_user) == "0" || $var(lookup_user) == "<null>") {
-        return;
-    }
-    
-    # Try exact AoR match first (if provided)
-    if ($var(lookup_aor) != "") {
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
-            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-            if (sql_query($var(query), "$avp(endpoint_port)")) {
-                $var(endpoint_port) = $(avp(endpoint_port)[0]);
-            }
-            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor='" + $var(lookup_aor) + "' AND expires > NOW()";
-            if (sql_query($var(query), "$avp(contact_uri)")) {
-                $var(contact_uri) = $(avp(contact_uri)[0]);
-            }
-            $var(endpoint_aor) = $var(lookup_aor);
-        }
-    }
-    
-    # Fallback: username-only lookup
-    if ($var(endpoint_ip) == "") {
-        $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-        if (sql_query($var(query), "$avp(endpoint_ip)") && $(avp(endpoint_ip)[0]) != "") {
-            $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-            $var(query) = "SELECT contact_port FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_port)")) {
-                $var(endpoint_port) = $(avp(endpoint_port)[0]);
-            }
-            $var(query) = "SELECT contact_uri FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(contact_uri)")) {
-                $var(contact_uri) = $(avp(contact_uri)[0]);
-            }
-            $var(query) = "SELECT aor FROM endpoint_locations WHERE aor LIKE '" + $var(lookup_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_aor)")) {
-                $var(endpoint_aor) = $(avp(endpoint_aor)[0]);
-            }
-        }
-    }
-    
-    if ($var(endpoint_ip) != "") {
-        route(VALIDATE_ENDPOINT);
-        if ($var(contact_uri) == "" && $var(endpoint_aor) != "") {
-            $var(contact_uri) = "sip:" + $var(endpoint_aor);
-        }
-        $var(lookup_success) = 1;
-    }
-    return;
-}
-
-# Endpoint validation helper route
-# Validates endpoint IP and port, sets defaults
-# 
-# Input variables:
-#   $var(endpoint_ip)   - Endpoint IP address (required)
-#   $var(endpoint_port) - Endpoint port (optional, defaults to 5060)
-#
-# Output variables:
-#   $var(endpoint_ip)   - Validated IP (unchanged if valid)
-#   $var(endpoint_port) - Validated port (defaults to 5060 if empty/invalid)
-#
-# Usage:
-#   $var(endpoint_ip) = "192.168.1.100";
-#   $var(endpoint_port) = "";  # Will be set to 5060
-#   route(VALIDATE_ENDPOINT);
-route[VALIDATE_ENDPOINT] {
-    # Validate IP is not empty
-    if ($var(endpoint_ip) == "" || $var(endpoint_ip) == "0") {
-        xlog("L_ERR", "VALIDATE_ENDPOINT: endpoint_ip is empty or invalid\n");
-        return;
-    }
-    
-    # Set default port if empty or invalid
-    if ($var(endpoint_port) == "" || $var(endpoint_port) == "0") {
-        $var(endpoint_port) = "5060";
-    }
-    
-    # Route returns normally to caller (no exit needed)
-}
-
-# Build endpoint URI helper route
-# Constructs destination URI ($du) and Request-URI ($ru) for routing to endpoints
-# Uses stored contact_uri for Request-URI to ensure it matches Contact URI from REGISTER
-#
-# Input variables:
-#   $var(endpoint_user)   - Username for the endpoint (required)
-#   $var(endpoint_ip)     - Endpoint IP address (required)
-#   $var(endpoint_port)   - Endpoint port (required, should be validated)
-#   $var(endpoint_aor)    - Full AoR (user@domain) if available (optional)
-#   $var(contact_uri)     - Stored Contact URI format (from REGISTER) for Request-URI matching (optional)
-#
-# Output variables:
-#   $du - Destination URI (sip:user@ip:port) for routing
-#   $ru - Request-URI (uses stored contact_uri if available, otherwise fallback to AoR format)
-#
-# Usage:
-#   $var(endpoint_user) = "40004";
-#   $var(endpoint_ip) = "192.168.1.100";
-#   $var(endpoint_port) = "5060";
-#   $var(endpoint_aor) = "40004@pbx3sbc.vcloudpbx.com";  # Optional
-#   $var(contact_uri) = "sip:40004@pbx3sbc.vcloudpbx.com";  # Optional, from ENDPOINT_LOOKUP
-#   route(BUILD_ENDPOINT_URI);
-route[BUILD_ENDPOINT_URI] {
-    # Build destination URI with IP:port for routing (NAT traversal)
-    $du = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-    
-    # Use stored contact_uri if available (ensures Request-URI matches Contact URI from REGISTER)
-    # This fixes the "broken registrar" issue for Snom and other endpoints
-    if ($var(contact_uri) != "" && $var(contact_uri) != "0") {
-        $ru = $var(contact_uri);
-        xlog("BUILD_ENDPOINT_URI: Using stored Contact-URI for Request-URI: $ru\n");
-    } else if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@" && $var(endpoint_aor) !~ "@[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-        # Fallback: AoR has domain (not IP), use it directly
-        $ru = "sip:" + $var(endpoint_aor);
-        xlog("BUILD_ENDPOINT_URI: Using AoR directly in Request-URI (fallback): $ru\n");
-    } else {
-        # Last resort: extract domain from To header or use IP
-        $var(endpoint_domain) = "";
-        if ($var(endpoint_aor) != "" && $var(endpoint_aor) =~ "@(.+)") {
-            $var(endpoint_domain) = $re;
-        }
-        # Try To header as fallback
-        if (($var(endpoint_domain) == "" || $var(endpoint_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") && $(tu{uri.domain}) != "" && $(tu{uri.domain}) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-            $var(endpoint_domain) = $(tu{uri.domain});
-        }
-        if ($var(endpoint_domain) != "" && $var(endpoint_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-            $ru = "sip:" + $var(endpoint_user) + "@" + $var(endpoint_domain);
-            xlog("BUILD_ENDPOINT_URI: Using extracted domain in Request-URI (fallback): $ru\n");
-        } else {
-            # Last resort: use IP if domain not found (shouldn't happen with proper registration)
-            xlog("L_WARN", "BUILD_ENDPOINT_URI: Cannot determine domain, using IP in Request-URI (last resort): $du\n");
-            $ru = $du;
-        }
-    }
-    
-    # Route returns normally to caller (no exit needed)
-}
-
 # Check if IP address is private (RFC 1918)
 # Input: $var(check_ip) - IP address to check
 # Output: $var(is_private) - 1 if private, 0 if public
@@ -970,13 +804,68 @@ route[RELAY] {
             route(CHECK_PRIVATE_IP);
             
             if ($var(is_private) == 1 && $rU != "") {
-                $var(lookup_user) = $rU;
-                $var(lookup_aor) = "";
-                route(ENDPOINT_LOOKUP);
+                # Use location table for NAT handling (migrated from endpoint_locations)
+                # Extract username and domain from Request-URI
+                $var(nat_lookup_user) = $rU;
+                $var(nat_lookup_domain) = $rd;
                 
-                if ($var(lookup_success) == 1 && $var(endpoint_ip) != "" && $var(endpoint_ip) != "0" && $var(endpoint_ip) != "<null>") {
-                    $du = "sip:" + $rU + "@" + $var(endpoint_ip) + ":" + $var(endpoint_port);
-                    xlog("RELAY: $rm - Updated destination to NAT IP: $du (was $ru)\n");
+                # Check if domain is an IP address (not a domain name)
+                if ($var(nat_lookup_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Domain is IP - try to determine domain from source IP
+                    route(GET_DOMAIN_FROM_SOURCE_IP);
+                    if ($var(domain_detection_success) == 1) {
+                        $var(nat_lookup_domain) = $var(domain_from_source);
+                    }
+                }
+                
+                # Query location table for contact information
+                # First try received field (NAT traversal), then fallback to contact field
+                $var(nat_contact_found) = 0;
+                
+                if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    # Domain-specific lookup (preferred for multi-tenant)
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                } else {
+                    # Fallback: username-only lookup (wildcard)
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                }
+                
+                # Try received field first (NAT traversal)
+                if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "") {
+                    # received field contains IP:port from NAT traversal
+                    if ($(avp(nat_received)[0]) =~ "^([^:]+):([0-9]+)") {
+                        $var(nat_ip) = $re;
+                        $var(nat_port) = $(re[1]);
+                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
+                        $var(nat_contact_found) = 1;
+                    }
+                }
+                
+                # Fallback to contact field if received not available
+                if ($var(nat_contact_found) == 0) {
+                    if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    } else {
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    }
+                    
+                    if (sql_query($var(query), "$avp(nat_contact)") && $(avp(nat_contact)[0]) != "") {
+                        # Extract IP:port from contact field
+                        $var(contact_uri) = $(avp(nat_contact)[0]);
+                        # Contact format: sip:user@ip:port or <sip:user@ip:port>
+                        if ($var(contact_uri) =~ "@([^:>]+):([0-9]+)") {
+                            $var(nat_ip) = $re;
+                            $var(nat_port) = $(re[1]);
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                            xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                        } else if ($var(contact_uri) =~ "@([^:>]+)") {
+                            # No port in contact, use default 5060
+                            $var(nat_ip) = $re;
+                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                            xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                        }
+                    }
                 }
             }
         }
@@ -1103,24 +992,58 @@ onreply_route {
         
         # Diagnostic logging: Check endpoint IPs for SDP troubleshooting
         # This helps diagnose RTP issues regardless of whether call is from Asterisk or endpoint
+        # Updated to use location table (migrated from endpoint_locations)
         if ($var(to_user) != "") {
-            # Look up endpoint IP from database for the callee (To header)
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(to_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(endpoint_ip)")) {
-                if ($(avp(endpoint_ip)[0]) != "") {
-                    $var(endpoint_ip) = $(avp(endpoint_ip)[0]);
-                    xlog("Callee endpoint IP from database: $var(endpoint_ip) (user=$var(to_user))\n");
+            # Look up endpoint contact from location table for the callee (To header)
+            # Use received field if available (NAT), otherwise extract from contact field
+            $var(query) = "SELECT received FROM location WHERE username='" + $var(to_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(endpoint_received)")) {
+                if ($(avp(endpoint_received)[0]) != "") {
+                    # received field contains IP:port
+                    if ($(avp(endpoint_received)[0]) =~ "^([^:]+)") {
+                        $var(endpoint_ip) = $re;
+                        xlog("Callee endpoint IP from location table (received): $var(endpoint_ip) (user=$var(to_user))\n");
+                    }
+                } else {
+                    # Fallback to contact field
+                    $var(query) = "SELECT contact FROM location WHERE username='" + $var(to_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    if (sql_query($var(query), "$avp(endpoint_contact)")) {
+                        if ($(avp(endpoint_contact)[0]) != "") {
+                            $var(contact_uri) = $(avp(endpoint_contact)[0]);
+                            # Extract IP from contact: sip:user@ip:port
+                            if ($var(contact_uri) =~ "@([^:>]+)") {
+                                $var(endpoint_ip) = $re;
+                                xlog("Callee endpoint IP from location table (contact): $var(endpoint_ip) (user=$var(to_user))\n");
+                            }
+                        }
+                    }
                 }
             }
         }
         
         # Also check the caller's endpoint IP
         if ($var(from_user) != "") {
-            $var(query) = "SELECT contact_ip FROM endpoint_locations WHERE aor LIKE '" + $var(from_user) + "@%' AND expires > NOW() LIMIT 1";
-            if (sql_query($var(query), "$avp(caller_ip)")) {
-                if ($(avp(caller_ip)[0]) != "") {
-                    $var(caller_ip) = $(avp(caller_ip)[0]);
-                    xlog("Caller endpoint IP from database: $var(caller_ip) (user=$var(from_user))\n");
+            $var(query) = "SELECT received FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(caller_received)")) {
+                if ($(avp(caller_received)[0]) != "") {
+                    # received field contains IP:port
+                    if ($(avp(caller_received)[0]) =~ "^([^:]+)") {
+                        $var(caller_ip) = $re;
+                        xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user))\n");
+                    }
+                } else {
+                    # Fallback to contact field
+                    $var(query) = "SELECT contact FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    if (sql_query($var(query), "$avp(caller_contact)")) {
+                        if ($(avp(caller_contact)[0]) != "") {
+                            $var(contact_uri) = $(avp(caller_contact)[0]);
+                            # Extract IP from contact: sip:user@ip:port
+                            if ($var(contact_uri) =~ "@([^:>]+)") {
+                                $var(caller_ip) = $re;
+                                xlog("Caller endpoint IP from location table (contact): $var(caller_ip) (user=$var(from_user))\n");
+                            }
+                        }
+                    }
                 }
             }
         }
