@@ -274,8 +274,9 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 - **`config/opensips.cfg.template`** - Main OpenSIPS configuration (~1300 lines)
   - Routing logic
   - Module configuration
-  - NAT handling
+  - NAT handling with auto-detection
   - Dialog tracking
+  - Comprehensive logging for troubleshooting
 
 ### Scripts
 
