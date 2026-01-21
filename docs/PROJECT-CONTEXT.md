@@ -156,9 +156,12 @@
   - Endpoint location tracking
 
 - **NAT Handling:**
-  - NAT traversal for REGISTER
-  - In-dialog request routing (ACK/BYE)
+  - ✅ **Auto-detection**: Automatically detects NAT environment based on endpoint IPs
+  - NAT traversal for REGISTER (`fix_nated_register()`)
+  - Automatic SDP fixing for INVITE and responses when NAT detected
+  - In-dialog request routing (ACK/BYE) with NAT IP lookup
   - NOTIFY routing to endpoints behind NAT
+  - Works seamlessly in both LAN and NAT environments
 
 - **Accounting:**
   - CDR (Call Detail Records) with `from_uri`/`to_uri`
@@ -268,7 +271,7 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 
 ### Configuration
 
-- **`config/opensips.cfg.template`** - Main OpenSIPS configuration (1004 lines)
+- **`config/opensips.cfg.template`** - Main OpenSIPS configuration (~1300 lines)
   - Routing logic
   - Module configuration
   - NAT handling
@@ -289,6 +292,8 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 - **`docs/opensips-routing-logic.md`** - Detailed routing logic explanation
 - **`docs/ENDPOINT-LOCATION-CREATION.md`** - When endpoint_location records are created
 - **`docs/DIALOG-STATE-EXPLANATION.md`** - Dialog state values and meanings
+- **`docs/NAT-AUTO-DETECTION.md`** - NAT environment auto-detection implementation
+- **`docs/AUDIO-FIX-ACK-HANDLING.md`** - ACK forwarding fix and troubleshooting notes
 - **`docs/SECURITY-THREAT-DETECTION-PROJECT.md`** - Security project plan
 - **`docs/PROMETHEUS-GRAFANA-PLAN.md`** - Prometheus & Grafana deployment plan
 - **`docs/PROMETHEUS-INSTALL-UBUNTU.md`** - Prometheus installation guide
@@ -329,10 +334,16 @@ mysql -u opensips -p opensips -e "SELECT * FROM acc ORDER BY created DESC LIMIT 
 
 ### Troubleshooting
 
+**⚠️ Important:** Comprehensive logging is critical for troubleshooting. Always check logs first!
+
 1. **Check OpenSIPS logs:**
    ```bash
    journalctl -u opensips -f
    ```
+   - Look for detailed request/response logging
+   - Check NAT detection messages
+   - Review ACK/PRACK forwarding logs
+   - See `docs/AUDIO-FIX-ACK-HANDLING.md` for example of logging value
 
 2. **Check database connectivity:**
    ```bash
@@ -352,6 +363,12 @@ mysql -u opensips -p opensips -e "SELECT * FROM acc ORDER BY created DESC LIMIT 
    ```bash
    mysql -u opensips -p opensips -e "SELECT callid, state, start_time FROM dialog ORDER BY start_time DESC LIMIT 10;"
    ```
+
+5. **Troubleshooting ACK/RTP issues:**
+   - Check logs for ACK forwarding errors
+   - Verify NAT detection is working (`NAT environment detected` messages)
+   - Check if SDP is being fixed correctly
+   - See `docs/AUDIO-FIX-ACK-HANDLING.md` for detailed troubleshooting guide
 
 ---
 
@@ -387,15 +404,27 @@ Endpoint locations are created using OpenSIPS `save("location")` function **only
 
 ### NAT Traversal
 
-OpenSIPS handles NAT traversal for:
-- **REGISTER:** Fixes Contact header with public IP
-- **In-dialog requests:** Routes ACK/BYE using Record-Route headers
-- **NOTIFY:** Routes to endpoint's public IP:port
+OpenSIPS handles NAT traversal with **automatic environment detection**:
+
+- **Auto-Detection:** ✅ Automatically detects if endpoints are behind NAT by checking source IPs
+  - Enables NAT fixes only when needed (endpoints sending private IPs)
+  - Works seamlessly in both LAN and NAT environments
+  - No manual configuration required
+
+- **REGISTER:** Fixes Contact header with public IP (`fix_nated_register()`)
+- **INVITE:** Automatically fixes SDP media IPs when NAT detected (`fix_nated_sdp()`)
+- **Responses:** Automatically fixes Contact headers and SDP when NAT detected
+- **In-dialog requests:** Routes ACK/BYE using Record-Route headers + NAT IP lookup
+- **NOTIFY:** Routes to endpoint's public IP:port from location table
 
 **Key functions:**
-- `fix_nated_register()` - Fixes REGISTER Contact header
+- `fix_nated_register()` - Fixes REGISTER Contact header (always enabled)
+- `fix_nated_sdp("rewrite-media-ip")` - Fixes SDP media IPs (auto-enabled when NAT detected)
+- `fix_nated_contact()` - Fixes Contact header in responses (auto-enabled when NAT detected)
 - `loose_route()` - Routes in-dialog requests
-- `fix_nated_contact()` - Fixes Contact header in responses
+- `route[CHECK_NAT_ENVIRONMENT]` - Auto-detects NAT environment
+
+**See:** `docs/NAT-AUTO-DETECTION.md` for detailed implementation
 
 ---
 
