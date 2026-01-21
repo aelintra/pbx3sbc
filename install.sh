@@ -1267,6 +1267,32 @@ verify_installation() {
     echo "   # Example with sipsak:"
     echo "   # sipsak -s sip:your-domain.com -H your-domain.com"
     echo
+    echo "=== Admin Panel Setup ==="
+    echo
+    echo "The database 'opensips' is ready for the admin panel."
+    echo
+    if [[ "$SKIP_DB" != true ]] && [[ -n "$DB_PASSWORD" ]]; then
+        echo "To install the admin panel on this host:"
+        echo "1. cd ../pbx3sbc-admin  (or path to admin panel repository)"
+        echo "2. ./install.sh --db-host localhost --db-name opensips --db-user opensips --db-password '${DB_PASSWORD}'"
+        echo
+        echo "If installing the admin panel on a different server:"
+        echo "1. Run the admin panel installer on the remote server:"
+        echo "   cd pbx3sbc-admin"
+        echo "   ./install.sh --db-host <OPENSIPS_SERVER_IP> --db-name opensips --db-user opensips --db-password '${DB_PASSWORD}'"
+        echo
+        echo "   The admin panel installer will handle MySQL remote access configuration"
+        echo "   (bind-address, UFW rules, MySQL grants) automatically."
+    else
+        echo "To install the admin panel:"
+        echo "1. cd ../pbx3sbc-admin  (or path to admin panel repository)"
+        echo "2. ./install.sh --db-host localhost --db-name opensips --db-user opensips"
+        echo "   (You will be prompted for the database password)"
+        echo
+        echo "If installing on a different server, the admin panel installer will handle"
+        echo "MySQL remote access configuration automatically."
+    fi
+    echo
 }
 
 # Main installation flow
