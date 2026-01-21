@@ -69,6 +69,14 @@ loadmodule "prometheus.so"
 
 ####### Module Parameters ########
 
+# --- NAT Environment Detection ---
+# Auto-detected by install script based on advertised_address
+# Install script checks if advertised_address is public IP (not RFC 1918)
+# If public IP: NAT_ENVIRONMENT_AUTO_DETECT will be set to "1" (NAT fixes enabled)
+# If private IP or CHANGE_ME: NAT_ENVIRONMENT_AUTO_DETECT will be set to "0" (NAT fixes disabled)
+# Install script replaces NAT_ENVIRONMENT_AUTO_DETECT placeholder with detected value
+#NAT_ENVIRONMENT_AUTO_DETECT=0
+
 # --- MySQL routing database ---
 # SQL operations module connection for sql_query() function
 modparam("sqlops", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -778,6 +786,45 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     return;
 }
 
+# Check if NAT fixes should be enabled
+# Auto-detected by install script based on advertised_address
+# If advertised_address is public IP, install script enables NAT fixes
+# Output: $var(enable_nat_fixes) - 1 if NAT fixes should be enabled, 0 if not
+route[CHECK_NAT_ENVIRONMENT] {
+    $var(enable_nat_fixes) = 0;
+    
+    # Runtime detection: Check if endpoints are sending private IPs (indicates NAT environment)
+    # This works for both LAN and NAT environments
+    # If we receive requests with private IPs from endpoints (not Asterisk), enable NAT fixes
+    route(CHECK_IS_FROM_ASTERISK);
+    if ($var(is_from_asterisk) == 0) {
+        $var(check_ip) = $si;
+        route(CHECK_PRIVATE_IP);
+        if ($var(is_private) == 1) {
+            # Endpoint is behind NAT - enable NAT fixes for this request
+            $var(enable_nat_fixes) = 1;
+            xlog("NAT environment detected: endpoint $si is behind NAT, enabling NAT fixes\n");
+        }
+    }
+    
+    return;
+}
+
+# Check if source IP is from Asterisk (dispatcher destination)
+# Input: $si - Source IP (automatically available)
+# Output: $var(is_from_asterisk) - 1 if from Asterisk, 0 if not
+# Uses dispatcher table to determine if source IP matches any dispatcher destination
+route[CHECK_IS_FROM_ASTERISK] {
+    $var(is_from_asterisk) = 0;
+    $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    if (sql_query($var(query), "$avp(dispatcher_match)")) {
+        if ($(avp(dispatcher_match)[0]) != "" && $(avp(dispatcher_match)[0]) != "0") {
+            $var(is_from_asterisk) = 1;
+        }
+    }
+    return;
+}
+
 # Check if IP address is private (RFC 1918)
 # Input: $var(check_ip) - IP address to check
 # Output: $var(is_private) - 1 if private, 0 if public
@@ -817,11 +864,14 @@ route[RELAY] {
         # Fix NAT in SDP for INVITE requests from endpoints behind NAT
         # This is CRITICAL for RTP to work - fixes private IPs in SDP to public NAT IPs
         # Must be done BEFORE forwarding to Asterisk so Asterisk receives correct IP for RTP
-        # NOTE: Disabled for LAN-only deployments - enable when endpoints are behind NAT
-        # if ($hdr(Content-Type) =~ "application/sdp") {
-        #     fix_nated_sdp("rewrite-media-ip");
-        #     xlog("RELAY: Fixed NAT in SDP for INVITE from $si to $du, Call-ID=$hdr(Call-ID)\n");
-        # }
+        # Auto-detected: NAT fixes enabled automatically if endpoints are behind NAT
+        if ($hdr(Content-Type) =~ "application/sdp") {
+            route(CHECK_NAT_ENVIRONMENT);
+            if ($var(enable_nat_fixes) == 1) {
+                fix_nated_sdp("rewrite-media-ip");
+                xlog("RELAY: Fixed NAT in SDP for INVITE from $si to $du, Call-ID=$hdr(Call-ID)\n");
+            }
+        }
         
         # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
         # This is required for proper dialog tracking and database persistence
@@ -861,7 +911,8 @@ route[RELAY] {
         if (is_method("ACK|PRACK")) {
             # Only run NAT extraction for ACKs from endpoints (not from Asterisk)
             # ACKs from Asterisk already have correct IP in Request-URI and should use it directly
-            if ($ru =~ "^sip:[^@]+@" && $si !~ "^192\\.168\\.1\\.109") {
+            route(CHECK_IS_FROM_ASTERISK);
+            if ($ru =~ "^sip:[^@]+@" && $var(is_from_asterisk) == 0) {
                 $var(needs_nat_fix) = 1;
             }
         } else {
@@ -927,39 +978,34 @@ route[RELAY] {
                         # Extract IP:port from contact field
                         $var(contact_uri) = $(avp(nat_contact)[0]);
                         # Contact format: sip:user@ip:port or <sip:user@ip:port>
-                        # Extract IP first
-                        if ($var(contact_uri) =~ "@([^:>]+):") {
+                        $var(nat_ip) = "";
+                        $var(nat_port) = "";
+                        
+                        # Try pattern with port first: sip:user@ip:port
+                        if ($var(contact_uri) =~ "@([^:>]+):([0-9]+)") {
                             $var(nat_ip) = $re;
-                            # Validate extracted IP is not empty
-                            if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                                # Extract port
-                                if ($var(contact_uri) =~ ":([0-9]+)") {
-                                    $var(nat_port) = $re;
-                                    if ($var(nat_port) != "") {
-                                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                                        xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
-                                        $var(nat_contact_found) = 1;
-                                    }
-                                } else {
-                                    # No port in contact, use default 5060
-                                    $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
-                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
-                                    $var(nat_contact_found) = 1;
-                                }
-                            } else {
-                                xlog("L_WARN", "RELAY: $rm - Invalid IP extracted from contact: $var(nat_ip), keeping original $du\n");
+                            # Extract port separately (OpenSIPS regex limitation)
+                            if ($var(contact_uri) =~ "@[^:>]+:([0-9]+)") {
+                                $var(nat_port) = $re;
                             }
-                        } else if ($var(contact_uri) =~ "@([^:>]+)") {
-                            # No port in contact, use default 5060
+                        }
+                        # Fallback to pattern without port: sip:user@ip
+                        if ($var(nat_ip) == "" && $var(contact_uri) =~ "@([^:>]+)") {
                             $var(nat_ip) = $re;
-                            # Validate extracted IP is not empty and is valid
-                            if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        }
+                        
+                        # Validate extracted IP and set destination URI
+                        if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                            if ($var(nat_port) != "") {
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            } else {
                                 $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
                                 xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
-                                $var(nat_contact_found) = 1;
-                            } else {
-                                xlog("L_WARN", "RELAY: $rm - Invalid IP extracted from contact: $var(nat_ip), keeping original $du\n");
                             }
+                            $var(nat_contact_found) = 1;
+                        } else {
+                            xlog("L_WARN", "RELAY: $rm - Invalid IP extracted from contact: $var(nat_ip), keeping original $du\n");
                         }
                     }
                 }
@@ -986,10 +1032,10 @@ route[RELAY] {
             # Do NOT call fix_nated_sdp() - SDP in ACK/PRACK should be preserved exactly as received
         }
         
-        # Validate destination URI
-        if ($du == "" || $du == "0") {
+        # Validate destination URI (WITHINDLG already validated, but double-check for safety)
+        if ($du == "" || $du == "0" || $du !~ "^sip:") {
             $du = $ru;
-            xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty)\n");
+            xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty/invalid)\n");
         }
         
         xlog("RELAY: $rm - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route), From=$si)\n");
@@ -998,7 +1044,8 @@ route[RELAY] {
         # ACKs from Asterisk may not match the original INVITE transaction (created from endpoint)
         # So we use stateless forward() which doesn't require transaction matching
         # This is critical to prevent retransmission loops where Yealink never receives ACK
-        if ($si =~ "^192\\.168\\.1\\.109") {
+        route(CHECK_IS_FROM_ASTERISK);
+        if ($var(is_from_asterisk) == 1) {
             # ACK is from Asterisk - use stateless forward to ensure it reaches endpoint
             xlog("RELAY: $rm from Asterisk - using stateless forward to ensure delivery to $du\n");
             if (!forward()) {
@@ -1083,13 +1130,9 @@ onreply_route {
     # Check if response is from Asterisk (dispatcher destination) vs endpoint
     # We should only fix NAT in responses FROM endpoints, not FROM Asterisk
     # Asterisk's SDP is correct as-is and should not be modified
-    $var(is_from_asterisk) = 0;
-    $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
-    if (sql_query($var(query), "$avp(dispatcher_match)")) {
-        if ($(avp(dispatcher_match)[0]) != "" && $(avp(dispatcher_match)[0]) != "0") {
-            $var(is_from_asterisk) = 1;
-            xlog("Response from Asterisk (dispatcher destination) at $si - skipping NAT fixes\n");
-        }
+    route(CHECK_IS_FROM_ASTERISK);
+    if ($var(is_from_asterisk) == 1) {
+        xlog("Response from Asterisk (dispatcher destination) at $si - skipping NAT fixes\n");
     }
     
     # Fix NAT in Contact headers and SDP for responses from endpoints behind NAT
@@ -1100,17 +1143,21 @@ onreply_route {
     # CRITICAL: Do NOT fix Contact header for REGISTER responses - the Contact header contains
     # the endpoint's contact information from Asterisk, and we must preserve it for save() to work
     # CRITICAL: Do NOT fix SDP in responses FROM Asterisk - Asterisk's SDP is correct and should not be modified
-    # NOTE: NAT fixes disabled for LAN-only deployments - enable when endpoints are behind NAT
+    # Auto-detected: NAT fixes enabled automatically if endpoints are behind NAT
     if ($var(is_from_asterisk) == 0) {
-        # Response is from endpoint - fix NAT (disabled for LAN)
-        # if (!is_method("REGISTER")) {
-        #     fix_nated_contact();
-        # }
-        # if ($hdr(Content-Type) =~ "application/sdp") {
-        #     fix_nated_sdp("rewrite-media-ip");
-        #     xlog("Fixed NAT in SDP for response $rs from endpoint $si\n");
-        # }
-        xlog("Response from endpoint $si - NAT fixes disabled (LAN-only deployment)\n");
+        # Response is from endpoint - check if NAT fixes needed
+        route(CHECK_NAT_ENVIRONMENT);
+        if ($var(enable_nat_fixes) == 1) {
+            if (!is_method("REGISTER")) {
+                fix_nated_contact();
+            }
+            if ($hdr(Content-Type) =~ "application/sdp") {
+                fix_nated_sdp("rewrite-media-ip");
+                xlog("Fixed NAT in SDP for response $rs from endpoint $si\n");
+            }
+        } else {
+            xlog("Response from endpoint $si - NAT fixes not needed (LAN-only deployment)\n");
+        }
     } else {
         # Response is from Asterisk - do NOT fix SDP, just log
         if ($hdr(Content-Type) =~ "application/sdp") {
@@ -1211,9 +1258,6 @@ onreply_route {
     exit;
 }
 
-# --- REGISTER reply handler (usrloc migration) ---
-# This handler saves endpoint locations only on successful registration (2xx)
-# Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
 # --- REGISTER reply handler (usrloc migration) ---
 # This handler saves endpoint locations only on successful registration (2xx)
 # Follows OpenSIPS proxy-registrar pattern: save AFTER successful reply, not before
