@@ -182,6 +182,93 @@ Comprehensive security enhancement project including registration security, rate
 **Dependencies:**
 - Security project Phase 3 (security event logging) for security metrics
 
+#### 2.1.5 Comprehensive Logging System 📋 **NEW REQUIREMENT**
+
+**Objective:** Formalize comprehensive logging system with production-ready controls
+
+**Status:** 📋 **Planned**  
+**Priority:** High  
+**Timeline:** 1-2 weeks
+
+**Background:**
+During troubleshooting of ACK forwarding issues, detailed logging proved critical for rapid diagnosis. The current logging implementation provides excellent visibility but needs formalization and production controls.
+
+**Requirements:**
+
+1. **Structured Logging Levels:**
+   - **DEBUG**: Detailed diagnostic information (request/response details, SDP content, routing decisions)
+   - **INFO**: Normal operational events (call setup, routing decisions, endpoint lookups)
+   - **WARN**: Unusual but recoverable conditions (fallback routing, missing data)
+   - **ERROR**: Failures and errors (transaction failures, database errors, routing failures)
+
+2. **Logging Categories:**
+   - **Request Logging**: All incoming SIP requests with full details
+   - **Response Logging**: All SIP responses with status codes and details
+   - **Routing Logging**: Dispatcher selection, endpoint lookups, domain resolution
+   - **NAT Logging**: NAT detection, SDP/Contact fixing operations
+   - **Dialog Logging**: Dialog creation, state changes, termination
+   - **Database Logging**: Query results, lookup successes/failures
+   - **Error Logging**: Transaction failures, routing failures, database errors
+
+3. **Production Controls:**
+   - **Configurable Log Levels**: Per-category log level control
+   - **Production Mode**: Reduced logging (WARN/ERROR only) for performance
+   - **Debug Mode**: Full logging (DEBUG/INFO/WARN/ERROR) for troubleshooting
+   - **Selective Logging**: Enable/disable specific categories
+   - **Log Rotation**: Automatic log rotation and archival
+   - **Performance Impact**: Minimal overhead in production mode
+
+4. **Implementation:**
+   - Use OpenSIPS `xlog()` with appropriate log levels
+   - Create modparam-based configuration for log levels
+   - Add install script option for production vs debug mode
+   - Document logging configuration in admin panel
+   - Provide log analysis tools/scripts
+
+5. **Benefits:**
+   - **Faster Troubleshooting**: Detailed logs enable rapid problem diagnosis
+   - **Production Ready**: Reduced logging overhead in production
+   - **Flexible**: Enable detailed logging when needed without code changes
+   - **Audit Trail**: Complete record of all SIP operations
+
+**Implementation Plan:**
+
+**Phase 1: Logging Infrastructure (Week 1)**
+- Define logging categories and levels
+- Create modparam configuration for log control
+- Implement log level checks in routes
+- Add install script options for logging mode
+
+**Phase 2: Production Controls (Week 2)**
+- Implement production mode (reduced logging)
+- Implement debug mode (full logging)
+- Add selective category enable/disable
+- Create logging documentation
+
+**Files to Create/Modify:**
+- `config/opensips.cfg.template` - Add log level controls
+- `install.sh` - Add logging mode selection
+- `docs/LOGGING-CONFIGURATION.md` - Logging documentation
+- `scripts/analyze-opensips-logs.sh` - Log analysis tool (optional)
+
+**Key Logging Points (Current Implementation):**
+- ✅ Request logging (all requests)
+- ✅ Response logging (all responses)
+- ✅ Routing decisions (dispatcher, endpoint lookup)
+- ✅ NAT detection and fixing
+- ✅ Dialog creation and state
+- ✅ Error conditions
+- 📋 Need: Production mode controls
+- 📋 Need: Log level configuration
+- 📋 Need: Category-based enable/disable
+
+**Dependencies:**
+- None (can be implemented independently)
+
+**Related Documentation:**
+- `docs/AUDIO-FIX-ACK-HANDLING.md` - Example of logging value in troubleshooting
+- `docs/NAT-AUTO-DETECTION.md` - NAT logging examples
+
 #### 2.2 Asterisk Node Failure Notification
 
 **Objective:** Alert when Asterisk backend nodes fail
