@@ -761,7 +761,7 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     }
     
     # Step 2: Find domain for this setid
-    $var(query) = "SELECT domain FROM domain WHERE setid='" + $var(setid) + "' AND enabled=1 LIMIT 1";
+    $var(query) = "SELECT domain FROM domain WHERE setid='" + $var(setid) + "' LIMIT 1";
     if (!sql_query($var(query), "$avp(source_domain)")) {
         xlog("GET_DOMAIN_FROM_SOURCE_IP: Domain query failed for setid $var(setid)\n");
         return;
@@ -814,6 +814,15 @@ route[RELAY] {
         record_route();
         xlog("RELAY: Added Record-Route for INVITE to $du, Call-ID=$hdr(Call-ID)\n");
         
+        # Fix NAT in SDP for INVITE requests from endpoints behind NAT
+        # This is CRITICAL for RTP to work - fixes private IPs in SDP to public NAT IPs
+        # Must be done BEFORE forwarding to Asterisk so Asterisk receives correct IP for RTP
+        # NOTE: Disabled for LAN-only deployments - enable when endpoints are behind NAT
+        # if ($hdr(Content-Type) =~ "application/sdp") {
+        #     fix_nated_sdp("rewrite-media-ip");
+        #     xlog("RELAY: Fixed NAT in SDP for INVITE from $si to $du, Call-ID=$hdr(Call-ID)\n");
+        # }
+        
         # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
         # This is required for proper dialog tracking and database persistence
         if (!has_totag()) {
@@ -847,8 +856,12 @@ route[RELAY] {
         $var(needs_nat_fix) = 0;
         
         # For ACK/PRACK, require username in Request-URI (ACKs to Asterisk have no username)
+        # CRITICAL: Do NOT run NAT extraction for ACKs from Asterisk - Request-URI already has correct IP
+        # NAT extraction can corrupt $du and create invalid URIs like sip:1001@:
         if (is_method("ACK|PRACK")) {
-            if ($ru =~ "^sip:[^@]+@") {
+            # Only run NAT extraction for ACKs from endpoints (not from Asterisk)
+            # ACKs from Asterisk already have correct IP in Request-URI and should use it directly
+            if ($ru =~ "^sip:[^@]+@" && $si !~ "^192\\.168\\.1\\.109") {
                 $var(needs_nat_fix) = 1;
             }
         } else {
@@ -917,21 +930,36 @@ route[RELAY] {
                         # Extract IP first
                         if ($var(contact_uri) =~ "@([^:>]+):") {
                             $var(nat_ip) = $re;
-                            # Extract port
-                            if ($var(contact_uri) =~ ":([0-9]+)") {
-                                $var(nat_port) = $re;
-                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                                xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            # Validate extracted IP is not empty
+                            if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                                # Extract port
+                                if ($var(contact_uri) =~ ":([0-9]+)") {
+                                    $var(nat_port) = $re;
+                                    if ($var(nat_port) != "") {
+                                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                        xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                                        $var(nat_contact_found) = 1;
+                                    }
+                                } else {
+                                    # No port in contact, use default 5060
+                                    $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                                    $var(nat_contact_found) = 1;
+                                }
                             } else {
-                                # No port in contact, use default 5060
-                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
-                                xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                                xlog("L_WARN", "RELAY: $rm - Invalid IP extracted from contact: $var(nat_ip), keeping original $du\n");
                             }
                         } else if ($var(contact_uri) =~ "@([^:>]+)") {
                             # No port in contact, use default 5060
                             $var(nat_ip) = $re;
-                            $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
-                            xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                            # Validate extracted IP is not empty and is valid
+                            if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
+                                xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                                $var(nat_contact_found) = 1;
+                            } else {
+                                xlog("L_WARN", "RELAY: $rm - Invalid IP extracted from contact: $var(nat_ip), keeping original $du\n");
+                            }
                         }
                     }
                 }
@@ -951,34 +979,60 @@ route[RELAY] {
     # ACK/PRACK should use transaction state when available, but need fallback if transaction expired
     # This prevents retransmission loops where ACKs aren't properly forwarded
     if (is_method("ACK|PRACK")) {
+        # PRACKs can contain SDP for early media - preserve SDP as-is, do NOT modify
+        # ACKs typically don't have SDP, but if they do, preserve it as-is
+        if ($hdr(Content-Type) =~ "application/sdp") {
+            xlog("RELAY: $rm with SDP from $si to $du - preserving SDP as-is (no modification)\n");
+            # Do NOT call fix_nated_sdp() - SDP in ACK/PRACK should be preserved exactly as received
+        }
+        
         # Validate destination URI
         if ($du == "" || $du == "0") {
             $du = $ru;
             xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty)\n");
         }
         
-        xlog("RELAY: $rm - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route))\n");
+        xlog("RELAY: $rm - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route), From=$si)\n");
         
-        # Try t_relay() first - it will use transaction state if available
-        # ACK/PRACK should work with transaction state since they're part of the INVITE transaction
-        if (!t_relay()) {
-            # t_relay() failed - transaction might not exist or expired
-            # For ACK/PRACK, this is unusual but can happen if transaction expired
-            xlog("L_WARN", "RELAY: $rm - t_relay() failed for destination $du (transaction not found?)\n");
-            
-            # Try stateless forward as fallback
-            # This ensures ACK/PRACK reaches destination even if transaction expired
+        # For ACKs from Asterisk, we MUST forward them even if transaction doesn't match
+        # ACKs from Asterisk may not match the original INVITE transaction (created from endpoint)
+        # So we use stateless forward() which doesn't require transaction matching
+        # This is critical to prevent retransmission loops where Yealink never receives ACK
+        if ($si =~ "^192\\.168\\.1\\.109") {
+            # ACK is from Asterisk - use stateless forward to ensure it reaches endpoint
+            xlog("RELAY: $rm from Asterisk - using stateless forward to ensure delivery to $du\n");
             if (!forward()) {
-                xlog("L_ERR", "RELAY: $rm - forward() also failed for destination $du\n");
-                # For ACK, we can't send an error response (ACK has no response)
-                # For PRACK, we could send an error, but it's better to just log and exit
+                xlog("L_ERR", "RELAY: $rm from Asterisk - forward() failed for destination $du\n");
                 exit;
             } else {
-                xlog("RELAY: $rm - Stateless forward succeeded to $du\n");
+                xlog("RELAY: $rm from Asterisk - stateless forward succeeded to $du\n");
             }
         } else {
-            xlog("RELAY: $rm - t_relay() succeeded (transaction found)\n");
+            # ACK is from endpoint - try transaction-based relay first
+            # Try t_relay() first - it will use transaction state if available
+            # ACK/PRACK should work with transaction state since they're part of the INVITE transaction
+            if (!t_relay()) {
+                # t_relay() failed - transaction might not exist or expired
+                # For ACK/PRACK, this is unusual but can happen if transaction expired
+                xlog("L_WARN", "RELAY: $rm - t_relay() failed for destination $du (transaction not found?), trying stateless forward\n");
+                
+                # Try stateless forward as fallback
+                # This ensures ACK/PRACK reaches destination even if transaction expired
+                if (!forward()) {
+                    xlog("L_ERR", "RELAY: $rm - forward() also failed for destination $du\n");
+                    # For ACK, we can't send an error response (ACK has no response)
+                    # For PRACK, we could send an error, but it's better to just log and exit
+                    exit;
+                } else {
+                    xlog("RELAY: $rm - Stateless forward succeeded to $du\n");
+                }
+            } else {
+                xlog("RELAY: $rm - t_relay() succeeded (transaction found)\n");
+            }
         }
+        # CRITICAL: Exit after ACK/PRACK handling to prevent further processing
+        # ACK/PRACK must be forwarded immediately and not processed further
+        exit;
     } else if (is_method("BYE")) {
         # Validate destination URI - prefer Request-URI if $du is invalid or domain (not IP)
         if ($du == "" || $du == "0" || $du !~ "^sip:") {
@@ -1026,6 +1080,18 @@ route[RELAY] {
 onreply_route {
     xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
     
+    # Check if response is from Asterisk (dispatcher destination) vs endpoint
+    # We should only fix NAT in responses FROM endpoints, not FROM Asterisk
+    # Asterisk's SDP is correct as-is and should not be modified
+    $var(is_from_asterisk) = 0;
+    $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    if (sql_query($var(query), "$avp(dispatcher_match)")) {
+        if ($(avp(dispatcher_match)[0]) != "" && $(avp(dispatcher_match)[0]) != "0") {
+            $var(is_from_asterisk) = 1;
+            xlog("Response from Asterisk (dispatcher destination) at $si - skipping NAT fixes\n");
+        }
+    }
+    
     # Fix NAT in Contact headers and SDP for responses from endpoints behind NAT
     # This is critical for RTP to work correctly - fixes private IPs to public NAT IPs
     # fix_nated_contact() fixes Contact headers in responses
@@ -1033,12 +1099,23 @@ onreply_route {
     # This ensures Asterisk receives the public NAT IP instead of private IP for RTP
     # CRITICAL: Do NOT fix Contact header for REGISTER responses - the Contact header contains
     # the endpoint's contact information from Asterisk, and we must preserve it for save() to work
-    if (!is_method("REGISTER")) {
-        fix_nated_contact();
-    }
-    if ($hdr(Content-Type) =~ "application/sdp") {
-        fix_nated_sdp("rewrite-media-ip");
-        xlog("Fixed NAT in SDP for response $rs from $si\n");
+    # CRITICAL: Do NOT fix SDP in responses FROM Asterisk - Asterisk's SDP is correct and should not be modified
+    # NOTE: NAT fixes disabled for LAN-only deployments - enable when endpoints are behind NAT
+    if ($var(is_from_asterisk) == 0) {
+        # Response is from endpoint - fix NAT (disabled for LAN)
+        # if (!is_method("REGISTER")) {
+        #     fix_nated_contact();
+        # }
+        # if ($hdr(Content-Type) =~ "application/sdp") {
+        #     fix_nated_sdp("rewrite-media-ip");
+        #     xlog("Fixed NAT in SDP for response $rs from endpoint $si\n");
+        # }
+        xlog("Response from endpoint $si - NAT fixes disabled (LAN-only deployment)\n");
+    } else {
+        # Response is from Asterisk - do NOT fix SDP, just log
+        if ($hdr(Content-Type) =~ "application/sdp") {
+            xlog("Response with SDP from Asterisk $si - preserving SDP as-is (no NAT fix)\n");
+        }
     }
     
     # Log OPTIONS/NOTIFY responses specifically
