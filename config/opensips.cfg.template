@@ -433,6 +433,12 @@ route {
             # We store request Contact here only for logging/diagnostics
             $avp(reg_contact) = $hdr(Contact);
             
+            # CRITICAL: Capture original request source IP:port for NAT traversal
+            # In onreply_route, $si:$sp will be the response source (Asterisk), not the original request source
+            # We need to preserve the endpoint's public NAT IP:port to populate the 'received' field
+            $avp(reg_received) = $si + ":" + $sp;
+            xlog("REGISTER: Captured original request source for received field: $avp(reg_received) (endpoint public NAT IP:port)\n");
+            
             # Arm reply handler to save location only on successful registration (2xx)
             # This follows OpenSIPS proxy-registrar pattern: save AFTER successful reply
             # The save() function will use contact information from the 200 OK reply
@@ -1307,6 +1313,26 @@ onreply_route[handle_reply_reg] {
                 $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
                 xlog("REGISTER: save(\"location\") returned TRUE for $var(endpoint_aor) (response $rs $rr)\n");
                 xlog("REGISTER: Note: With db_mode=2 (cached DB), writes may be delayed up to timer_interval seconds\n");
+                
+                # CRITICAL FIX: Manually populate 'received' field for NAT traversal
+                # save() should populate 'received' automatically, but it doesn't always work in proxy-registrar mode
+                # We captured the original request source IP:port in $avp(reg_received) before forwarding
+                # Now we need to update the location record with this value
+                if ($avp(reg_received) != "") {
+                    $var(received_value) = $avp(reg_received);
+                    xlog("REGISTER: Updating 'received' field with captured source IP:port: $var(received_value)\n");
+                    
+                    # Update the location record's 'received' field using SQL
+                    # This ensures lookup() can find the endpoint's public NAT IP:port for routing OPTIONS/NOTIFY
+                    $var(update_query) = "UPDATE location SET received='" + $var(received_value) + "' WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' AND expires > UNIX_TIMESTAMP()";
+                    if (sql_query($var(update_query))) {
+                        xlog("REGISTER: Successfully updated 'received' field to $var(received_value) for $var(endpoint_aor)\n");
+                    } else {
+                        xlog("L_WARN", "REGISTER: Failed to update 'received' field for $var(endpoint_aor) - SQL query failed\n");
+                    }
+                } else {
+                    xlog("L_WARN", "REGISTER: No captured source IP:port available ($avp(reg_received) is empty) - 'received' field not updated\n");
+                }
             } else {
                 xlog("L_ERR", "REGISTER: save(\"location\") returned FALSE for $tU@$(tu{uri.domain}) (response $rs $rr)\n");
                 xlog("L_ERR", "REGISTER: This means save() failed - check usrloc logs for database errors\n");
