@@ -555,10 +555,10 @@ route {
     # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
     if (is_method("REGISTER")) {
         if ($hdr(Contact) != "") {
-            # Detect NAT using nat_uac_test() - checks Contact (1), Via (4), port mismatch (16)
-            # Flag 19 = 1 (Contact) + 2 (received mismatch) + 16 (port mismatch)
-            # This is more comprehensive than manual IP checking
-            if (nat_uac_test("19")) {
+            # Detect NAT using nat_uac_test() - checks Contact header for private IPs
+            # Flag 1 = check Contact header for private IP addresses
+            # This is more efficient than manual IP checking
+            if (nat_uac_test("1")) {
                 xlog("REGISTER: NAT detected via nat_uac_test() - endpoint is behind NAT\n");
             }
             
@@ -1112,10 +1112,10 @@ route[CHECK_NAT_ENVIRONMENT] {
     # If we receive requests with private IPs from endpoints (not Asterisk), enable NAT fixes
     route(CHECK_IS_FROM_ASTERISK);
     if ($var(is_from_asterisk) == 0) {
-        # Use nat_uac_test() for comprehensive NAT detection
-        # Flag 19 = 1 (Contact) + 2 (received mismatch) + 16 (port mismatch)
-        # This detects NAT more reliably than just checking source IP
-        if (nat_uac_test("19")) {
+        # Use nat_uac_test() for NAT detection
+        # Flag 1 = check Contact header, Flag 4 = check Via header
+        # Try Contact first (most common), then Via as fallback
+        if (nat_uac_test("1") || nat_uac_test("4")) {
             # Endpoint is behind NAT - enable NAT fixes for this request
             $var(enable_nat_fixes) = 1;
             xlog("NAT environment detected via nat_uac_test(): endpoint is behind NAT, enabling NAT fixes\n");
