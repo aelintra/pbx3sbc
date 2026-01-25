@@ -555,12 +555,9 @@ route {
     # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
     if (is_method("REGISTER")) {
         if ($hdr(Contact) != "") {
-            # Detect NAT using nat_uac_test() - checks Contact header for private IPs
-            # Flag 1 = check Contact header for private IP addresses
-            # This is more efficient than manual IP checking
-            if (nat_uac_test("1")) {
-                xlog("REGISTER: NAT detected via nat_uac_test() - endpoint is behind NAT\n");
-            }
+            # NOTE: nat_uac_test() doesn't work in OpenSIPS 3.6.3 - causes "Unknown flag" error
+            # Reverting to manual NAT detection which works reliably
+            # TODO: Investigate correct nat_uac_test() syntax for OpenSIPS 3.6.3
             
             # Fix NAT in REGISTER request (needed for proper Contact header handling)
             # This updates Contact header with public IP if behind NAT
@@ -1112,21 +1109,15 @@ route[CHECK_NAT_ENVIRONMENT] {
     # If we receive requests with private IPs from endpoints (not Asterisk), enable NAT fixes
     route(CHECK_IS_FROM_ASTERISK);
     if ($var(is_from_asterisk) == 0) {
-        # Use nat_uac_test() for NAT detection
-        # Flag 1 = check Contact header, Flag 4 = check Via header
-        # Try Contact first (most common), then Via as fallback
-        if (nat_uac_test("1") || nat_uac_test("4")) {
+        # NOTE: nat_uac_test() doesn't work in OpenSIPS 3.6.3 - causes "Unknown flag" error
+        # Using manual source IP check which works reliably
+        # TODO: Investigate correct nat_uac_test() syntax for OpenSIPS 3.6.3
+        $var(check_ip) = $si;
+        route(CHECK_PRIVATE_IP);
+        if ($var(is_private) == 1) {
             # Endpoint is behind NAT - enable NAT fixes for this request
             $var(enable_nat_fixes) = 1;
-            xlog("NAT environment detected via nat_uac_test(): endpoint is behind NAT, enabling NAT fixes\n");
-        } else {
-            # Fallback: Check source IP manually (for cases where nat_uac_test() doesn't detect it)
-            $var(check_ip) = $si;
-            route(CHECK_PRIVATE_IP);
-            if ($var(is_private) == 1) {
-                $var(enable_nat_fixes) = 1;
-                xlog("NAT environment detected via source IP check: endpoint $si is behind NAT, enabling NAT fixes\n");
-            }
+            xlog("NAT environment detected via source IP check: endpoint $si is behind NAT, enabling NAT fixes\n");
         }
     }
     
@@ -1512,18 +1503,17 @@ onreply_route {
     if ($var(is_from_asterisk) == 0) {
         # Response is from endpoint - fix Contact header if it contains private IP
         # This is critical for ACK routing - ACK uses Contact header from 200 OK response
-        # Use nat_uac_test() to detect NAT in Contact header (flag 1 = check Contact header)
-        if (!is_method("REGISTER") && $hdr(Contact) != "" && nat_uac_test("1")) {
-            # NAT detected in Contact header - extract IP for logging
-            if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
-                $var(contact_ip) = $re;
-            } else {
-                $var(contact_ip) = "unknown";
-            }
-            
-            xlog("Contact header NAT detected via nat_uac_test(): IP=$var(contact_ip), fixing to use NAT IP from location table\n");
-            
-            # Contact header contains private IP - fix it using received field from location table
+        # NOTE: nat_uac_test() doesn't work in OpenSIPS 3.6.3 - using manual Contact header IP check
+        # Check if Contact header contains private IP using regex
+        if (!is_method("REGISTER") && $hdr(Contact) != "" && $hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+            # Extract IP from Contact header and check if it's private
+            $var(contact_ip) = $re;
+            $var(check_ip) = $var(contact_ip);
+            route(CHECK_PRIVATE_IP);
+            if ($var(is_private) == 1) {
+                xlog("Contact header NAT detected: IP=$var(contact_ip) is private, fixing to use NAT IP from location table\n");
+                
+                # Contact header contains private IP - fix it using received field from location table
             # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
             $var(contact_user) = "";
             if ($hdr(Contact) =~ "sip:([^@]+)@") {
