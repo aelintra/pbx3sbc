@@ -555,6 +555,13 @@ route {
     # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
     if (is_method("REGISTER")) {
         if ($hdr(Contact) != "") {
+            # Detect NAT using nat_uac_test() - checks Contact (1), Via (4), port mismatch (16)
+            # Flag 19 = 1 (Contact) + 2 (received mismatch) + 16 (port mismatch)
+            # This is more comprehensive than manual IP checking
+            if (nat_uac_test("19")) {
+                xlog("REGISTER: NAT detected via nat_uac_test() - endpoint is behind NAT\n");
+            }
+            
             # Fix NAT in REGISTER request (needed for proper Contact header handling)
             # This updates Contact header with public IP if behind NAT
             fix_nated_register();
@@ -1105,12 +1112,21 @@ route[CHECK_NAT_ENVIRONMENT] {
     # If we receive requests with private IPs from endpoints (not Asterisk), enable NAT fixes
     route(CHECK_IS_FROM_ASTERISK);
     if ($var(is_from_asterisk) == 0) {
-        $var(check_ip) = $si;
-        route(CHECK_PRIVATE_IP);
-        if ($var(is_private) == 1) {
+        # Use nat_uac_test() for comprehensive NAT detection
+        # Flag 19 = 1 (Contact) + 2 (received mismatch) + 16 (port mismatch)
+        # This detects NAT more reliably than just checking source IP
+        if (nat_uac_test("19")) {
             # Endpoint is behind NAT - enable NAT fixes for this request
             $var(enable_nat_fixes) = 1;
-            xlog("NAT environment detected: endpoint $si is behind NAT, enabling NAT fixes\n");
+            xlog("NAT environment detected via nat_uac_test(): endpoint is behind NAT, enabling NAT fixes\n");
+        } else {
+            # Fallback: Check source IP manually (for cases where nat_uac_test() doesn't detect it)
+            $var(check_ip) = $si;
+            route(CHECK_PRIVATE_IP);
+            if ($var(is_private) == 1) {
+                $var(enable_nat_fixes) = 1;
+                xlog("NAT environment detected via source IP check: endpoint $si is behind NAT, enabling NAT fixes\n");
+            }
         }
     }
     
@@ -1496,21 +1512,25 @@ onreply_route {
     if ($var(is_from_asterisk) == 0) {
         # Response is from endpoint - fix Contact header if it contains private IP
         # This is critical for ACK routing - ACK uses Contact header from 200 OK response
-        if (!is_method("REGISTER") && $hdr(Contact) != "" && $hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
-            # Extract IP from Contact header
-            $var(contact_ip) = $re;
-            $var(check_ip) = $var(contact_ip);
-            route(CHECK_PRIVATE_IP);
+        # Use nat_uac_test() to detect NAT in Contact header (flag 1 = check Contact header)
+        if (!is_method("REGISTER") && $hdr(Contact) != "" && nat_uac_test("1")) {
+            # NAT detected in Contact header - extract IP for logging
+            if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+                $var(contact_ip) = $re;
+            } else {
+                $var(contact_ip) = "unknown";
+            }
             
-            if ($var(is_private) == 1) {
-                # Contact header contains private IP - fix it using received field from location table
-                # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
-                $var(contact_user) = "";
-                if ($hdr(Contact) =~ "sip:([^@]+)@") {
-                    $var(contact_user) = $re;
-                }
-                
-                if ($var(contact_user) != "") {
+            xlog("Contact header NAT detected via nat_uac_test(): IP=$var(contact_ip), fixing to use NAT IP from location table\n");
+            
+            # Contact header contains private IP - fix it using received field from location table
+            # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
+            $var(contact_user) = "";
+            if ($hdr(Contact) =~ "sip:([^@]+)@") {
+                $var(contact_user) = $re;
+            }
+            
+            if ($var(contact_user) != "") {
                     # Query location table for received field (NAT IP)
                     $var(query) = "SELECT received FROM location WHERE username='" + $var(contact_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                     if (sql_query($var(query), "$avp(contact_received)")) {
