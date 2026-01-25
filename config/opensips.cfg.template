@@ -622,18 +622,184 @@ route[DOMAIN_CHECK] {
             xlog("INVITE: Determined domain from source IP $si: $var(domain_from_source), using domain-specific lookup: $var(lookup_uri)\n");
             
             # Set Request-URI and use lookup() function
+            # CRITICAL: Set $ru to lookup_uri BEFORE calling lookup()
+            # lookup() will update $ru with the contact if found
             $ru = $var(lookup_uri);
+            # Save what we set $ru to, so we can detect if lookup() changed it
+            $var(ru_before_lookup) = $ru;
+            
+            # lookup() sets $du automatically if contact found
+            # NOTE: In OpenSIPS 3.6, if lookup() returns TRUE but $du is null,
+            # it means $ru was updated with the registered contact (local contact, no outbound proxy)
+            $var(lookup_success) = 0;
+            $var(du_is_valid) = 0;
+            $var(ru_is_valid) = 0;
+            
             if (lookup("location")) {
-                # Contact found - $du is set automatically by lookup()
-                xlog("INVITE: lookup() found contact: $du for user $var(endpoint_user)@$var(domain_from_source)\n");
+                # Contact found - $du is set automatically by lookup(), OR $ru is updated with contact
+                xlog("INVITE: lookup() returned TRUE - contact found\n");
+                xlog("INVITE: After lookup() - $du=$du, $ru=$ru, ru_before_lookup=$var(ru_before_lookup)\n");
+                $var(lookup_success) = 1;
+                
+                # Check if $du is set (outbound proxy case)
+                if ($du != "" && $du != "<null>" && $du != "0" && $du =~ "^sip:") {
+                    $var(du_is_valid) = 1;
+                    xlog("INVITE: $du is valid - using outbound proxy destination\n");
+                } else {
+                    # $du is null - check if $ru was updated with contact (local contact case)
+                    xlog("INVITE: $du is null - checking if $ru was updated by lookup()\n");
+                    xlog("INVITE: $ru changed from $var(ru_before_lookup) to $ru\n");
+                    
+                    # Check if $ru was changed by lookup() (contains contact, not the lookup URI)
+                    if ($ru != "" && $ru != $var(ru_before_lookup) && $ru =~ "^sip:") {
+                        # Extract domain/IP from $ru to validate
+                        $var(ru_domain) = $(ru{uri.domain});
+                        if ($var(ru_domain) != "" && ($var(ru_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" || $var(ru_domain) !~ "^[0-9]")) {
+                            $var(ru_is_valid) = 1;
+                            # Set $du = $ru for routing (local contact, no outbound proxy)
+                            $du = $ru;
+                            xlog("INVITE: $ru is valid contact - using $ru as destination (local contact, no outbound proxy)\n");
+                        } else {
+                            xlog("INVITE: $ru domain is invalid: $var(ru_domain)\n");
+                        }
+                    } else {
+                        xlog("INVITE: $ru was not updated by lookup() (still $var(ru_before_lookup)) - will use SQL fallback\n");
+                    }
+                }
+            } else {
+                # Restore original Request-URI
+                $ru = $var(original_ru);
+                xlog("INVITE: lookup() returned FALSE - no contact found for $var(lookup_uri)\n");
+            }
+            
+            # If lookup() succeeded and either $du or $ru is valid, check for NAT traversal
+            if ($var(lookup_success) == 1 && ($var(du_is_valid) == 1 || $var(ru_is_valid) == 1)) {
+                # Check if destination contains private IP - if so, use received field for NAT traversal
+                # Determine which URI to check (prefer $du if valid, otherwise $ru)
+                if ($var(du_is_valid) == 1) {
+                    $var(dest_domain) = $(du{uri.domain});
+                } else {
+                    $var(dest_domain) = $(ru{uri.domain});
+                }
+                
+                # Check if destination domain is a private IP
+                if ($var(dest_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                    $var(check_ip) = $var(dest_domain);
+                    route(CHECK_PRIVATE_IP);
+                    if ($var(is_private) == 1) {
+                        # Destination is private IP - query for received field (NAT IP)
+                        xlog("INVITE: Destination contains private IP $var(dest_domain), checking received field for NAT traversal\n");
+                        $var(query) = "SELECT received FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(domain_from_source) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                        if (sql_query($var(query), "$avp(invite_received)") && $(avp(invite_received)[0]) != "" && $(avp(invite_received)[0]) != "<null>") {
+                            # Extract IP:port from received field using SQL
+                            $var(received_value) = $(avp(invite_received)[0]);
+                            $var(nat_ip) = "";
+                            $var(nat_port) = "";
+                            
+                            # Extract IP and port using SUBSTRING_INDEX
+                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', 1)";
+                            if (sql_query($var(query_ip), "$avp(invite_nat_ip)")) {
+                                $var(nat_ip) = $(avp(invite_nat_ip)[0]);
+                            }
+                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', -1)";
+                            if (sql_query($var(query_port), "$avp(invite_nat_port)")) {
+                                $var(nat_port) = $(avp(invite_nat_port)[0]);
+                            }
+                            
+                            # Validate and update destination
+                            if ($var(nat_ip) != "" && $var(nat_ip) != "<null>" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) != "<null>") {
+                                $du = "sip:" + $var(endpoint_user) + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                $ru = $du;
+                                xlog("INVITE: Updated destination to NAT IP from received field: $du (was $var(dest_uri))\n");
+                            } else {
+                                xlog("L_WARN", "INVITE: Failed to extract valid IP:port from received field: [$var(received_value)]\n");
+                            }
+                        } else {
+                            xlog("L_WARN", "INVITE: No received field found for NAT traversal, using original destination: $var(dest_uri)\n");
+                        }
+                    }
+                }
+                
+                # Request-URI is already set to destination by lookup()
                 xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
                 route(RELAY);
                 exit;
-            } else {
-                # Domain-specific lookup failed
-                $ru = $var(original_ru);
-                xlog("L_WARN", "INVITE: Domain-specific lookup failed for $var(endpoint_user)@$var(domain_from_source) (source IP $si)\n");
             }
+            
+            # If we get here, either lookup() returned FALSE or $du was empty/invalid
+            # RACE CONDITION FIX: Try SQL fallback to check database directly (handles timing issues)
+            xlog("INVITE: Trying SQL fallback for domain-specific lookup (race condition handling)\n");
+            xlog("INVITE: SQL fallback query for user=$var(endpoint_user), domain=$var(domain_from_source)\n");
+            # Use received field if available (NAT traversal), otherwise use contact field
+            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(domain_from_source) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(invite_contact)")) {
+                xlog("INVITE: SQL fallback query executed, result count check\n");
+                if ($(avp(invite_contact)[0]) != "" && $(avp(invite_contact)[0]) != "<null>") {
+                    # Extract IP:port from received or contact field using SQL (regex $re doesn't work)
+                    $var(contact_value) = $(avp(invite_contact)[0]);
+                    $var(extracted_ip) = "";
+                    $var(extracted_port) = "";
+                    
+                    # Check if it's received field format (IP:port) or contact field format (sip:user@IP:port)
+                    # received field format: 74.83.23.44:5060
+                    if ($var(contact_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:") {
+                        # received field - extract IP and port using SQL
+                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', 1)";
+                        if (sql_query($var(query_ip), "$avp(invite_ip)")) {
+                            $var(extracted_ip) = $(avp(invite_ip)[0]);
+                        }
+                        $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', -1)";
+                        if (sql_query($var(query_port), "$avp(invite_port)")) {
+                            $var(extracted_port) = $(avp(invite_port)[0]);
+                        }
+                    } else if ($var(contact_value) =~ "^sip:") {
+                        # contact field format: sip:user@IP:port or sip:user@IP
+                        # Extract everything after @ and before : (or end of string)
+                        $var(query_at) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', '@', -1)";
+                        if (sql_query($var(query_at), "$avp(invite_at_part)")) {
+                            $var(at_part) = $(avp(invite_at_part)[0]);
+                            # Extract IP (before colon if present)
+                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', 1)";
+                            if (sql_query($var(query_ip), "$avp(invite_ip)")) {
+                                $var(extracted_ip) = $(avp(invite_ip)[0]);
+                            }
+                            # Extract port (after colon if present)
+                            if ($var(at_part) =~ ":") {
+                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', -1)";
+                                if (sql_query($var(query_port), "$avp(invite_port)")) {
+                                    $var(extracted_port) = $(avp(invite_port)[0]);
+                                }
+                            } else {
+                                $var(extracted_port) = "5060";
+                            }
+                        }
+                    }
+                    
+                    # Validate and construct destination URI
+                    if ($var(extracted_ip) != "" && $var(extracted_ip) != "<null>" && $var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        # Construct destination URI
+                        if ($var(extracted_port) != "" && $var(extracted_port) != "<null>") {
+                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port);
+                        } else {
+                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":5060";
+                        }
+                        $ru = $du;
+                        xlog("INVITE: SQL fallback found contact: $du (race condition resolved)\n");
+                        route(RELAY);
+                        exit;
+                    } else {
+                        xlog("L_WARN", "INVITE: SQL fallback found contact value but extraction failed: [$var(contact_value)], extracted_ip=[$var(extracted_ip)], extracted_port=[$var(extracted_port)]\n");
+                    }
+                } else {
+                    xlog("L_WARN", "INVITE: SQL fallback query returned no results for user=$var(endpoint_user), domain=$var(domain_from_source)\n");
+                }
+            } else {
+                xlog("L_WARN", "INVITE: SQL fallback query failed for user=$var(endpoint_user), domain=$var(domain_from_source)\n");
+            }
+            
+            # Domain-specific lookup failed
+            $ru = $var(original_ru);
+            xlog("L_WARN", "INVITE: Domain-specific lookup failed for $var(endpoint_user)@$var(domain_from_source) (source IP $si)\n");
         } else {
             # Domain not found - use SQL wildcard lookup as fallback (with warning)
             xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
@@ -1047,14 +1213,24 @@ route[RELAY] {
         $var(needs_nat_fix) = 0;
         
         # For ACK/PRACK, require username in Request-URI (ACKs to Asterisk have no username)
-        # CRITICAL: Do NOT run NAT extraction for ACKs from Asterisk - Request-URI already has correct IP
-        # NAT extraction can corrupt $du and create invalid URIs like sip:1001@:
+        # Check if Request-URI contains private IP - if so, apply NAT traversal regardless of source
+        # This is needed because ACKs from Asterisk may use Contact header from 200 OK which has private IP
         if (is_method("ACK|PRACK")) {
-            # Only run NAT extraction for ACKs from endpoints (not from Asterisk)
-            # ACKs from Asterisk already have correct IP in Request-URI and should use it directly
-            route(CHECK_IS_FROM_ASTERISK);
-            if ($ru =~ "^sip:[^@]+@" && $var(is_from_asterisk) == 0) {
-                $var(needs_nat_fix) = 1;
+            # Check if Request-URI has username and contains private IP
+            if ($ru =~ "^sip:[^@]+@") {
+                $var(check_ip) = $rd;
+                route(CHECK_PRIVATE_IP);
+                # Apply NAT traversal if Request-URI contains private IP (regardless of source)
+                if ($var(is_private) == 1) {
+                    $var(needs_nat_fix) = 1;
+                    xlog("RELAY: $rm - Request-URI contains private IP $rd, applying NAT traversal\n");
+                } else {
+                    # Request-URI has public IP - no NAT traversal needed
+                    $var(needs_nat_fix) = 0;
+                }
+            } else {
+                # No username in Request-URI (ACK to Asterisk) - no NAT traversal needed
+                $var(needs_nat_fix) = 0;
             }
         } else {
             # BYE/NOTIFY/OPTIONS: always check
@@ -1318,10 +1494,85 @@ onreply_route {
     # CRITICAL: Do NOT fix SDP in responses FROM Asterisk - Asterisk's SDP is correct and should not be modified
     # Auto-detected: NAT fixes enabled automatically if endpoints are behind NAT
     if ($var(is_from_asterisk) == 0) {
-        # Response is from endpoint - check if NAT fixes needed
+        # Response is from endpoint - fix Contact header if it contains private IP
+        # This is critical for ACK routing - ACK uses Contact header from 200 OK response
+        if (!is_method("REGISTER") && $hdr(Contact) != "" && $hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+            # Extract IP from Contact header
+            $var(contact_ip) = $re;
+            $var(check_ip) = $var(contact_ip);
+            route(CHECK_PRIVATE_IP);
+            
+            if ($var(is_private) == 1) {
+                # Contact header contains private IP - fix it using received field from location table
+                # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
+                $var(contact_user) = "";
+                if ($hdr(Contact) =~ "sip:([^@]+)@") {
+                    $var(contact_user) = $re;
+                }
+                
+                if ($var(contact_user) != "") {
+                    # Query location table for received field (NAT IP)
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(contact_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    if (sql_query($var(query), "$avp(contact_received)")) {
+                        if ($(avp(contact_received)[0]) != "" && $(avp(contact_received)[0]) != "<null>") {
+                            # Extract IP:port from received field
+                            $var(received_value) = $(avp(contact_received)[0]);
+                            $var(nat_ip) = "";
+                            $var(nat_port) = "";
+                            
+                            # Extract IP and port using SQL SUBSTRING_INDEX
+                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', 1)";
+                            if (sql_query($var(query_ip), "$avp(contact_nat_ip)")) {
+                                $var(nat_ip) = $(avp(contact_nat_ip)[0]);
+                            }
+                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', -1)";
+                            if (sql_query($var(query_port), "$avp(contact_nat_port)")) {
+                                $var(nat_port) = $(avp(contact_nat_port)[0]);
+                            }
+                            
+                            # Validate and construct new Contact header
+                            if ($var(nat_ip) != "" && $var(nat_ip) != "<null>" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) != "<null>") {
+                                # Reconstruct Contact header with NAT IP:port
+                                # Extract any parameters from original Contact header (after semicolon)
+                                $var(contact_params) = "";
+                                if ($hdr(Contact) =~ ";([^>]+)") {
+                                    $var(contact_params) = ";" + $re;
+                                }
+                                
+                                # Check for angle brackets in original (format: <sip:user@ip:port> or <sip:user@ip:port;params>)
+                                $var(has_brackets) = 0;
+                                if ($hdr(Contact) =~ "^<") {
+                                    $var(has_brackets) = 1;
+                                }
+                                
+                                # Construct new Contact header
+                                if ($var(has_brackets) == 1) {
+                                    $var(new_contact) = "<sip:" + $var(contact_user) + "@" + $var(nat_ip) + ":" + $var(nat_port) + $var(contact_params) + ">";
+                                } else {
+                                    $var(new_contact) = "sip:" + $var(contact_user) + "@" + $var(nat_ip) + ":" + $var(nat_port) + $var(contact_params);
+                                }
+                                
+                                # Update Contact header - remove old and append new
+                                # In OpenSIPS, cannot directly assign to $hdr() in onreply_route
+                                # Construct full Contact header line with \r\n (required by append_hf)
+                                $var(contact_header) = "Contact: " + $var(new_contact) + "\r\n";
+                                remove_hf("Contact");
+                                append_hf($var(contact_header));
+                                xlog("Fixed Contact header in response $rs: replaced private IP $var(contact_ip) with NAT IP $var(nat_ip):$var(nat_port), new Contact=$var(new_contact)\n");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        # Fix NAT in Contact headers and SDP for responses from endpoints behind NAT
+        # This is critical for RTP to work correctly - fixes private IPs to public NAT IPs
         route(CHECK_NAT_ENVIRONMENT);
         if ($var(enable_nat_fixes) == 1) {
             if (!is_method("REGISTER")) {
+                # fix_nated_contact() may not work correctly, so we manually fixed it above
+                # But call it anyway as a fallback
                 fix_nated_contact();
             }
             if ($hdr(Content-Type) =~ "application/sdp") {
