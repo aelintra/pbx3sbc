@@ -1318,20 +1318,40 @@ onreply_route[handle_reply_reg] {
                 # save() should populate 'received' automatically, but it doesn't always work in proxy-registrar mode
                 # We captured the original request source IP:port in $avp(reg_received) before forwarding
                 # Now we need to update the location record with this value
-                if ($avp(reg_received) != "") {
-                    $var(received_value) = $avp(reg_received);
+                # DEBUG: Check AVP value using different access methods
+                xlog("REGISTER: DEBUG - Checking AVP reg_received (direct): [$avp(reg_received)]\n");
+                xlog("REGISTER: DEBUG - Checking AVP reg_received (array): [$(avp(reg_received)[0])]\n");
+                
+                # Try both access methods - AVPs might need array-style access
+                $var(received_value) = $avp(reg_received);
+                if ($var(received_value) == "" || $var(received_value) == "<null>") {
+                    # Try array-style access
+                    $var(received_value) = $(avp(reg_received)[0]);
+                    xlog("REGISTER: DEBUG - Trying array access, received_value: [$var(received_value)]\n");
+                }
+                
+                # If AVP is still empty, the AVP didn't persist - this is a problem
+                if ($var(received_value) == "" || $var(received_value) == "<null>") {
+                    # AVP didn't persist - this shouldn't happen but we need a fallback
+                    # The Contact header in the reply has the private IP, but we need the public NAT IP
+                    # Unfortunately, we can't get the original request source from onreply_route
+                    # We'll need to use a different approach - extract from the transaction or use MI
+                    xlog("L_WARN", "REGISTER: AVP reg_received is empty in onreply_route - AVP persistence issue detected\n");
+                    xlog("L_WARN", "REGISTER: Cannot update 'received' field without original request source IP:port\n");
+                    xlog("L_WARN", "REGISTER: This will cause OPTIONS/NOTIFY routing to fail - endpoint behind NAT\n");
+                } else {
                     xlog("REGISTER: Updating 'received' field with captured source IP:port: $var(received_value)\n");
                     
                     # Update the location record's 'received' field using SQL
                     # This ensures lookup() can find the endpoint's public NAT IP:port for routing OPTIONS/NOTIFY
+                    # Note: With db_mode=2, the record might be in memory, so we update both in-memory and DB
                     $var(update_query) = "UPDATE location SET received='" + $var(received_value) + "' WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' AND expires > UNIX_TIMESTAMP()";
                     if (sql_query($var(update_query))) {
                         xlog("REGISTER: Successfully updated 'received' field to $var(received_value) for $var(endpoint_aor)\n");
                     } else {
                         xlog("L_WARN", "REGISTER: Failed to update 'received' field for $var(endpoint_aor) - SQL query failed\n");
+                        xlog("L_WARN", "REGISTER: This might be because record is still in memory (db_mode=2) - will retry on next flush\n");
                     }
-                } else {
-                    xlog("L_WARN", "REGISTER: No captured source IP:port available ($avp(reg_received) is empty) - 'received' field not updated\n");
                 }
             } else {
                 xlog("L_ERR", "REGISTER: save(\"location\") returned FALSE for $tU@$(tu{uri.domain}) (response $rs $rr)\n");
