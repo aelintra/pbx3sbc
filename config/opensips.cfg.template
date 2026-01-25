@@ -558,7 +558,8 @@ route {
             # Detect NAT using nat_uac_test() - comprehensive test (flags 1+2+4+8+16 = 31)
             # Flag 1 = Contact, 2 = received mismatch, 4 = Via, 8 = SDP, 16 = port mismatch
             # Using flag 31 for comprehensive NAT detection
-            if (nat_uac_test(31)) {
+            $var(nat_test_flags) = "31";
+            if (nat_uac_test($var(nat_test_flags))) {
                 xlog("REGISTER: NAT detected via nat_uac_test() - endpoint is behind NAT\n");
             }
             
@@ -1115,7 +1116,8 @@ route[CHECK_NAT_ENVIRONMENT] {
         # Use nat_uac_test() for comprehensive NAT detection
         # Flag 19 = 1 (Contact) + 2 (received mismatch) + 16 (port mismatch)
         # This detects NAT more reliably than just checking source IP
-        if (nat_uac_test(19)) {
+        $var(nat_test_flags) = "19";
+        if (nat_uac_test($var(nat_test_flags))) {
             # Endpoint is behind NAT - enable NAT fixes for this request
             $var(enable_nat_fixes) = 1;
             xlog("NAT environment detected via nat_uac_test(): endpoint is behind NAT, enabling NAT fixes\n");
@@ -1514,24 +1516,26 @@ onreply_route {
         # This is critical for ACK routing - ACK uses Contact header from 200 OK response
         # Use nat_uac_test() to detect NAT in Contact header (flag 1 = check Contact header)
         # This is more efficient than manual regex extraction
-        if (!is_method("REGISTER") && $hdr(Contact) != "" && nat_uac_test(1)) {
-            # NAT detected in Contact header - extract IP for logging
-            if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
-                $var(contact_ip) = $re;
-            } else {
-                $var(contact_ip) = "unknown";
-            }
-            
-            xlog("Contact header NAT detected via nat_uac_test(): IP=$var(contact_ip), fixing to use NAT IP from location table\n");
+        if (!is_method("REGISTER") && $hdr(Contact) != "") {
+            $var(nat_test_flags) = "1";
+            if (nat_uac_test($var(nat_test_flags))) {
+                # NAT detected in Contact header - extract IP for logging
+                if ($hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+                    $var(contact_ip) = $re;
+                } else {
+                    $var(contact_ip) = "unknown";
+                }
+                
+                xlog("Contact header NAT detected via nat_uac_test(): IP=$var(contact_ip), fixing to use NAT IP from location table\n");
                 
                 # Contact header contains private IP - fix it using received field from location table
-            # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
-            $var(contact_user) = "";
-            if ($hdr(Contact) =~ "sip:([^@]+)@") {
-                $var(contact_user) = $re;
-            }
-            
-            if ($var(contact_user) != "") {
+                # Extract username from Contact header (format: sip:user@ip:port or <sip:user@ip:port>)
+                $var(contact_user) = "";
+                if ($hdr(Contact) =~ "sip:([^@]+)@") {
+                    $var(contact_user) = $re;
+                }
+                
+                if ($var(contact_user) != "") {
                 # Query location table for received field (NAT IP)
                 $var(query) = "SELECT received FROM location WHERE username='" + $var(contact_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                 if (sql_query($var(query), "$avp(contact_received)")) {
@@ -1583,6 +1587,7 @@ onreply_route {
                         }
                     }
                 }
+            }
             }
         }
             
