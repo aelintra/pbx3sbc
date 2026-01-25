@@ -248,8 +248,9 @@ The complexity we've added (manual NAT handling) is necessary and appropriate fo
 - Script-based regex pattern matching
 - Used in multiple places: INVITE route, RELAY route, Contact header fixing
 
-**nat_uac_test() Alternative:**
-- C-based detection (faster, more efficient)
+**nat_uac_test() Implementation:**
+- **Status**: ✅ Successfully implemented in OpenSIPS 3.6.3
+- C-based detection (faster, more efficient than script-based checks)
 - Checks multiple NAT indicators:
   - Flag 1: Private IP in Contact header
   - Flag 2: `received` IP differs from source IP
@@ -259,16 +260,26 @@ The complexity we've added (manual NAT handling) is necessary and appropriate fo
 - More comprehensive (detects NAT even with public IPs via port/received mismatches)
 - Standard OpenSIPS approach
 
-**Assessment:**
-- Our manual approach works but is less efficient and less comprehensive
-- `nat_uac_test()` would be an optimization opportunity
-- Can detect NAT scenarios beyond just private IP ranges
-- **Status**: Optimization opportunity, not a critical issue
+**OpenSIPS 3.6.3 Syntax Requirements:**
+- **Critical**: Flags must be passed as variables containing strings, not raw numbers or quoted strings
+- Correct syntax: `$var(nat_test_flags) = "31"; if (nat_uac_test($var(nat_test_flags))) { ... }`
+- Incorrect: `nat_uac_test(31)` or `nat_uac_test("31")` - causes "Unknown flag" or "expected string or variable" errors
+- Common flag combinations:
+  - `"1"` = Contact header check only
+  - `"19"` = Contact (1) + received mismatch (2) + port mismatch (16)
+  - `"31"` = All checks (1+2+4+8+16)
 
-**Recommendation:**
-- Consider switching to `nat_uac_test()` for initial NAT detection on requests
-- Keep `CHECK_PRIVATE_IP` for cases where we've already extracted a specific IP
-- Hybrid approach: Use `nat_uac_test()` for comprehensive detection, manual check for specific IPs
+**Current Implementation:**
+- **REGISTER route**: Uses `nat_uac_test(31)` for comprehensive NAT detection
+- **CHECK_NAT_ENVIRONMENT route**: Uses `nat_uac_test(19)` for Contact + received mismatch + port mismatch
+- **Contact header fixing (onreply_route)**: Uses `nat_uac_test(1)` for Contact header check
+- **Fallback**: Manual `CHECK_PRIVATE_IP` route still used as fallback when `nat_uac_test()` doesn't detect NAT
+
+**Benefits:**
+- Faster detection (C code vs script-based regex)
+- More comprehensive (detects NAT via port/received mismatches, not just private IPs)
+- Standard OpenSIPS approach
+- Hybrid approach: `nat_uac_test()` for initial detection, `CHECK_PRIVATE_IP` for specific IP checks
 
 ## References
 
