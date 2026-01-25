@@ -216,10 +216,66 @@ We're using `usrloc` correctly for its intended purpose (location storage and ex
 
 The complexity we've added (manual NAT handling) is necessary and appropriate for proxy-registrar mode. The alternative would be to abandon proxy-registrar mode entirely, which would require significant architectural changes.
 
+## Additional Findings: Path Headers and nat_uac_test()
+
+### Path Headers and path-received
+
+**Why we're not using `path-received`:**
+- `path-received` requires Path headers to be present in REGISTER requests
+- Path headers must be inserted by an intermediate proxy using `add_path_received()`
+- We're not inserting Path headers in our current architecture
+- Without Path headers, `path-received` cannot work
+- **Conclusion**: Our manual `received` field update is correct for our architecture
+
+**Could we use Path headers?**
+- Yes, we could add Path header insertion before forwarding to Asterisk
+- This would enable `path-received` and automatic `received` population
+- Trade-off: Adds Path header complexity to messages
+- **Decision**: Not necessary - our manual approach works correctly
+
+### NAT Keepalives
+
+**Why we're not using `nat_keepalive()`:**
+- Asterisk (the registrar) handles NAT keepalives by sending OPTIONS packets
+- OpenSIPS routes those OPTIONS packets correctly (already fixed)
+- No need to duplicate keepalive functionality in OpenSIPS
+- **Conclusion**: Delegating keepalives to Asterisk is the correct architectural choice
+
+### NAT Detection: Manual vs nat_uac_test()
+
+**Current Approach:**
+- Custom `CHECK_PRIVATE_IP` route that checks RFC 1918 private IP ranges
+- Script-based regex pattern matching
+- Used in multiple places: INVITE route, RELAY route, Contact header fixing
+
+**nat_uac_test() Alternative:**
+- C-based detection (faster, more efficient)
+- Checks multiple NAT indicators:
+  - Flag 1: Private IP in Contact header
+  - Flag 2: `received` IP differs from source IP
+  - Flag 4: Private IP in Via header
+  - Flag 8: Private IP in SDP
+  - Flag 16: Source port differs from Via port
+- More comprehensive (detects NAT even with public IPs via port/received mismatches)
+- Standard OpenSIPS approach
+
+**Assessment:**
+- Our manual approach works but is less efficient and less comprehensive
+- `nat_uac_test()` would be an optimization opportunity
+- Can detect NAT scenarios beyond just private IP ranges
+- **Status**: Optimization opportunity, not a critical issue
+
+**Recommendation:**
+- Consider switching to `nat_uac_test()` for initial NAT detection on requests
+- Keep `CHECK_PRIVATE_IP` for cases where we've already extracted a specific IP
+- Hybrid approach: Use `nat_uac_test()` for comprehensive detection, manual check for specific IPs
+
 ## References
 
 - OpenSIPS usrloc module documentation
 - OpenSIPS registrar module documentation
+- OpenSIPS nathelper module documentation (`nat_uac_test()`)
+- OpenSIPS path module documentation (Path headers, `path-received`)
 - Proxy-registrar mode limitations (documented in code comments)
 - Our implementation: `config/opensips.cfg.template`
 - Related documents:
