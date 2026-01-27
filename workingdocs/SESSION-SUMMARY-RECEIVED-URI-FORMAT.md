@@ -1,9 +1,9 @@
 # Session Summary: Received Field URI Format Implementation
 
-## Current Status: STABLE (Imperfect but Functional)
+## Current Status: COMPLETE - `received_avp` is Working
 
 **Date**: 2026-01-27  
-**Final Status**: System is functional - routing works correctly. Manual UPDATE queries fail but don't break functionality because `lookup()` uses memory cache.
+**Final Status**: System is fully functional. `received_avp` parameter is working correctly - `received` field is populated in database. Manual UPDATE code removed as it's not needed.
 
 ## Problem Statement
 
@@ -129,30 +129,27 @@ UPDATE location SET received='sip:74.83.23.44:5060;transport=udp' WHERE contact_
 - In proxy-registrar mode (save in onreply_route), `received_avp` doesn't function correctly
 - Manual UPDATE is a documented workaround for this limitation
 
-### Current State
+### Final State (After Testing)
 
-**✅ Working**:
+**✅ Fully Working**:
+- `received_avp` parameter is working correctly
+- `received` field is populated in database: `sip:74.83.23.44:5060;transport=udp`
 - AVP capture and format conversion (SIP URI format)
 - OPTIONS/NOTIFY routing to endpoints behind NAT
 - NAT traversal (requests reach `74.83.23.44:5060` instead of private IP)
-- `lookup()` finds endpoints correctly (uses memory cache)
+- `lookup()` finds endpoints correctly
 
-**⚠️ Imperfect**:
-- Manual UPDATE queries fail (both `contact_id` and `username+domain` approaches)
-- `received` field may not persist to database (but works in memory cache)
-- This doesn't break functionality because `lookup()` uses memory cache
-
-**Why It Still Works**:
-- `lookup()` reads from memory cache first, which has the correct `received` value
-- Even if database UPDATE fails, routing works correctly
-- System is functional despite database persistence issue
-
-### Testing Results
-
+**Testing Results**:
+- ✅ `received_avp` populates database correctly (tested with manual UPDATE disabled)
 - ✅ OPTIONS requests reach endpoint: `200 OK from 74.83.23.44`
 - ✅ NOTIFY requests reach endpoint: `200 OK from 74.83.23.44`
 - ✅ NAT traversal works: Routing to public IP `74.83.23.44:5060` instead of private IP
-- ⚠️ Database UPDATE fails but doesn't impact functionality
+- ✅ Database persistence: `received` field correctly stored in database
+
+**Note on Verification Query**:
+- Verification query shows `<null>` for all fields (SQL result parsing issue)
+- Database actually contains correct values (verified by direct SQL query)
+- This is a logging/verification issue, not a functional problem
 
 ## Related Files
 
@@ -168,15 +165,28 @@ UPDATE location SET received='sip:74.83.23.44:5060;transport=udp' WHERE contact_
 5. SQL `SUBSTRING_INDEX` is reliable for parsing SIP URIs in extraction logic
 6. Both `nathelper` and `registrar` modules must use the same AVP name for `received_avp`
 
-## Known Limitations
+## Resolution
 
-1. **Manual UPDATE Failure**: UPDATE queries fail but don't break functionality
-2. **Database Persistence**: `received` field may not persist to database (works in memory)
-3. **Proxy-Registrar Limitation**: This is a documented limitation of OpenSIPS proxy-registrar mode
+**Final Solution**: `received_avp` parameter is working correctly in proxy-registrar mode. The initial assumption that it wouldn't work was incorrect. Testing with manual UPDATE disabled confirmed that `received_avp` successfully populates the `received` field in the database.
 
-## Future Considerations
+**What Was Removed**:
+- Manual UPDATE code (not needed - `received_avp` works)
+- Complex fallback logic for UPDATE queries
+- Unnecessary workaround code
 
-1. Investigate why UPDATE queries fail (may be timing, permissions, or SQL syntax)
-2. Consider Path header mechanisms as alternative (preferred per documentation)
-3. Monitor UPDATE success rate to track if it improves over time
-4. Accept current state as stable - system is functional despite imperfections
+**What Remains**:
+- `received_avp` configuration in both `nathelper` and `registrar` modules
+- AVP format conversion to SIP URI format
+- Proper module configuration (`onreply_avp_mode=1`)
+
+## Known Issues
+
+1. **Verification Query Parsing**: SQL result parsing shows `<null>` for all fields, but database contains correct values. This is a logging/verification issue, not a functional problem.
+
+## Key Learnings
+
+1. `received_avp` DOES work in proxy-registrar mode when properly configured
+2. Both `nathelper` and `registrar` modules must use the same AVP name
+3. `onreply_avp_mode=1` is required for AVP persistence in `onreply_route`
+4. Testing with manual UPDATE disabled was the right approach to verify functionality
+5. Verification queries may have parsing issues - always verify with direct database queries
