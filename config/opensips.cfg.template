@@ -480,50 +480,18 @@ route {
                                         $var(extracted_ip) = "";
                                         $var(extracted_port) = "";
                                         
-                                        # Check if it's received field format (sip:IP:port;transport=udp) or contact field format (sip:user@IP:port)
-                                        # received field format: sip:74.83.23.44:5060;transport=udp (no @ symbol)
-                                        # contact field format: sip:user@IP:port (has @ symbol)
-                                        if ($var(contact_value) =~ "^sip:" && $var(contact_value) !~ "@") {
-                                            # received field - SIP URI format: sip:IP:port;transport=udp
-                                            # Remove 'sip:' prefix, then extract IP and port
-                                            $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(contact_value) + "', 5)";
-                                            if (sql_query($var(query_remove_prefix), "$avp(fallback_no_prefix)")) {
-                                                $var(received_no_prefix) = $(avp(fallback_no_prefix)[0]);
-                                                # Extract IP (before first colon)
-                                                $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                                                if (sql_query($var(query_ip), "$avp(fallback_ip)")) {
-                                                    $var(extracted_ip) = $(avp(fallback_ip)[0]);
-                                                }
-                                                # Extract port (after colon, before semicolon or end)
-                                                $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
-                                                if (sql_query($var(query_port_part), "$avp(fallback_port_part)")) {
-                                                    $var(port_with_transport) = $(avp(fallback_port_part)[0]);
-                                                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
-                                                    if (sql_query($var(query_port), "$avp(fallback_port)")) {
-                                                        $var(extracted_port) = $(avp(fallback_port)[0]);
-                                                    }
-                                                }
-                                            }
-                                        } else if ($var(contact_value) =~ "^sip:") {
-                                            # contact field format: sip:user@IP:port or sip:user@IP
-                                            # Extract everything after @ and before : (or end of string)
-                                            $var(query_at) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', '@', -1)";
-                                            if (sql_query($var(query_at), "$avp(fallback_at_part)")) {
-                                                $var(at_part) = $(avp(fallback_at_part)[0]);
-                                                # Extract IP (before colon if present)
-                                                $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', 1)";
-                                                if (sql_query($var(query_ip), "$avp(fallback_ip)")) {
-                                                    $var(extracted_ip) = $(avp(fallback_ip)[0]);
-                                                }
-                                                # Extract port (after colon if present)
-                                                if ($var(at_part) =~ ":") {
-                                                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', -1)";
-                                                    if (sql_query($var(query_port), "$avp(fallback_port)")) {
-                                                        $var(extracted_port) = $(avp(fallback_port)[0]);
-                                                    }
-                                                } else {
-                                                    $var(extracted_port) = "5060";
-                                                }
+                                        # Extract IP:port using standard OpenSIPS URI transformations
+                                        # Works for both received field format (sip:IP:port;transport=udp) and contact field format (sip:user@IP:port)
+                                        if ($var(contact_value) =~ "^sip:") {
+                                            # Use standard OpenSIPS URI transformations instead of SQL queries
+                                            # Assign URI to $ru to enable transformations
+                                            $ru = $var(contact_value);
+                                            $var(extracted_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                                            $var(extracted_port) = $(ru{uri.port}); # Extract port using standard transformation
+                                            
+                                            # If port is empty, default to 5060
+                                            if ($var(extracted_port) == "" || $var(extracted_port) == "<null>") {
+                                                $var(extracted_port) = "5060";
                                             }
                                         }
                                         
@@ -768,39 +736,27 @@ route[DOMAIN_CHECK] {
                         xlog("INVITE: Destination contains private IP $var(dest_domain), checking received field for NAT traversal\n");
                         $var(query) = "SELECT received FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(domain_from_source) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                         if (sql_query($var(query), "$avp(invite_received)") && $(avp(invite_received)[0]) != "" && $(avp(invite_received)[0]) != "<null>") {
-                            # Extract IP:port from received field (SIP URI format: sip:IP:port;transport=udp)
+                            # Extract IP:port from received field using standard OpenSIPS URI transformations
+                            # received field format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
                             $var(received_value) = $(avp(invite_received)[0]);
-                            $var(nat_ip) = "";
-                            $var(nat_port) = "";
                             
-                            # received field is in SIP URI format: sip:IP:port;transport=udp
-                            # Remove 'sip:' prefix, then extract IP and port
-                            $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
-                            if (sql_query($var(query_remove_prefix), "$avp(invite_no_prefix)")) {
-                                $var(received_no_prefix) = $(avp(invite_no_prefix)[0]);
-                                # Extract IP (before first colon)
-                                $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                                if (sql_query($var(query_ip), "$avp(invite_nat_ip)")) {
-                                    $var(nat_ip) = $(avp(invite_nat_ip)[0]);
-                                }
-                                # Extract port (after colon, before semicolon or end)
-                                $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
-                                if (sql_query($var(query_port_part), "$avp(invite_port_part)")) {
-                                    $var(port_with_transport) = $(avp(invite_port_part)[0]);
-                                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
-                                    if (sql_query($var(query_port), "$avp(invite_nat_port)")) {
-                                        $var(nat_port) = $(avp(invite_nat_port)[0]);
-                                    }
-                                }
-                            }
+                            # Use standard OpenSIPS URI transformations instead of SQL queries
+                            # Assign URI to $ru to enable transformations
+                            $ru = $var(received_value);
+                            $var(nat_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                            $var(nat_port) = $(ru{uri.port}); # Extract port using standard transformation
                             
                             # Validate and update destination
-                            if ($var(nat_ip) != "" && $var(nat_ip) != "<null>" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) != "<null>") {
+                            if ($var(nat_ip) != "" && $var(nat_ip) != "<null>" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                                # If port is empty, default to 5060
+                                if ($var(nat_port) == "" || $var(nat_port) == "<null>") {
+                                    $var(nat_port) = "5060";
+                                }
                                 $du = "sip:" + $var(endpoint_user) + "@" + $var(nat_ip) + ":" + $var(nat_port);
                                 $ru = $du;
                                 xlog("INVITE: Updated destination to NAT IP from received field: $du (was $var(dest_uri))\n");
                             } else {
-                                xlog("L_WARN", "INVITE: Failed to extract valid IP:port from received field: [$var(received_value)]\n");
+                                xlog("L_WARN", "INVITE: Failed to extract valid IP:port from received field: [$var(received_value)] (IP: [$var(nat_ip)], Port: [$var(nat_port)])\n");
                             }
                         } else {
                             xlog("L_WARN", "INVITE: No received field found for NAT traversal, using original destination: $var(dest_uri)\n");
@@ -830,48 +786,17 @@ route[DOMAIN_CHECK] {
                     
                     # Check if it's received field format (sip:IP:port;transport=udp) or contact field format (sip:user@IP:port)
                     # received field format: sip:74.83.23.44:5060;transport=udp (no @ symbol)
-                    # contact field format: sip:user@IP:port (has @ symbol)
-                    if ($var(contact_value) =~ "^sip:" && $var(contact_value) !~ "@") {
-                        # received field - SIP URI format: sip:IP:port;transport=udp
-                        # Remove 'sip:' prefix, then extract IP and port
-                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(contact_value) + "', 5)";
-                        if (sql_query($var(query_remove_prefix), "$avp(invite_no_prefix)")) {
-                            $var(received_no_prefix) = $(avp(invite_no_prefix)[0]);
-                            # Extract IP (before first colon)
-                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                            if (sql_query($var(query_ip), "$avp(invite_ip)")) {
-                                $var(extracted_ip) = $(avp(invite_ip)[0]);
-                            }
-                            # Extract port (after colon, before semicolon or end)
-                            $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
-                            if (sql_query($var(query_port_part), "$avp(invite_port_part)")) {
-                                $var(port_with_transport) = $(avp(invite_port_part)[0]);
-                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
-                                if (sql_query($var(query_port), "$avp(invite_port)")) {
-                                    $var(extracted_port) = $(avp(invite_port)[0]);
-                                }
-                            }
-                        }
-                    } else if ($var(contact_value) =~ "^sip:") {
-                        # contact field format: sip:user@IP:port or sip:user@IP
-                        # Extract everything after @ and before : (or end of string)
-                        $var(query_at) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', '@', -1)";
-                        if (sql_query($var(query_at), "$avp(invite_at_part)")) {
-                            $var(at_part) = $(avp(invite_at_part)[0]);
-                            # Extract IP (before colon if present)
-                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', 1)";
-                            if (sql_query($var(query_ip), "$avp(invite_ip)")) {
-                                $var(extracted_ip) = $(avp(invite_ip)[0]);
-                            }
-                            # Extract port (after colon if present)
-                            if ($var(at_part) =~ ":") {
-                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(at_part) + "', ':', -1)";
-                                if (sql_query($var(query_port), "$avp(invite_port)")) {
-                                    $var(extracted_port) = $(avp(invite_port)[0]);
-                                }
-                            } else {
-                                $var(extracted_port) = "5060";
-                            }
+                    # Extract IP:port from contact/received field using standard OpenSIPS URI transformations
+                    if ($var(contact_value) =~ "^sip:") {
+                        # Use standard OpenSIPS URI transformations instead of SQL queries
+                        # Assign URI to $ru to enable transformations
+                        $ru = $var(contact_value);
+                        $var(extracted_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                        $var(extracted_port) = $(ru{uri.port}); # Extract port using standard transformation
+                        
+                        # If port is empty, default to 5060
+                        if ($var(extracted_port) == "" || $var(extracted_port) == "<null>") {
+                            $var(extracted_port) = "5060";
                         }
                     }
                     
@@ -1397,6 +1322,10 @@ route[RELAY] {
                 # First try received field (NAT traversal), then fallback to contact field
                 $var(nat_contact_found) = 0;
                 
+                # Save original Request-URI username before any modifications
+                $var(original_username) = $rU;
+                $var(original_ru) = $ru;
+                
                 if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
                     # Domain-specific lookup (preferred for multi-tenant)
                     # For in-dialog requests (BYE), use most recent registration even if slightly expired
@@ -1410,55 +1339,44 @@ route[RELAY] {
                 
                 # Try received field first (NAT traversal)
                 if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "" && $(avp(nat_received)[0]) != "<null>") {
-                    # received field contains SIP URI format from NAT traversal (e.g., sip:74.83.23.44:5060;transport=udp)
-                    # Extract IP and port from the SIP URI format
-                    $var(nat_ip) = "";
-                    $var(nat_port) = "";
+                    # Extract IP:port from received field using standard OpenSIPS URI transformations
+                    # received field format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
                     $var(received_value) = $(avp(nat_received)[0]);
                     xlog("RELAY: $rm - DEBUG - Extracting from received field: [$var(received_value)]\n");
                     
+                    # Save original Request-URI username before overwriting $ru
+                    $var(original_username) = $rU;
+                    $var(original_ru) = $ru;
+                    
                     # Validate that received_value is a valid SIP URI (not NULL or empty)
                     if ($var(received_value) =~ "^sip:") {
-                        # received field is in SIP URI format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
-                        # We need to extract IP and port from the URI
-                        # Format: sip:IP:port;transport=udp
-                        # Strategy: Remove 'sip:' prefix, then extract IP (before ':') and port (between ':' and ';' or end)
+                        # Use standard OpenSIPS URI transformations instead of SQL queries
+                        # Assign URI to $ru to enable transformations (temporarily)
+                        $ru = $var(received_value);
+                        $var(nat_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                        $var(nat_port) = $(ru{uri.port}); # Extract port using standard transformation
                         
-                        # Step 1: Remove 'sip:' prefix to get IP:port;transport=udp
-                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
-                        if (sql_query($var(query_remove_prefix), "$avp(nat_no_prefix)")) {
-                        $var(received_no_prefix) = $(avp(nat_no_prefix)[0]);
-                        # Step 2: Extract IP (everything before the colon after sip:)
-                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                        if (sql_query($var(query_ip), "$avp(nat_ip_extracted)")) {
-                            $var(nat_ip) = $(avp(nat_ip_extracted)[0]);
-                            xlog("RELAY: $rm - DEBUG - SQL extracted IP: [$var(nat_ip)]\n");
-                        }
-                        # Step 3: Extract port (between ':' and ';' or end of string)
-                        # First get everything after the first ':', then get everything before ';' or end
-                        $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
-                        if (sql_query($var(query_port_part), "$avp(nat_port_part)")) {
-                            $var(port_with_transport) = $(avp(nat_port_part)[0]);
-                            # Remove ';transport=udp' part if present
-                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
-                            if (sql_query($var(query_port), "$avp(nat_port_extracted)")) {
-                                $var(nat_port) = $(avp(nat_port_extracted)[0]);
-                                xlog("RELAY: $rm - DEBUG - SQL extracted port: [$var(nat_port)]\n");
-                            }
-                        }
-                        } else {
-                            xlog("L_WARN", "RELAY: $rm - DEBUG - SQL URI prefix removal failed for: [$var(received_value)]\n");
-                        }
+                        # Restore original Request-URI
+                        $ru = $var(original_ru);
+                        
+                        xlog("RELAY: $rm - DEBUG - Extracted IP: [$var(nat_ip)], Port: [$var(nat_port)]\n");
                     } else {
                         xlog("L_WARN", "RELAY: $rm - DEBUG - received field is not a valid SIP URI format: [$var(received_value)]\n");
+                        $var(nat_ip) = "";
+                        $var(nat_port) = "";
                     }
                     
                     xlog("RELAY: $rm - DEBUG - Final extraction result: IP=[$var(nat_ip)], Port=[$var(nat_port)]\n");
                     
                     # Only set $du if we successfully extracted both IP and port
                     if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) =~ "^[0-9]+$") {
-                        $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $ru)\n");
+                        # Construct destination URI: include username if it exists, otherwise just IP:port
+                        if ($var(original_username) != "") {
+                            $du = "sip:" + $var(original_username) + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                        } else {
+                            $du = "sip:" + $var(nat_ip) + ":" + $var(nat_port);
+                        }
+                        xlog("RELAY: $rm - Updated destination to NAT IP from received field: $du (was $var(original_ru))\n");
                         $var(nat_contact_found) = 1;
                     } else {
                         xlog("L_WARN", "RELAY: $rm - Failed to extract valid IP:port from received field: [$var(received_value)], nat_ip=[$var(nat_ip)], nat_port=[$var(nat_port)]\n");
@@ -1497,12 +1415,23 @@ route[RELAY] {
                         
                         # Validate extracted IP and set destination URI
                         if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                            if ($var(nat_port) != "") {
-                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":" + $var(nat_port);
-                                xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $ru)\n");
+                            # Construct destination URI: include username if it exists, otherwise just IP:port
+                            if ($var(original_username) != "") {
+                                if ($var(nat_port) != "") {
+                                    $du = "sip:" + $var(original_username) + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact: $du (was $var(original_ru))\n");
+                                } else {
+                                    $du = "sip:" + $var(original_username) + "@" + $var(nat_ip) + ":5060";
+                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $var(original_ru))\n");
+                                }
                             } else {
-                                $du = "sip:" + $rU + "@" + $var(nat_ip) + ":5060";
-                                xlog("RELAY: $rm - Updated destination to NAT IP from contact (default port): $du (was $ru)\n");
+                                if ($var(nat_port) != "") {
+                                    $du = "sip:" + $var(nat_ip) + ":" + $var(nat_port);
+                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact (no username): $du (was $var(original_ru))\n");
+                                } else {
+                                    $du = "sip:" + $var(nat_ip) + ":5060";
+                                    xlog("RELAY: $rm - Updated destination to NAT IP from contact (no username, default port): $du (was $var(original_ru))\n");
+                                }
                             }
                             $var(nat_contact_found) = 1;
                         } else {
@@ -1673,30 +1602,15 @@ onreply_route {
                 if (sql_query($var(query), "$avp(contact_received)")) {
                     if ($(avp(contact_received)[0]) != "" && $(avp(contact_received)[0]) != "<null>") {
                         # Extract IP:port from received field (SIP URI format: sip:IP:port;transport=udp)
+                        # Extract IP:port from received field using standard OpenSIPS URI transformations
+                        # received field format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
                         $var(received_value) = $(avp(contact_received)[0]);
-                        $var(nat_ip) = "";
-                        $var(nat_port) = "";
                         
-                        # received field is in SIP URI format: sip:IP:port;transport=udp
-                        # Remove 'sip:' prefix, then extract IP and port
-                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
-                        if (sql_query($var(query_remove_prefix), "$avp(contact_no_prefix)")) {
-                            $var(received_no_prefix) = $(avp(contact_no_prefix)[0]);
-                            # Extract IP (before first colon)
-                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                            if (sql_query($var(query_ip), "$avp(contact_nat_ip)")) {
-                                $var(nat_ip) = $(avp(contact_nat_ip)[0]);
-                            }
-                            # Extract port (after colon, before semicolon or end)
-                            $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
-                            if (sql_query($var(query_port_part), "$avp(contact_port_part)")) {
-                                $var(port_with_transport) = $(avp(contact_port_part)[0]);
-                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
-                                if (sql_query($var(query_port), "$avp(contact_nat_port)")) {
-                                    $var(nat_port) = $(avp(contact_nat_port)[0]);
-                                }
-                            }
-                        }
+                        # Use standard OpenSIPS URI transformations instead of SQL queries
+                        # Assign URI to $ru to enable transformations
+                        $ru = $var(received_value);
+                        $var(nat_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                        $var(nat_port) = $(ru{uri.port}); # Extract port using standard transformation
                         
                         # Validate and construct new Contact header
                         if ($var(nat_ip) != "" && $var(nat_ip) != "<null>" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) != "<null>") {
@@ -1831,27 +1745,19 @@ onreply_route {
                 # Note: AVPs from database queries return "<null>" string when database value is NULL
                 # Also, if no rows match, the AVP will be empty
                 if ($(avp(caller_received)[0]) != "" && $(avp(caller_received)[0]) != "<null>") {
-                    # received field contains SIP URI format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
-                    # Use SQL SUBSTRING_INDEX for extraction (consistent with codebase pattern)
+                    # Extract IP from received field using standard OpenSIPS URI transformations
+                    # received field format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
                     $var(received_value) = $(avp(caller_received)[0]);
-                    # Remove 'sip:' prefix, then extract IP
-                    $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
-                    if (sql_query($var(query_remove_prefix), "$avp(caller_no_prefix)")) {
-                        $var(received_no_prefix) = $(avp(caller_no_prefix)[0]);
-                        # Extract IP part (everything before first colon)
-                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
-                        if (sql_query($var(query_ip), "$avp(caller_ip_extracted)")) {
-                            $var(caller_ip) = $(avp(caller_ip_extracted)[0]);
-                            if ($var(caller_ip) != "" && $var(caller_ip) != "<null>") {
-                                xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user), extracted from: $var(received_value))\n");
-                            } else {
-                                xlog("L_WARN", "Caller lookup: IP extraction returned empty/null: [$var(caller_ip)] from [$var(received_value)] (user=$var(from_user))\n");
-                            }
-                        } else {
-                            xlog("L_WARN", "Caller lookup: SQL IP extraction query failed for: [$var(received_value)] (user=$var(from_user))\n");
-                        }
+                    
+                    # Use standard OpenSIPS URI transformations instead of SQL queries
+                    # Assign URI to $ru to enable transformations
+                    $ru = $var(received_value);
+                    $var(caller_ip) = $(ru{uri.host});   # Extract host/IP using standard transformation
+                    
+                    if ($var(caller_ip) != "" && $var(caller_ip) != "<null>") {
+                        xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user), extracted from: $var(received_value))\n");
                     } else {
-                        xlog("L_WARN", "Caller lookup: SQL URI prefix removal failed for: [$var(received_value)] (user=$var(from_user))\n");
+                        xlog("L_WARN", "Caller lookup: IP extraction returned empty/null: [$var(caller_ip)] from [$var(received_value)] (user=$var(from_user))\n");
                     }
                 } else {
                     # received field is empty or NULL - log for debugging
