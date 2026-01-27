@@ -3,7 +3,7 @@
 # OpenSIPS SIP Edge Router Installation Script
 # Installs and configures OpenSIPS with MySQL routing database
 #
-# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--skip-prometheus] [--advertised-ip <IP>] [--preferlan] [--db-password <PASSWORD>]
+# Usage: sudo ./install.sh [--skip-deps] [--skip-firewall] [--skip-db] [--skip-prometheus] [--skip-fail2ban] [--advertised-ip <IP>] [--preferlan] [--db-password <PASSWORD>]
 #
 
 set -euo pipefail
@@ -30,6 +30,7 @@ SKIP_DEPS=false
 SKIP_FIREWALL=false
 SKIP_DB=false
 SKIP_PROMETHEUS=false
+SKIP_FAIL2BAN=false
 ADVERTISED_IP=""
 PREFER_LAN=false
 DB_PASSWORD=""
@@ -51,6 +52,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-prometheus)
             SKIP_PROMETHEUS=true
+            shift
+            ;;
+        --skip-fail2ban)
+            SKIP_FAIL2BAN=true
             shift
             ;;
         --advertised-ip)
@@ -210,6 +215,14 @@ install_dependencies() {
             log_error "Failed to install dependencies"
             exit 1
         }
+    
+    # Install Fail2ban if not skipped
+    if [[ "$SKIP_FAIL2BAN" != true ]]; then
+        log_info "Installing Fail2ban..."
+        apt-get install -y fail2ban || {
+            log_warn "Failed to install Fail2ban - continuing without it"
+        }
+    fi
     
     # Verify OpenSIPS installation and log version
     if command -v opensips &> /dev/null; then
@@ -1096,6 +1109,77 @@ NODE_SERVICE_EOF
     log_success "Prometheus configuration created"
 }
 
+configure_fail2ban() {
+    if [[ "$SKIP_FAIL2BAN" == true ]]; then
+        log_info "Skipping Fail2ban configuration"
+        return
+    fi
+    
+    # Check if Fail2ban is installed
+    if ! command -v fail2ban-server &> /dev/null; then
+        log_warn "Fail2ban not installed - skipping configuration"
+        return
+    fi
+    
+    log_info "Configuring Fail2ban for OpenSIPS brute force detection..."
+    
+    # Create Fail2ban directories if they don't exist
+    mkdir -p /etc/fail2ban/filter.d
+    mkdir -p /etc/fail2ban/jail.d
+    
+    # Copy filter files
+    if [[ -f "${CONFIG_DIR}/fail2ban/opensips-combined.conf" ]]; then
+        cp "${CONFIG_DIR}/fail2ban/opensips-combined.conf" /etc/fail2ban/filter.d/ || {
+            log_warn "Failed to copy Fail2ban filter - continuing without it"
+            return
+        }
+        log_success "Fail2ban filter installed"
+    else
+        log_warn "Fail2ban filter not found at ${CONFIG_DIR}/fail2ban/opensips-combined.conf"
+        return
+    fi
+    
+    # Copy jail configuration
+    if [[ -f "${CONFIG_DIR}/fail2ban/opensips-brute-force.conf" ]]; then
+        # Check if jail config already exists
+        if [[ -f /etc/fail2ban/jail.d/opensips-brute-force.conf ]]; then
+            log_info "Fail2ban jail configuration already exists - backing up..."
+            cp /etc/fail2ban/jail.d/opensips-brute-force.conf \
+               /etc/fail2ban/jail.d/opensips-brute-force.conf.backup.$(date +%Y%m%d_%H%M%S) || true
+        fi
+        
+        cp "${CONFIG_DIR}/fail2ban/opensips-brute-force.conf" /etc/fail2ban/jail.d/ || {
+            log_warn "Failed to copy Fail2ban jail configuration - continuing without it"
+            return
+        }
+        
+        # Update log path in jail config (try to detect OpenSIPS log location)
+        local log_path="/var/log/opensips/opensips.log"
+        if [[ ! -f "$log_path" ]]; then
+            # Try syslog as fallback
+            log_path="/var/log/syslog"
+            log_warn "OpenSIPS log not found at /var/log/opensips/opensips.log"
+            log_warn "Using syslog as fallback - you may need to update logpath in /etc/fail2ban/jail.d/opensips-brute-force.conf"
+        fi
+        
+        # Update logpath in jail config
+        sed -i "s|^logpath = .*|logpath = ${log_path}|" /etc/fail2ban/jail.d/opensips-brute-force.conf || {
+            log_warn "Failed to update logpath in Fail2ban jail configuration"
+        }
+        
+        log_success "Fail2ban jail configuration installed"
+        log_warn "IMPORTANT: Before enabling Fail2ban in production, whitelist trusted customer IPs:"
+        log_warn "  sudo ./scripts/manage-fail2ban-whitelist.sh add <IP_or_CIDR> [comment]"
+        log_warn "  See config/fail2ban/README.md for details"
+        
+        # Don't restart Fail2ban yet - let user configure whitelist first
+        # They can restart it manually or we can add a flag to enable it immediately
+    else
+        log_warn "Fail2ban jail configuration not found at ${CONFIG_DIR}/fail2ban/opensips-brute-force.conf"
+        return
+    fi
+}
+
 enable_services() {
     log_info "Enabling services..."
     
@@ -1121,6 +1205,13 @@ enable_services() {
         log_warn "Cleanup timer setup failed - you can set it up manually later"
     }
     
+    # Enable Fail2ban if installed and not skipped
+    if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
+        systemctl enable fail2ban || {
+            log_warn "Failed to enable Fail2ban service"
+        }
+    fi
+    
     log_success "Services enabled"
 }
 
@@ -1140,6 +1231,14 @@ start_services() {
         log_success "OpenSIPS started"
     else
         log_error "OpenSIPS failed to start. Check logs: journalctl -u opensips"
+    fi
+    
+    # Start Fail2ban if installed and not skipped
+    if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
+        # Don't start Fail2ban automatically - user should configure whitelist first
+        log_info "Fail2ban installed but not started - configure whitelist first, then:"
+        log_info "  sudo systemctl start fail2ban"
+        log_info "  sudo systemctl status fail2ban"
     fi
     
     # Start Prometheus and Node Exporter if installed
@@ -1220,6 +1319,20 @@ verify_installation() {
         echo -e "${YELLOW}⚠${NC} Endpoint cleanup timer not enabled"
     fi
     
+    # Check Fail2ban if installed
+    if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
+        if systemctl is-enabled --quiet fail2ban 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Fail2ban service enabled"
+        else
+            echo -e "${YELLOW}⚠${NC} Fail2ban service not enabled"
+        fi
+        if systemctl is-active --quiet fail2ban 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Fail2ban service running"
+        else
+            echo -e "${YELLOW}⚠${NC} Fail2ban service not running (configure whitelist first)"
+        fi
+    fi
+    
     # Check Prometheus and Node Exporter if installed
     if [[ "$SKIP_PROMETHEUS" != true ]]; then
         if command -v prometheus &> /dev/null; then
@@ -1250,6 +1363,13 @@ verify_installation() {
     echo
     echo "=== Next Steps ==="
     echo
+    if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
+        echo "1. Configure Fail2ban whitelist (IMPORTANT before production):"
+        echo "   sudo ./scripts/manage-fail2ban-whitelist.sh add <IP_or_CIDR> [comment]"
+        echo "   See config/fail2ban/README.md for details"
+        echo "   Then start Fail2ban: sudo systemctl start fail2ban"
+        echo
+    fi
     echo "1. Add domains and dispatcher entries to the database:"
     echo "   mysql -u opensips -p'your-password' opensips"
     echo "   Or use helper scripts:"
@@ -1258,6 +1378,9 @@ verify_installation() {
     echo
     echo "2. Check service status:"
     echo "   systemctl status opensips"
+    if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
+        echo "   systemctl status fail2ban"
+    fi
     echo
     echo "3. View logs:"
     echo "   journalctl -u opensips -f"

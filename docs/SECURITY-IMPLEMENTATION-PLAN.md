@@ -131,6 +131,12 @@ This ensures we use modules correctly and don't miss important features or best 
 
 **Objective:** Track all failed registration attempts in database
 
+**⚠️ STANDARD APPROACH EVALUATION:** 
+- **Evaluated:** OpenSIPS `acc` module for failed transaction logging
+- **Finding:** `acc` module doesn't capture source IP:port or user agent (critical for security)
+- **Decision:** Use custom `failed_registrations` table (justified deviation)
+- **See:** `docs/FAILED-REGISTRATION-TRACKING-COMPARISON.md` for detailed comparison
+
 **Implementation Steps:**
 
 #### Step 1.1.1: Create Database Table ✅ **HIGH CONFIDENCE**
@@ -159,9 +165,10 @@ This ensures we use modules correctly and don't miss important features or best 
 - **Note:** Using `username` and `domain` instead of `aor` to match `location` table structure
 
 #### Step 1.1.2: Add Logging in onreply_route ✅ **HIGH CONFIDENCE**
-- **What:** Log failed registrations (4xx, 5xx responses) to database
+- **What:** Log failed registrations (403 and other failures, excluding 401) to database
 - **Where:** `config/opensips.cfg.template` - `onreply_route[handle_reply_reg]`
 - **Confidence:** ✅ High - We know how onreply_route works, have access to `$rs`, `$rr`, `$si`, `$sp`
+- **Important:** 401 Unauthorized is a normal part of SIP authentication (challenge-response), so we skip logging it. Only log 403 Forbidden and other actual failures.
 - **Implementation:**
   ```opensips
   onreply_route[handle_reply_reg] {
@@ -170,7 +177,11 @@ This ensures we use modules correctly and don't miss important features or best 
               # Success - existing save() logic
               ...
           } else if ($rs >= 400) {
-              # Failed registration - log to database
+              # Skip 401 (normal auth challenge)
+              if ($rs == 401) {
+                  exit;
+              }
+              # Log 403 and other failures
               $var(query) = "INSERT INTO failed_registrations 
                   (username, domain, source_ip, source_port, user_agent, 
                    response_code, response_reason, attempt_time) 
@@ -207,16 +218,105 @@ This ensures we use modules correctly and don't miss important features or best 
   - Test AVP persistence across transaction boundaries
   - Check if transaction-scoped AVPs (`tu:`) are needed
 
-### 1.2 Registration Status Tracking ✅ **HIGH CONFIDENCE**
+### 1.2 Registration Status Tracking ❌ **DEFERRED - LOW VALUE**
 
 **Objective:** Track registration status (pending, registered, failed, expired)
 
-**Note:** Since we're using OpenSIPS `location` table (usrloc module), we can't directly modify it. Instead, we'll create a separate tracking table.
+**Status:** ❌ **DEFERRED** - Decision made to skip this phase based on value analysis
 
-#### Step 1.2.1: Create Registration Status Table ✅ **HIGH CONFIDENCE**
+**Decision Date:** January 2026  
+**Decision:** Skip Phase 1.2 - Information already available in existing tables
+
+---
+
+## Value Analysis
+
+### What Phase 1.2 Would Provide
+
+A `registration_status` table tracking:
+- Status: `pending`, `registered`, `failed`, `expired`
+- Last response code/reason
+- Timestamps: `registered_at`, `failed_at`, `last_attempt_time`
+
+### What We Already Have
+
+**1. `location` Table (usrloc module):**
+- ✅ Shows if someone is registered (record exists + `expires > NOW()`)
+- ✅ Has `last_modified` timestamp (when they registered)
+- ✅ Has `user_agent`, `callid`, `contact`, `received` fields
+- ✅ Automatically cleaned up when expired
+
+**2. `failed_registrations` Table:**
+- ✅ Shows failed attempts (403 and other failures)
+- ✅ Has `attempt_time`, `response_code`, `response_reason`
+- ✅ Has `username`, `domain`, `source_ip`, `user_agent`
+
+### Why Phase 1.2 Has Low Value
+
+1. **Duplicate Information:**
+   - Registered status? → Check `location` table (if record exists and `expires > NOW()`)
+   - Failed status? → Check `failed_registrations` table
+   - Last attempt time? → Query `location.last_modified` or `failed_registrations.attempt_time`
+
+2. **Maintenance Overhead:**
+   - Must keep in sync with `location` and `failed_registrations` tables
+   - Risk of stale data if updates fail
+   - Additional SQL queries on every registration
+
+3. **Can Be Replaced with SQL View:**
+   - If needed later, create a view instead of maintaining a separate table
+   - No maintenance overhead
+   - Always reflects current state from source tables
+
+### Alternative: SQL View (If Needed Later)
+
+If a quick status lookup is needed in the future, create a view instead:
+
+```sql
+-- Example view (if needed later)
+CREATE VIEW user_registration_status AS
+SELECT 
+    COALESCE(l.username, f.username) as username,
+    COALESCE(l.domain, f.domain) as domain,
+    CASE 
+        WHEN l.contact_id IS NOT NULL AND l.expires > UNIX_TIMESTAMP() THEN 'registered'
+        WHEN f.id IS NOT NULL THEN 'failed'
+        ELSE 'unknown'
+    END as status,
+    l.last_modified as registered_at,
+    MAX(f.attempt_time) as last_failed_at
+FROM location l
+LEFT JOIN failed_registrations f 
+    ON l.username = f.username AND l.domain = f.domain
+WHERE l.expires > UNIX_TIMESTAMP() OR f.id IS NOT NULL
+GROUP BY username, domain;
+```
+
+---
+
+## Decision
+
+**Skip Phase 1.2** - Focus on higher-value features:
+- Phase 2.2: Brute Force Detection (uses data we're already collecting)
+- Phase 2.3: Flood Detection (already implemented with Pike)
+- Phase 3: Monitoring & Alerting
+
+**Rationale:**
+- Information already available in existing tables
+- Reduces maintenance overhead
+- Can add SQL view later if needed
+- Better to focus on actionable security features
+
+---
+
+## Original Plan (For Reference)
+
+<details>
+<summary>Original Phase 1.2 Implementation Plan (Deferred)</summary>
+
+#### Step 1.2.1: Create Registration Status Table
 - **What:** Create `registration_status` table to track registration state
 - **Where:** `scripts/init-database.sh`
-- **Confidence:** ✅ High - Standard SQL table creation
 - **Schema:**
   ```sql
   CREATE TABLE registration_status (
@@ -235,32 +335,12 @@ This ensures we use modules correctly and don't miss important features or best 
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   ```
 
-#### Step 1.2.2: Update Status in onreply_route ✅ **HIGH CONFIDENCE**
+#### Step 1.2.2: Update Status in onreply_route
 - **What:** Update registration status based on response code
 - **Where:** `config/opensips.cfg.template` - `onreply_route[handle_reply_reg]`
-- **Confidence:** ✅ High - Standard SQL UPDATE operations
-- **Implementation:**
-  ```opensips
-  if ($rs >= 200 && $rs < 300) {
-      # Success - update status to 'registered'
-      $var(update_query) = "INSERT INTO registration_status 
-          (username, domain, status, last_response_code, last_response_reason, registered_at, last_attempt_time) 
-          VALUES ('" + $tU + "', '" + $(tu{uri.domain}) + "', 'registered', " + $rs + ", '" + $rr + "', NOW(), NOW())
-          ON DUPLICATE KEY UPDATE 
-          status='registered', last_response_code=" + $rs + ", 
-          last_response_reason='" + $rr + "', registered_at=NOW(), last_attempt_time=NOW()";
-      sql_query($var(update_query));
-  } else if ($rs >= 400) {
-      # Failed - update status to 'failed'
-      $var(update_query) = "INSERT INTO registration_status 
-          (username, domain, status, last_response_code, last_response_reason, failed_at, last_attempt_time) 
-          VALUES ('" + $tU + "', '" + $(tu{uri.domain}) + "', 'failed', " + $rs + ", '" + $rr + "', NOW(), NOW())
-          ON DUPLICATE KEY UPDATE 
-          status='failed', last_response_code=" + $rs + ", 
-          last_response_reason='" + $rr + "', failed_at=NOW(), last_attempt_time=NOW()";
-      sql_query($var(update_query));
-  }
-  ```
+- **Implementation:** SQL INSERT/UPDATE operations in onreply_route
+
+</details>
 
 ### 1.3 Response-Based Cleanup ⚠️ **MEDIUM CONFIDENCE**
 
@@ -365,98 +445,131 @@ This ensures we use modules correctly and don't miss important features or best 
   - Window-based vs token bucket algorithm
   - Performance optimization (caching, batch updates)
 
-### 2.2 Registration-Specific Rate Limiting ✅ **HIGH CONFIDENCE**
+### 2.2 Brute Force Detection ✅ **IMPLEMENTED**
 
-**Objective:** Detect and block brute force registration attacks
+**Objective:** Detect and block brute force attacks (registration failures + door-knock attempts)
 
-**⚠️ NOTE:** This section uses custom database tracking for registration attempts. This is acceptable because:
-- We need to track registration attempts for analysis/reporting (not just rate limiting)
-- The `ratelimit` module handles rate limiting, but we need detailed logging
-- This complements the standard `ratelimit` module (doesn't replace it)
+**Status:** ✅ **COMPLETED** - Fail2ban integration implemented
 
-#### Step 2.2.1: Create Registration Attempts Table ✅ **HIGH CONFIDENCE**
-- **What:** Create `registration_attempts` table
-- **Where:** `scripts/init-database.sh`
-- **Confidence:** ✅ High - Standard SQL table creation
-- **Schema:**
-  ```sql
-  CREATE TABLE registration_attempts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      source_ip VARCHAR(45) NOT NULL,
-      username VARCHAR(64) DEFAULT NULL,
-      domain VARCHAR(128) DEFAULT NULL,
-      success BOOLEAN DEFAULT FALSE,
-      response_code INT NOT NULL,
-      attempt_time DATETIME NOT NULL,
-      INDEX idx_source_ip_time (source_ip, attempt_time),
-      INDEX idx_username_domain_time (username, domain, attempt_time),
-      INDEX idx_attempt_time (attempt_time)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  ```
+**⚠️ NOTE:** We use existing tables (`failed_registrations` and `door_knock_attempts`) for brute force detection. We don't need a separate `registration_attempts` table because:
+- We only care about failures (not successes) for brute force detection
+- `failed_registrations` already tracks failed registration attempts
+- `door_knock_attempts` tracks high-volume attacks (INVITE to guessed extensions, unknown domains)
+- Both sources should be considered for brute force detection
 
-#### Step 2.2.2: Track Registration Attempts ✅ **HIGH CONFIDENCE**
-- **What:** Log all registration attempts (success and failure)
-- **Where:** `config/opensips.cfg.template` - `onreply_route[handle_reply_reg]`
-- **Confidence:** ✅ High - Similar to failed_registrations logging
-- **Implementation:** Add INSERT to `registration_attempts` table in onreply_route
+**Key Insight:** Attackers often use multiple attack vectors:
+1. **Registration brute force:** Wrong passwords (tracked in `failed_registrations`)
+2. **Extension scanning:** INVITE to guessed extensions/unknown domains (tracked in `door_knock_attempts`)
 
-#### Step 2.2.3: Implement Brute Force Detection ✅ **HIGH CONFIDENCE** (Recommended: Fail2ban)
+Both should be considered when detecting brute force patterns.
+
+#### Step 2.2.1: Implement Brute Force Detection ✅ **IMPLEMENTED** (Fail2ban)
 
 **Recommended Approach:** Use Fail2ban for brute force detection (monitors OpenSIPS logs and adds iptables rules)
 
-#### Option A: Fail2ban Integration ✅ **HIGH CONFIDENCE** (Recommended)
-- **What:** Configure Fail2ban to monitor OpenSIPS logs for failed registration patterns
-- **Confidence:** ✅ High - Standard approach, well-documented
+**Data Sources:**
+- `failed_registrations` table - Failed registration attempts (403 and other failures)
+- `door_knock_attempts` table - Door-knock attempts (unknown domains, scanners, method not allowed, etc.)
+
+**Why Both Sources Matter:**
+- **Registration failures:** Password guessing attacks
+- **Door-knock attempts:** Extension scanning, unknown domain probes, scanner activity
+- **Combined:** Provides comprehensive brute force detection
+
+#### Option A: Fail2ban Integration ✅ **IMPLEMENTED** (Recommended)
+- **What:** Configure Fail2ban to monitor OpenSIPS logs for failed registration and door-knock patterns
+- **Status:** ✅ **COMPLETED**
+- **Implementation Location:** `config/fail2ban/`
+- **Files Created:**
+  - `opensips-combined.conf` - Combined filter matching both failed registrations and door-knock attempts
+  - `opensips-failed-registrations.conf` - Standalone filter for registration failures (optional)
+  - `opensips-door-knock.conf` - Standalone filter for door-knock attempts (optional)
+  - `opensips-brute-force.conf` - Jail configuration using combined filter
+  - `README.md` - Complete installation and configuration documentation
 - **How it works:**
   - Fail2ban monitors OpenSIPS log files
-  - Detects patterns indicating brute force (multiple failed registrations from same IP)
+  - Detects patterns indicating brute force:
+    - Multiple failed registrations from same IP (from `failed_registrations` logs)
+    - Multiple door-knock attempts from same IP (from `door_knock_attempts` logs)
   - Automatically adds iptables rules to block IPs
-  - Can be configured with ban duration and thresholds
+  - Configurable ban duration and thresholds
 - **Pros:** 
   - System-level blocking (more effective than application-level)
   - Automatic IPTables integration
   - Well-tested and maintained
   - Reduces load on OpenSIPS (blocking happens at firewall level)
-- **Cons:** Requires Fail2ban installation and configuration
-- **Implementation:**
-  - Configure Fail2ban filter for OpenSIPS registration failures
-  - Set up jail rules for registration brute force detection
-  - Configure iptables action
-- **Research Needed:**
-  - Fail2ban filter patterns for OpenSIPS logs
-  - Optimal ban duration and thresholds
-  - Integration with existing firewall rules
+  - Monitors both registration failures and door-knock attempts
+- **Default Configuration:**
+  - `maxretry = 10` - Ban after 10 failures
+  - `findtime = 300` - Count failures within 5 minutes
+  - `bantime = 3600` - Ban for 1 hour
+- **Whitelist Support (CRITICAL for Production):**
+  - **Problem:** In NAT/cluster environments, multiple endpoints share the same public IP
+  - **Risk:** One misconfigured phone can trigger blocking for entire cluster
+  - **Solution:** Whitelist management script (`scripts/manage-fail2ban-whitelist.sh`)
+  - **Usage:** `sudo ./scripts/manage-fail2ban-whitelist.sh add <IP_or_CIDR> [comment]`
+  - **Always whitelist trusted customer IPs/ranges before production deployment**
+- **Installation:**
+  ```bash
+  # Copy files to Fail2ban directories
+  sudo cp config/fail2ban/opensips-combined.conf /etc/fail2ban/filter.d/
+  sudo cp config/fail2ban/opensips-brute-force.conf /etc/fail2ban/jail.d/
+  
+  # Edit jail config to set correct log path
+  sudo nano /etc/fail2ban/jail.d/opensips-brute-force.conf
+  
+  # Add trusted customer IPs to whitelist (CRITICAL!)
+  sudo ./scripts/manage-fail2ban-whitelist.sh add 203.0.113.50 "Customer A office"
+  sudo ./scripts/manage-fail2ban-whitelist.sh add 198.51.100.0/24 "Customer B network"
+  
+  # Restart Fail2ban
+  sudo systemctl restart fail2ban
+  ```
+- **Documentation:** See `config/fail2ban/README.md` for complete setup instructions and whitelist management
 
 #### Option B: Custom Database-Based Detection ⚠️ **MEDIUM CONFIDENCE** (Alternative)
-- **What:** Check for excessive failed attempts and block IPs using database queries
-- **Where:** `config/opensips.cfg.template` - `route{}` (before domain check)
+- **What:** Check for excessive failed attempts from both sources and block IPs using database queries
+- **Where:** `config/opensips.cfg.template` - `route{}` (early, before domain check)
 - **Confidence:** ⚠️ Medium - Need to design efficient query pattern
 - **Implementation:**
   ```opensips
   route[CHECK_BRUTE_FORCE] {
-      # Check failed attempts in last 5 minutes
-      $var(query) = "SELECT COUNT(*) FROM registration_attempts 
+      # Check failed registrations in last 5 minutes
+      $var(query) = "SELECT COUNT(*) FROM failed_registrations 
           WHERE source_ip='" + $si + "' 
-          AND success=FALSE 
           AND attempt_time > DATE_SUB(NOW(), INTERVAL 5 MINUTE)";
-      if (sql_query($var(query), "$avp(failed_count)")) {
-          if ($(avp(failed_count)[0]) >= 5) {
-              # Block IP
-              xlog("L_WARN", "Brute force detected from $si - blocking\n");
-              sl_send_reply(403, "Too Many Failed Attempts");
-              exit;
-          }
+      $var(failed_reg_count) = 0;
+      if (sql_query($var(query), "$avp(failed_reg_count)")) {
+          $var(failed_reg_count) = $(avp(failed_reg_count)[0]);
+      }
+      
+      # Check door-knock attempts in last 5 minutes
+      $var(query) = "SELECT COUNT(*) FROM door_knock_attempts 
+          WHERE source_ip='" + $si + "' 
+          AND attempt_time > DATE_SUB(NOW(), INTERVAL 5 MINUTE)";
+      $var(door_knock_count) = 0;
+      if (sql_query($var(query), "$avp(door_knock_count)")) {
+          $var(door_knock_count) = $(avp(door_knock_count)[0]);
+      }
+      
+      # Block if total failures exceed threshold (e.g., 10 in 5 minutes)
+      $var(total_failures) = $var(failed_reg_count) + $var(door_knock_count);
+      if ($var(total_failures) >= 10) {
+          xlog("L_WARN", "Brute force detected from $si - $var(failed_reg_count) failed registrations, $var(door_knock_count) door-knocks - blocking\n");
+          sl_send_reply(403, "Too Many Failed Attempts");
+          exit;
       }
   }
   ```
-- **Pros:** Full control, integrated with OpenSIPS
-- **Cons:** Database query overhead, less effective than firewall-level blocking
+- **Pros:** Full control, integrated with OpenSIPS, uses both data sources
+- **Cons:** Database query overhead (2 queries per request), less effective than firewall-level blocking
 - **Research Needed:**
   - Efficient query patterns for time-windowed counting
-  - Performance impact of database queries on every REGISTER
+  - Performance impact of database queries on every request
   - Caching strategies to reduce database load
+  - Optimal thresholds (separate for registrations vs door-knocks, or combined?)
 
-**Recommendation:** Use Fail2ban (Option A) for brute force detection - it's the recommended method for password guessing attacks and provides system-level protection.
+**Recommendation:** Use Fail2ban (Option A) for brute force detection - it's the recommended method for password guessing attacks and provides system-level protection. Can monitor both `failed_registrations` and `door_knock_attempts` log entries.
 
 ### 2.3 Flood Detection ✅ **HIGH CONFIDENCE** (with event_route)
 
@@ -805,10 +918,9 @@ This ensures we use modules correctly and don't miss important features or best 
 ## Summary: Confidence Levels by Phase
 
 ### ✅ High Confidence (Can implement immediately)
-- **Phase 1.1:** Failed registration tracking (database + logging)
-- **Phase 1.2:** Registration status tracking
-- **Phase 2.2:** Registration-specific rate limiting (custom database approach)
-- **Phase 2.2.3:** Brute force detection ✅ **UPDATED:** Fail2ban recommended approach
+- **Phase 1.1:** Failed registration tracking (database + logging) ✅ **COMPLETE**
+- **Phase 1.2:** Registration status tracking ❌ **DEFERRED - LOW VALUE** (see analysis above)
+- **Phase 2.2:** Brute Force Detection ✅ **COMPLETED:** Fail2ban integration implemented
 - **Phase 2.3:** Flood detection ✅ **UPDATED:** Pike module with event_route (recommended method)
 - **Phase 3.1:** Security event logging
 - **Phase 3.3:** Statistics & reporting
@@ -837,14 +949,15 @@ This ensures we use modules correctly and don't miss important features or best 
 1. ✅ Complete module research (already done)
 2. ✅ Test pike module (POC) - **COMPLETE**
 3. ⏸️ Test ratelimit module (POC) - **DEFERRED** (moved down priority list)
-4. 🔍 Test permissions module (POC)
+4. ✅ Permissions module research - **COMPLETE** (deferred, not needed right now)
 5. ✅ Document architecture decisions
 
 ### Weeks 2-3: Foundation (High Confidence)
-1. ✅ Create database tables (failed_registrations, registration_status)
-2. ✅ Add failed registration logging
-3. ✅ Add registration status tracking
+1. ✅ Create database tables (failed_registrations, door_knock_attempts)
+2. ✅ Add failed registration logging (403 and other failures, excluding 401)
+3. ✅ Add door-knock attempt logging (unknown domains, scanners, method not allowed, etc.)
 4. ✅ Test and verify logging works
+5. ❌ **SKIPPED:** Registration status tracking (low value - see `docs/PHASE-1.2-DEFERRED-ANALYSIS.md`)
 
 ### Weeks 4-5: Rate Limiting (Mixed Confidence)
 1. ⏸️ Test ratelimit module OR implement custom rate limiting - **DEFERRED** (moved down priority list)
