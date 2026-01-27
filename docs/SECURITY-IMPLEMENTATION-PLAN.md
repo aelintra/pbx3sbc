@@ -83,26 +83,25 @@ This ensures we use modules correctly and don't miss important features or best 
 
 **Remaining Tasks:**
 
-#### Task 0.1.1: Test Pike Module ⚠️ **MEDIUM CONFIDENCE**
+#### Task 0.1.1: Test Pike Module ✅ **COMPLETE**
 - **What:** Load and test `pike` module in test environment
 - **Why:** Verify flood detection capabilities and performance impact
-- **Confidence:** ⚠️ Medium - Need to test actual behavior
-- **Research Needed:**
-  - Performance impact on request processing
-  - Configuration parameters and thresholds
-  - Integration with MySQL database (if possible)
-  - Event emission for monitoring
-- **Deliverable:** POC test results and configuration examples
+- **Status:** ✅ **COMPLETE** - Module tested and merged to main
+- **Results:** Pike module is working without disruption, benign behavior confirmed
+- **Deliverable:** ✅ POC test results and configuration examples (see `docs/PHASE-0-PIKE-RESULTS.md`)
 
-#### Task 0.1.2: Test Ratelimit Module ⚠️ **MEDIUM CONFIDENCE**
+#### Task 0.1.2: Test Ratelimit Module ⏸️ **DEFERRED**
 - **What:** Load and test `ratelimit` module
 - **Why:** Verify rate limiting capabilities and algorithm options
-- **Confidence:** ⚠️ Medium - Need to test actual behavior
+- **Status:** ⏸️ **DEFERRED** - Moved down priority list
+- **Reason:** Need to better understand module API and implications in live system before implementation
 - **Research Needed:**
+  - Module API documentation review (actual parameters and functions)
   - Algorithm selection (TAILDROP, RED, etc.)
   - Per-method rate limiting configuration
   - Per-IP vs per-user rate limiting
   - Performance impact
+  - Live system implications
   - Integration with MySQL for persistence
 - **Deliverable:** POC test results and configuration examples
 
@@ -281,22 +280,31 @@ This ensures we use modules correctly and don't miss important features or best 
 
 ## Phase 2: Rate Limiting & Attack Mitigation (Weeks 4-5)
 
-### 2.1 IP-Based Rate Limiting 🔍 **NEEDS RESEARCH**
+### 2.1 IP-Based Rate Limiting ⏸️ **DEFERRED**
 
 **Objective:** Limit requests per IP address
 
+**Status:** ⏸️ **DEFERRED** - Moved down priority list pending better understanding of module API and live system implications.
+
 **⚠️ STANDARD APPROACH FIRST:** Always test standard OpenSIPS modules before building custom solutions.
 
-#### Option A: Use Ratelimit Module ✅ **PREFERRED - STANDARD APPROACH**
+#### Option A: Use Ratelimit Module ⏸️ **DEFERRED - NEEDS DOCUMENTATION REVIEW**
 - **What:** Load and configure `ratelimit` module (standard OpenSIPS module)
-- **Confidence:** 🔍 Needs Research - Need to test module behavior
+- **Status:** ⏸️ **DEFERRED** - Module API needs proper documentation review before implementation
 - **Why Preferred:** Standard OpenSIPS module, community-tested, maintained, optimized
+- **Why Deferred:** 
+  - Module API differs from assumptions (parameters don't match expected)
+  - Need to review official documentation thoroughly before implementation
+  - Want to understand live system implications before deploying
 - **Research Needed:**
-  - Module configuration parameters
+  - **CRITICAL:** Review official module documentation at https://opensips.org/html/docs/modules/3.6.x/ratelimit.html
+  - Module configuration parameters (actual API)
+  - Function syntax and parameters (actual API)
   - Rate limit algorithm selection (TAILDROP, RED, etc.)
   - Per-IP rate limiting setup
   - Performance impact
   - Integration with MySQL for persistence (if needed)
+  - Live system implications
 - **Pros:** Built-in, well-tested, efficient, community-maintained, follows OpenSIPS best practices
 - **Cons:** Need to learn module API (but worth it to avoid technical debt)
 - **Decision Criteria:** Use this if it meets majority/all requirements
@@ -826,8 +834,8 @@ This ensures we use modules correctly and don't miss important features or best 
 
 ### Week 1: Research Phase
 1. ✅ Complete module research (already done)
-2. 🔍 Test pike module (POC)
-3. 🔍 Test ratelimit module (POC)
+2. ✅ Test pike module (POC) - **COMPLETE**
+3. ⏸️ Test ratelimit module (POC) - **DEFERRED** (moved down priority list)
 4. 🔍 Test permissions module (POC)
 5. ✅ Document architecture decisions
 
@@ -838,9 +846,9 @@ This ensures we use modules correctly and don't miss important features or best 
 4. ✅ Test and verify logging works
 
 ### Weeks 4-5: Rate Limiting (Mixed Confidence)
-1. 🔍 Test ratelimit module OR implement custom rate limiting
+1. ⏸️ Test ratelimit module OR implement custom rate limiting - **DEFERRED** (moved down priority list)
 2. ✅ Implement registration-specific rate limiting
-3. 🔍 Configure pike module for flood detection
+3. ✅ Configure pike module for flood detection - **COMPLETE** (merged to main)
 4. ✅ Create brute force detection
 
 ### Weeks 6-7: Monitoring (High Confidence)
@@ -865,8 +873,8 @@ This ensures we use modules correctly and don't miss important features or best 
 ## Key Research Areas
 
 ### Critical Research Needed:
-1. **Pike Module:** Flood detection configuration and performance
-2. **Ratelimit Module:** Rate limiting algorithms and configuration
+1. ✅ **Pike Module:** Flood detection configuration and performance - **COMPLETE**
+2. ⏸️ **Ratelimit Module:** Rate limiting algorithms and configuration - **DEFERRED** (moved down priority list)
 3. **Permissions Module:** Database schema and performance
 4. **AVP Persistence:** Verify AVPs persist to onreply_route
 5. **Alert Integration:** How to call external scripts from OpenSIPS
