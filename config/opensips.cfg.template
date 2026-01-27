@@ -1118,6 +1118,11 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     $var(domain_detection_success) = 0;
     
     # Step 1: Find dispatcher setid for this source IP
+    # NOTE: The dispatcher module provides ds_select_dst() for forward lookup (setid → destination)
+    # but does NOT provide reverse lookup functions (IP → setid). This custom SQL query is necessary
+    # for multi-tenant scenarios where we need to determine which domain/tenant a request belongs to
+    # based on which Asterisk server (dispatcher destination) sent it.
+    # Refer to docs/DISPATCHER-REVERSE-LOOKUP-RESEARCH.md for detailed justification.
     # Dispatcher destinations are stored as "sip:IP:port" (e.g., "sip:10.0.1.10:5060")
     # We match the IP part using LIKE with proper delimiters to avoid substring matches
     # Match pattern: sip:IP: or sip:IP followed by end of string
@@ -1182,7 +1187,8 @@ route[CHECK_NAT_ENVIRONMENT] {
 # Check if source IP is from Asterisk (dispatcher destination)
 # Input: $si - Source IP (automatically available)
 # Output: $var(is_from_asterisk) - 1 if from Asterisk, 0 if not
-# Uses dispatcher table to determine if source IP matches any dispatcher destination
+# NOTE: Uses custom SQL query because dispatcher module doesn't provide reverse lookup functions.
+# Refer to docs/DISPATCHER-REVERSE-LOOKUP-RESEARCH.md for detailed justification.
 route[CHECK_IS_FROM_ASTERISK] {
     $var(is_from_asterisk) = 0;
     $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";

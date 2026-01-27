@@ -137,7 +137,7 @@ if (sql_query($var(query_remove_prefix), "$avp(nat_no_prefix)")) {
 
 **Current Implementation:**
 ```opensips
-# Line ~1195: Custom SQL to find dispatcher setid from source IP
+# Line ~1125: Custom SQL to find dispatcher setid from source IP
 $var(query) = "SELECT setid FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
 if (!sql_query($var(query), "$avp(source_setid)")) {
     # ...
@@ -145,15 +145,22 @@ if (!sql_query($var(query), "$avp(source_setid)")) {
 ```
 
 **Standard Approach Available:**
-- Dispatcher module may have functions to query by destination
-- Check dispatcher module documentation for reverse lookups
+- Dispatcher module provides `ds_select_dst()` for forward lookup (setid → destination)
+- Dispatcher module does NOT provide reverse lookup functions (IP → setid)
+
+**Research Completed:** ✅ See `docs/DISPATCHER-REVERSE-LOOKUP-RESEARCH.md`
+
+**Findings:**
+- Dispatcher module has no reverse lookup functions
+- Module is designed for forward routing, not reverse queries
+- Custom SQL is necessary for multi-tenant edge case (determining domain from Asterisk source IP)
 
 **Recommendation:**
-- 🔍 **Research:** Check dispatcher module for reverse lookup functions
-- If available, replace custom SQL with standard function
-- If not available, document why custom SQL is needed
+- ✅ **Keep custom SQL** - Justified given dispatcher module limitations
+- ✅ **Add code comments** - Document why SQL is needed
+- ✅ **Acceptable approach** - Simple, efficient, and appropriate for this use case
 
-**Impact:** Low - Custom SQL is simple and works
+**Impact:** Low - Custom SQL is simple, efficient, and justified
 
 ---
 
@@ -194,9 +201,9 @@ if ($ua =~ "sipvicious|friendly-scanner|sipcli|nmap") {
 - Scanner detection: Custom pattern matching ✅ (no standard module exists)
 
 ### 🔍 Needs Research (Could Use Standard Functions)
-- Domain lookups: Custom SQL - check domain module functions
-- NAT IP extraction: Custom regex/SQL - check sipmsgops/nathelper functions
-- Dispatcher reverse lookup: Custom SQL - check dispatcher module functions
+- ~~Domain lookups: Custom SQL~~ ✅ **RESOLVED** - Keep custom SQL (justified)
+- ~~NAT IP extraction: Custom regex/SQL~~ ✅ **RESOLVED** - Refactored to standard transformations
+- ~~Dispatcher reverse lookup: Custom SQL~~ ✅ **RESOLVED** - Keep custom SQL (justified)
 
 ---
 
