@@ -105,16 +105,17 @@ This ensures we use modules correctly and don't miss important features or best 
   - Integration with MySQL for persistence
 - **Deliverable:** POC test results and configuration examples
 
-#### Task 0.1.3: Test Permissions Module ⚠️ **MEDIUM CONFIDENCE**
+#### Task 0.1.3: Test Permissions Module ⏸️ **RESEARCH COMPLETE - DEFERRED**
 - **What:** Load and test `permissions` module for IP blocking
 - **Why:** Evaluate as replacement for missing `ipban` module
-- **Confidence:** ⚠️ Medium - Need to test database-backed ACLs
-- **Research Needed:**
-  - Database schema for permissions module
-  - Performance of database lookups
-  - Multi-tenant support
-  - Whitelist/blacklist management
-- **Deliverable:** POC test results and schema examples
+- **Status:** ⏸️ **RESEARCH COMPLETE - DEFERRED** (not needed right now)
+- **Research Completed:**
+  - ✅ Database schema verified from documentation (`address` table)
+  - ✅ API verified (`check_source_address()`, `check_address()`, etc.)
+  - ✅ Modparam parameters verified (`address_table`, `db_url`, etc.)
+  - ✅ Behavior understood: IP-based ACL system similar to hosts.allow/deny
+- **Finding:** This is an IP-based ACL system (like hosts.allow/deny), useful for future but not needed now
+- **Deliverable:** ✅ Research document complete (see `docs/PHASE-0-PERMISSIONS-RESEARCH.md`)
 
 #### Task 0.1.4: Architecture Decision Document ✅ **HIGH CONFIDENCE**
 - **What:** Document decisions on module usage vs custom implementation
