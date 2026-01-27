@@ -114,22 +114,33 @@ modparam("acc", "extra_fields", "db:from_uri->from_uri;to_uri->to_uri")
 
 # --- User location module (usrloc migration) ---
 modparam("usrloc", "db_url", "mysql://opensips:your-password@localhost/opensips")
-# db_mode: 0 = memory only, 1 = DB only (write-through), 2 = cached DB
-# Using db_mode=1 (write-through) ensures save() writes to DB immediately, allowing SQL UPDATE to work right away
-# This solves the issue where SQL UPDATE fails with db_mode=2 because record is still in memory
+# working_mode_preset: Pre-configured modes for single-instance or clustered setups
+# single-instance-sql-write-through: Writes to database immediately (high reliability, slower performance)
+# This ensures save() writes to DB immediately, allowing SQL UPDATE to work right away
+# This solves the issue where cached modes might have records still in memory
 # Trade-off: Slower performance under high load (every operation hits DB)
-modparam("usrloc", "db_mode", 1)
+# Note: db_mode is deprecated in OpenSIPS 3.6+, use working_mode_preset instead
+# Other options: single-instance-no-db (memory only), single-instance-sql-write-back (cached),
+#                sql-only (no memory cache), full-sharing-cluster (clustering)
+modparam("usrloc", "working_mode_preset", "single-instance-sql-write-through")
 # use_domain: 1 = domain-aware (REQUIRED for multi-tenant - allows same username across domains)
 modparam("usrloc", "use_domain", 1)
 # nat_bflag: Flag name for NAT detection (used with nathelper module)
 modparam("usrloc", "nat_bflag", "NAT")
 # timer_interval: How often to flush cached contacts to DB (seconds, default 60)
-# Note: With db_mode=1, this parameter is not used (writes go directly to DB)
+# Note: With working_mode_preset=single-instance-sql-write-through, this parameter is not used (writes go directly to DB)
 # Keeping it for compatibility, but it has no effect in write-through mode
 modparam("usrloc", "timer_interval", 10)
 # regen_broken_contactid: Regenerate invalid/broken contact_id values on startup
 # This fixes contact_id values that are out of range or invalid (e.g., from schema migration)
 modparam("usrloc", "regen_broken_contactid", 1)
+
+# --- NAT Helper module (NAT traversal) ---
+# received_avp: AVP name where nathelper stores the received IP:port from REGISTER requests
+# This must match the received_avp in registrar module for proxy-registrar mode to work
+# fix_nated_register() populates this AVP with the endpoint's public NAT IP:port
+# Format: The AVP will contain IP:port (e.g., 74.83.23.44:5060), which we convert to SIP URI format
+modparam("nathelper", "received_avp", "$avp(reg_received)")
 
 # --- Registrar module (provides save() and lookup() functions) ---
 # mcontact_avp: AVP name where registrar module stores modified Contact from main registrar's 200 OK reply
@@ -137,6 +148,14 @@ modparam("usrloc", "regen_broken_contactid", 1)
 # This allows save() in onreply_route to use the modified Contact (if reply Contact is modified)
 # NOTE: If reply Contact is <null> or missing, save() cannot extract contact info and will fail
 modparam("registrar", "mcontact_avp", "$avp(mcontact)")
+
+# received_avp: AVP name containing the SIP URI to populate the 'received' field in location table
+# In proxy-registrar mode, save() uses this AVP to populate the received column automatically
+# This MUST match the received_avp in nathelper module (both use $avp(reg_received))
+# The AVP should contain a SIP URI format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
+# This is critical for NAT traversal - allows lookup() to route OPTIONS/NOTIFY to endpoints behind NAT
+# fix_nated_register() populates the AVP, but we convert it to SIP URI format for registrar module
+modparam("registrar", "received_avp", "$avp(reg_received)")
 
 # --- Domain module (multi-tenant support) ---
 modparam("domain", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -204,6 +223,10 @@ modparam("prometheus", "statistics", "acc:")
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
 # restart_fr_on_each_reply: reset final response timer on each provisional response
 modparam("tm", "restart_fr_on_each_reply", 1)
+# onreply_avp_mode: Enable AVP persistence across transaction boundaries for onreply_route
+# This is required for received_avp to be available in onreply_route when using proxy-registrar mode
+# Value 1 enables AVP persistence (AVPs set in request route are available in onreply_route)
+modparam("tm", "onreply_avp_mode", 1)
 # T1_timer: initial retransmission period (2 seconds = 2000ms)
 # Note: OpenSIPS uses T1_timer instead of retr_timer1
 modparam("tm", "T1_timer", 2000)
@@ -457,17 +480,29 @@ route {
                                         $var(extracted_ip) = "";
                                         $var(extracted_port) = "";
                                         
-                                        # Check if it's received field format (IP:port) or contact field format (sip:user@IP:port)
-                                        # received field format: 74.83.23.44:5060
-                                        if ($var(contact_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:") {
-                                            # received field - extract IP and port using SQL
-                                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', 1)";
-                                            if (sql_query($var(query_ip), "$avp(fallback_ip)")) {
-                                                $var(extracted_ip) = $(avp(fallback_ip)[0]);
-                                            }
-                                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', -1)";
-                                            if (sql_query($var(query_port), "$avp(fallback_port)")) {
-                                                $var(extracted_port) = $(avp(fallback_port)[0]);
+                                        # Check if it's received field format (sip:IP:port;transport=udp) or contact field format (sip:user@IP:port)
+                                        # received field format: sip:74.83.23.44:5060;transport=udp (no @ symbol)
+                                        # contact field format: sip:user@IP:port (has @ symbol)
+                                        if ($var(contact_value) =~ "^sip:" && $var(contact_value) !~ "@") {
+                                            # received field - SIP URI format: sip:IP:port;transport=udp
+                                            # Remove 'sip:' prefix, then extract IP and port
+                                            $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(contact_value) + "', 5)";
+                                            if (sql_query($var(query_remove_prefix), "$avp(fallback_no_prefix)")) {
+                                                $var(received_no_prefix) = $(avp(fallback_no_prefix)[0]);
+                                                # Extract IP (before first colon)
+                                                $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                                                if (sql_query($var(query_ip), "$avp(fallback_ip)")) {
+                                                    $var(extracted_ip) = $(avp(fallback_ip)[0]);
+                                                }
+                                                # Extract port (after colon, before semicolon or end)
+                                                $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
+                                                if (sql_query($var(query_port_part), "$avp(fallback_port_part)")) {
+                                                    $var(port_with_transport) = $(avp(fallback_port_part)[0]);
+                                                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
+                                                    if (sql_query($var(query_port), "$avp(fallback_port)")) {
+                                                        $var(extracted_port) = $(avp(fallback_port)[0]);
+                                                    }
+                                                }
                                             }
                                         } else if ($var(contact_value) =~ "^sip:") {
                                             # contact field format: sip:user@IP:port or sip:user@IP
@@ -561,6 +596,7 @@ route {
             
             # Fix NAT in REGISTER request (needed for proper Contact header handling)
             # This updates Contact header with public IP if behind NAT
+            # fix_nated_register() also populates $avp(reg_received) with IP:port format (via nathelper received_avp parameter)
             fix_nated_register();
             
             # Store original Contact header (with NAT fixes) in AVP for diagnostic purposes
@@ -570,13 +606,36 @@ route {
             $avp(reg_contact) = $hdr(Contact);
             
             # CRITICAL: Capture original request source IP:port for NAT traversal
-            # In onreply_route, $si:$sp will be the response source (Asterisk), not the original request source
-            # We need to preserve the endpoint's public NAT IP:port to populate the 'received' field
+            # fix_nated_register() may have populated $avp(reg_received) with IP:port format
+            # But registrar module expects SIP URI format: sip:IP:port;transport=udp
+            # Convert to SIP URI format if needed (check if it's already in SIP URI format or just IP:port)
+            $var(received_value) = "";
+            if ($avp(reg_received) != "" && $avp(reg_received) != "<null>") {
+                # fix_nated_register() may have populated it - check format
+                if ($avp(reg_received) =~ "^sip:") {
+                    # Already in SIP URI format - check if it has transport parameter
+                    if ($avp(reg_received) =~ ";transport=") {
+                        # Already has transport parameter - use as-is
+                        $var(received_value) = $avp(reg_received);
+                    } else {
+                        # Has sip: prefix but missing transport - add it
+                        $var(received_value) = $avp(reg_received) + ";transport=udp";
+                    }
+                } else {
+                    # IP:port format - convert to SIP URI
+                    $var(received_value) = "sip:" + $avp(reg_received) + ";transport=udp";
+                }
+            } else {
+                # Fallback: Use current source IP:port (shouldn't happen if fix_nated_register() worked)
+                $var(received_value) = "sip:" + $si + ":" + $sp + ";transport=udp";
+            }
+            
+            # Set AVP in SIP URI format for registrar module
             # Use transaction-scoped AVP (tu) to ensure it persists across transaction boundaries
-            $avp(tu:reg_received) = $si + ":" + $sp;
-            # Also set regular AVP as fallback
-            $avp(reg_received) = $si + ":" + $sp;
-            xlog("REGISTER: Captured original request source for received field: $avp(reg_received) (endpoint public NAT IP:port)\n");
+            $avp(tu:reg_received) = $var(received_value);
+            # Also set regular AVP (registrar module uses this via received_avp parameter)
+            $avp(reg_received) = $var(received_value);
+            xlog("REGISTER: Captured original request source for received field: $avp(reg_received) (endpoint public NAT IP:port as SIP URI)\n");
             
             # Arm reply handler to save location only on successful registration (2xx)
             # This follows OpenSIPS proxy-registrar pattern: save AFTER successful reply
@@ -695,19 +754,30 @@ route[DOMAIN_CHECK] {
                         xlog("INVITE: Destination contains private IP $var(dest_domain), checking received field for NAT traversal\n");
                         $var(query) = "SELECT received FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(domain_from_source) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                         if (sql_query($var(query), "$avp(invite_received)") && $(avp(invite_received)[0]) != "" && $(avp(invite_received)[0]) != "<null>") {
-                            # Extract IP:port from received field using SQL
+                            # Extract IP:port from received field (SIP URI format: sip:IP:port;transport=udp)
                             $var(received_value) = $(avp(invite_received)[0]);
                             $var(nat_ip) = "";
                             $var(nat_port) = "";
                             
-                            # Extract IP and port using SUBSTRING_INDEX
-                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', 1)";
-                            if (sql_query($var(query_ip), "$avp(invite_nat_ip)")) {
-                                $var(nat_ip) = $(avp(invite_nat_ip)[0]);
-                            }
-                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', -1)";
-                            if (sql_query($var(query_port), "$avp(invite_nat_port)")) {
-                                $var(nat_port) = $(avp(invite_nat_port)[0]);
+                            # received field is in SIP URI format: sip:IP:port;transport=udp
+                            # Remove 'sip:' prefix, then extract IP and port
+                            $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
+                            if (sql_query($var(query_remove_prefix), "$avp(invite_no_prefix)")) {
+                                $var(received_no_prefix) = $(avp(invite_no_prefix)[0]);
+                                # Extract IP (before first colon)
+                                $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                                if (sql_query($var(query_ip), "$avp(invite_nat_ip)")) {
+                                    $var(nat_ip) = $(avp(invite_nat_ip)[0]);
+                                }
+                                # Extract port (after colon, before semicolon or end)
+                                $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
+                                if (sql_query($var(query_port_part), "$avp(invite_port_part)")) {
+                                    $var(port_with_transport) = $(avp(invite_port_part)[0]);
+                                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
+                                    if (sql_query($var(query_port), "$avp(invite_nat_port)")) {
+                                        $var(nat_port) = $(avp(invite_nat_port)[0]);
+                                    }
+                                }
                             }
                             
                             # Validate and update destination
@@ -744,17 +814,29 @@ route[DOMAIN_CHECK] {
                     $var(extracted_ip) = "";
                     $var(extracted_port) = "";
                     
-                    # Check if it's received field format (IP:port) or contact field format (sip:user@IP:port)
-                    # received field format: 74.83.23.44:5060
-                    if ($var(contact_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:") {
-                        # received field - extract IP and port using SQL
-                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', 1)";
-                        if (sql_query($var(query_ip), "$avp(invite_ip)")) {
-                            $var(extracted_ip) = $(avp(invite_ip)[0]);
-                        }
-                        $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(contact_value) + "', ':', -1)";
-                        if (sql_query($var(query_port), "$avp(invite_port)")) {
-                            $var(extracted_port) = $(avp(invite_port)[0]);
+                    # Check if it's received field format (sip:IP:port;transport=udp) or contact field format (sip:user@IP:port)
+                    # received field format: sip:74.83.23.44:5060;transport=udp (no @ symbol)
+                    # contact field format: sip:user@IP:port (has @ symbol)
+                    if ($var(contact_value) =~ "^sip:" && $var(contact_value) !~ "@") {
+                        # received field - SIP URI format: sip:IP:port;transport=udp
+                        # Remove 'sip:' prefix, then extract IP and port
+                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(contact_value) + "', 5)";
+                        if (sql_query($var(query_remove_prefix), "$avp(invite_no_prefix)")) {
+                            $var(received_no_prefix) = $(avp(invite_no_prefix)[0]);
+                            # Extract IP (before first colon)
+                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                            if (sql_query($var(query_ip), "$avp(invite_ip)")) {
+                                $var(extracted_ip) = $(avp(invite_ip)[0]);
+                            }
+                            # Extract port (after colon, before semicolon or end)
+                            $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
+                            if (sql_query($var(query_port_part), "$avp(invite_port_part)")) {
+                                $var(port_with_transport) = $(avp(invite_port_part)[0]);
+                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
+                                if (sql_query($var(query_port), "$avp(invite_port)")) {
+                                    $var(extracted_port) = $(avp(invite_port)[0]);
+                                }
+                            }
                         }
                     } else if ($var(contact_value) =~ "^sip:") {
                         # contact field format: sip:user@IP:port or sip:user@IP
@@ -831,7 +913,12 @@ route[DOMAIN_CHECK] {
         xlog("L_WARN", "R-URI / To mismatch domain=$rd src=$si\n");
         exit;
     }
-
+    
+    # NOTE: We do NOT validate that the From endpoint is registered/not expired for outbound INVITEs
+    # Asterisk handles authentication and authorization - registration is primarily for incoming calls
+    # (so Asterisk knows where to send calls TO the endpoint). Outbound calls from expired endpoints
+    # are allowed if Asterisk authenticates and authorizes them.
+    
     # Lookup dispatcher set for this domain
     # Use domain.setid as the dispatcher setid (explicit mapping)
     $var(query) = "SELECT setid FROM domain WHERE domain='" + $var(domain) + "'";
@@ -926,28 +1013,31 @@ route[WITHINDLG] {
         # For ACK and PRACK requests, validate destination URI after loose_route()
         # loose_route() may not set $du correctly, causing ACKs to not be forwarded
         if (is_method("ACK|PRACK")) {
-            # If $du is empty or invalid, use Request-URI
+            # If $du is empty, null, or invalid, use Request-URI
             # ACK/PRACK should use Request-URI as fallback since they're in-dialog requests
-            if ($du == "" || $du == "0") {
+            # Note: In OpenSIPS, core variables like $du use empty string ("") for null/empty values
+            # Save original $du value for logging
+            $var(original_du) = $du;
+            # Check for empty, null, or invalid format first
+            if ($du == "" || $du == "0" || $du !~ "^sip:") {
                 $du = $ru;
-                xlog("ACK/PRACK: loose_route() set empty destination, using Request-URI: $du\n");
-            } else {
-                # Validate $du is a valid SIP URI format
-                if ($du !~ "^sip:") {
-                    xlog("L_WARN", "ACK/PRACK: loose_route() set invalid destination format: $du, using Request-URI: $ru\n");
-                    $du = $ru;
+                if ($var(original_du) == "" || $var(original_du) == "0") {
+                    xlog("ACK/PRACK: loose_route() set empty/null destination, using Request-URI: $du\n");
                 } else {
-                    xlog("ACK/PRACK: loose_route() set destination to: $du\n");
+                    xlog("ACK/PRACK: loose_route() set invalid destination format ($var(original_du)), using Request-URI: $du\n");
                 }
+            } else {
+                xlog("ACK/PRACK: loose_route() set destination to: $du\n");
             }
         }
         
         # For BYE requests, validate destination URI after loose_route()
         # loose_route() may set $du to a domain that can't be resolved, causing 476 errors
         if (is_method("BYE")) {
-            # If $du is empty or appears invalid, try to extract from Request-URI
+            # If $du is empty, null, or appears invalid, try to extract from Request-URI
+            # Note: In OpenSIPS, core variables like $du use empty string ("") for null/empty values
             if ($du == "" || $du == "0") {
-                xlog("L_WARN", "BYE: loose_route() set empty destination, using Request-URI: $ru\n");
+                xlog("L_WARN", "BYE: loose_route() set empty/null destination, using Request-URI: $ru\n");
                 $du = $ru;
             } else {
                 # Log what loose_route() set as destination for debugging
@@ -1269,45 +1359,58 @@ route[RELAY] {
                 
                 if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
                     # Domain-specific lookup (preferred for multi-tenant)
-                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    # For in-dialog requests (BYE), use most recent registration even if slightly expired
+                    # This handles cases where registration expires during an active call
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' ORDER BY expires DESC LIMIT 1";
                 } else {
                     # Fallback: username-only lookup (wildcard)
-                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    # For in-dialog requests (BYE), use most recent registration even if slightly expired
+                    $var(query) = "SELECT received FROM location WHERE username='" + $var(nat_lookup_user) + "' ORDER BY expires DESC LIMIT 1";
                 }
                 
                 # Try received field first (NAT traversal)
-                if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "") {
-                    # received field contains IP:port from NAT traversal (e.g., 74.83.23.44:5060)
-                    # Extract IP and port using regex - OpenSIPS requires separate matches for IP and port
+                if (sql_query($var(query), "$avp(nat_received)") && $(avp(nat_received)[0]) != "" && $(avp(nat_received)[0]) != "<null>") {
+                    # received field contains SIP URI format from NAT traversal (e.g., sip:74.83.23.44:5060;transport=udp)
+                    # Extract IP and port from the SIP URI format
                     $var(nat_ip) = "";
                     $var(nat_port) = "";
                     $var(received_value) = $(avp(nat_received)[0]);
                     xlog("RELAY: $rm - DEBUG - Extracting from received field: [$var(received_value)]\n");
                     
-                    # Use SQL SUBSTRING_INDEX directly (POSIX regex $re doesn't populate capturing groups reliably)
-                    # Format is always IP:port (e.g., 74.83.23.44:5060)
-                    # SUBSTRING_INDEX(string, delimiter, count):
-                    #   count > 0: returns substring before the Nth occurrence of delimiter
-                    #   count < 0: returns substring after the Nth occurrence from the end
-                    $var(nat_ip) = "";
-                    $var(nat_port) = "";
-                    
-                    # Extract IP part (everything before first colon)
-                    $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', 1)";
-                    if (sql_query($var(query_ip), "$avp(nat_ip_extracted)")) {
-                        $var(nat_ip) = $(avp(nat_ip_extracted)[0]);
-                        xlog("RELAY: $rm - DEBUG - SQL extracted IP: [$var(nat_ip)]\n");
+                    # Validate that received_value is a valid SIP URI (not NULL or empty)
+                    if ($var(received_value) =~ "^sip:") {
+                        # received field is in SIP URI format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
+                        # We need to extract IP and port from the URI
+                        # Format: sip:IP:port;transport=udp
+                        # Strategy: Remove 'sip:' prefix, then extract IP (before ':') and port (between ':' and ';' or end)
+                        
+                        # Step 1: Remove 'sip:' prefix to get IP:port;transport=udp
+                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
+                        if (sql_query($var(query_remove_prefix), "$avp(nat_no_prefix)")) {
+                        $var(received_no_prefix) = $(avp(nat_no_prefix)[0]);
+                        # Step 2: Extract IP (everything before the colon after sip:)
+                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                        if (sql_query($var(query_ip), "$avp(nat_ip_extracted)")) {
+                            $var(nat_ip) = $(avp(nat_ip_extracted)[0]);
+                            xlog("RELAY: $rm - DEBUG - SQL extracted IP: [$var(nat_ip)]\n");
+                        }
+                        # Step 3: Extract port (between ':' and ';' or end of string)
+                        # First get everything after the first ':', then get everything before ';' or end
+                        $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
+                        if (sql_query($var(query_port_part), "$avp(nat_port_part)")) {
+                            $var(port_with_transport) = $(avp(nat_port_part)[0]);
+                            # Remove ';transport=udp' part if present
+                            $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
+                            if (sql_query($var(query_port), "$avp(nat_port_extracted)")) {
+                                $var(nat_port) = $(avp(nat_port_extracted)[0]);
+                                xlog("RELAY: $rm - DEBUG - SQL extracted port: [$var(nat_port)]\n");
+                            }
+                        }
+                        } else {
+                            xlog("L_WARN", "RELAY: $rm - DEBUG - SQL URI prefix removal failed for: [$var(received_value)]\n");
+                        }
                     } else {
-                        xlog("L_WARN", "RELAY: $rm - DEBUG - SQL IP extraction query failed for: [$var(received_value)]\n");
-                    }
-                    
-                    # Extract port part (everything after last colon)
-                    $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', -1)";
-                    if (sql_query($var(query_port), "$avp(nat_port_extracted)")) {
-                        $var(nat_port) = $(avp(nat_port_extracted)[0]);
-                        xlog("RELAY: $rm - DEBUG - SQL extracted port: [$var(nat_port)]\n");
-                    } else {
-                        xlog("L_WARN", "RELAY: $rm - DEBUG - SQL port extraction query failed for: [$var(received_value)]\n");
+                        xlog("L_WARN", "RELAY: $rm - DEBUG - received field is not a valid SIP URI format: [$var(received_value)]\n");
                     }
                     
                     xlog("RELAY: $rm - DEBUG - Final extraction result: IP=[$var(nat_ip)], Port=[$var(nat_port)]\n");
@@ -1325,9 +1428,11 @@ route[RELAY] {
                 # Fallback to contact field if received not available
                 if ($var(nat_contact_found) == 0) {
                     if ($var(nat_lookup_domain) != "" && $var(nat_lookup_domain) !~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                        # For in-dialog requests (BYE), use most recent registration even if slightly expired
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND domain='" + $var(nat_lookup_domain) + "' ORDER BY expires DESC LIMIT 1";
                     } else {
-                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                        # For in-dialog requests (BYE), use most recent registration even if slightly expired
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(nat_lookup_user) + "' ORDER BY expires DESC LIMIT 1";
                     }
                     
                     if (sql_query($var(query), "$avp(nat_contact)") && $(avp(nat_contact)[0]) != "") {
@@ -1389,9 +1494,10 @@ route[RELAY] {
         }
         
         # Validate destination URI (WITHINDLG already validated, but double-check for safety)
+        # Note: In OpenSIPS, core variables like $du use empty string ("") for null/empty values
         if ($du == "" || $du == "0" || $du !~ "^sip:") {
             $du = $ru;
-            xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty/invalid)\n");
+            xlog("RELAY: $rm - Set destination URI from Request-URI: $du (was empty/null/invalid)\n");
         }
         
         xlog("RELAY: $rm - Attempting to relay to $du (Request-URI=$ru, Route=$hdr(Route), From=$si)\n");
@@ -1526,19 +1632,30 @@ onreply_route {
                 $var(query) = "SELECT received FROM location WHERE username='" + $var(contact_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                 if (sql_query($var(query), "$avp(contact_received)")) {
                     if ($(avp(contact_received)[0]) != "" && $(avp(contact_received)[0]) != "<null>") {
-                        # Extract IP:port from received field
+                        # Extract IP:port from received field (SIP URI format: sip:IP:port;transport=udp)
                         $var(received_value) = $(avp(contact_received)[0]);
                         $var(nat_ip) = "";
                         $var(nat_port) = "";
                         
-                        # Extract IP and port using SQL SUBSTRING_INDEX
-                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', 1)";
-                        if (sql_query($var(query_ip), "$avp(contact_nat_ip)")) {
-                            $var(nat_ip) = $(avp(contact_nat_ip)[0]);
-                        }
-                        $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(received_value) + "', ':', -1)";
-                        if (sql_query($var(query_port), "$avp(contact_nat_port)")) {
-                            $var(nat_port) = $(avp(contact_nat_port)[0]);
+                        # received field is in SIP URI format: sip:IP:port;transport=udp
+                        # Remove 'sip:' prefix, then extract IP and port
+                        $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
+                        if (sql_query($var(query_remove_prefix), "$avp(contact_no_prefix)")) {
+                            $var(received_no_prefix) = $(avp(contact_no_prefix)[0]);
+                            # Extract IP (before first colon)
+                            $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                            if (sql_query($var(query_ip), "$avp(contact_nat_ip)")) {
+                                $var(nat_ip) = $(avp(contact_nat_ip)[0]);
+                            }
+                            # Extract port (after colon, before semicolon or end)
+                            $var(query_port_part) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', -1)";
+                            if (sql_query($var(query_port_part), "$avp(contact_port_part)")) {
+                                $var(port_with_transport) = $(avp(contact_port_part)[0]);
+                                $var(query_port) = "SELECT SUBSTRING_INDEX('" + $var(port_with_transport) + "', ';', 1)";
+                                if (sql_query($var(query_port), "$avp(contact_nat_port)")) {
+                                    $var(nat_port) = $(avp(contact_nat_port)[0]);
+                                }
+                            }
                         }
                         
                         # Validate and construct new Contact header
@@ -1650,28 +1767,83 @@ onreply_route {
         
         # Also check the caller's endpoint IP
         if ($var(from_user) != "") {
-            $var(query) = "SELECT received FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            # Extract domain from From header for domain-specific lookup (multi-tenant safety)
+            $var(from_domain) = $(fu{uri.domain});
+            xlog("Caller lookup: user=$var(from_user), domain from From header=$var(from_domain)\n");
+            
+            # Check if From header domain is an IP address (not a domain name)
+            # If domain is IP or empty, use username-only lookup (endpoint may have registered with different domain)
+            # Note: For diagnostic logging, we don't check expires - we want to see the caller's IP even if registration expired
+            if ($var(from_domain) == "" || $var(from_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                # Username-only lookup (when domain is IP or empty)
+                $var(query) = "SELECT received FROM location WHERE username='" + $var(from_user) + "' ORDER BY expires DESC LIMIT 1";
+                xlog("Caller lookup: Using username-only query (domain is IP or empty)\n");
+            } else {
+                # Domain-specific lookup (preferred for multi-tenant when domain is valid)
+                $var(query) = "SELECT received FROM location WHERE username='" + $var(from_user) + "' AND domain='" + $var(from_domain) + "' ORDER BY expires DESC LIMIT 1";
+                xlog("Caller lookup: Using domain-specific query (domain=$var(from_domain))\n");
+            }
+            
             if (sql_query($var(query), "$avp(caller_received)")) {
-                if ($(avp(caller_received)[0]) != "") {
-                    # received field contains IP:port
-                    if ($(avp(caller_received)[0]) =~ "^([^:]+)") {
-                        $var(caller_ip) = $re;
-                        xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user))\n");
+                # Log the raw query result for debugging
+                xlog("Caller lookup: SQL query executed, AVP value: [$(avp(caller_received)[0])] (user=$var(from_user), domain=$var(from_domain))\n");
+                # Check if AVP has a valid value (not empty and not NULL from database)
+                # Note: AVPs from database queries return "<null>" string when database value is NULL
+                # Also, if no rows match, the AVP will be empty
+                if ($(avp(caller_received)[0]) != "" && $(avp(caller_received)[0]) != "<null>") {
+                    # received field contains SIP URI format: sip:IP:port;transport=udp (e.g., sip:74.83.23.44:5060;transport=udp)
+                    # Use SQL SUBSTRING_INDEX for extraction (consistent with codebase pattern)
+                    $var(received_value) = $(avp(caller_received)[0]);
+                    # Remove 'sip:' prefix, then extract IP
+                    $var(query_remove_prefix) = "SELECT SUBSTRING('" + $var(received_value) + "', 5)";
+                    if (sql_query($var(query_remove_prefix), "$avp(caller_no_prefix)")) {
+                        $var(received_no_prefix) = $(avp(caller_no_prefix)[0]);
+                        # Extract IP part (everything before first colon)
+                        $var(query_ip) = "SELECT SUBSTRING_INDEX('" + $var(received_no_prefix) + "', ':', 1)";
+                        if (sql_query($var(query_ip), "$avp(caller_ip_extracted)")) {
+                            $var(caller_ip) = $(avp(caller_ip_extracted)[0]);
+                            if ($var(caller_ip) != "" && $var(caller_ip) != "<null>") {
+                                xlog("Caller endpoint IP from location table (received): $var(caller_ip) (user=$var(from_user), extracted from: $var(received_value))\n");
+                            } else {
+                                xlog("L_WARN", "Caller lookup: IP extraction returned empty/null: [$var(caller_ip)] from [$var(received_value)] (user=$var(from_user))\n");
+                            }
+                        } else {
+                            xlog("L_WARN", "Caller lookup: SQL IP extraction query failed for: [$var(received_value)] (user=$var(from_user))\n");
+                        }
+                    } else {
+                        xlog("L_WARN", "Caller lookup: SQL URI prefix removal failed for: [$var(received_value)] (user=$var(from_user))\n");
                     }
                 } else {
+                    # received field is empty or NULL - log for debugging
+                    xlog("L_WARN", "Caller lookup: received field is empty or NULL for user=$var(from_user), domain=$var(from_domain), query result: [$(avp(caller_received)[0])], falling back to contact field\n");
                     # Fallback to contact field
-                    $var(query) = "SELECT contact FROM location WHERE username='" + $var(from_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                    # Note: For diagnostic logging, we don't check expires - we want to see the caller's contact even if registration expired
+                    if ($var(from_domain) == "" || $var(from_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        # Username-only lookup (when domain is IP or empty)
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(from_user) + "' ORDER BY expires DESC LIMIT 1";
+                    } else {
+                        # Domain-specific lookup (preferred for multi-tenant when domain is valid)
+                        $var(query) = "SELECT contact FROM location WHERE username='" + $var(from_user) + "' AND domain='" + $var(from_domain) + "' ORDER BY expires DESC LIMIT 1";
+                    }
                     if (sql_query($var(query), "$avp(caller_contact)")) {
-                        if ($(avp(caller_contact)[0]) != "") {
+                        # Check if AVP has a valid value (not empty and not NULL from database)
+                        # Note: AVPs from database queries return "<null>" string when database value is NULL
+                        if ($(avp(caller_contact)[0]) != "" && $(avp(caller_contact)[0]) != "<null>") {
                             $var(contact_uri) = $(avp(caller_contact)[0]);
                             # Extract IP from contact: sip:user@ip:port
                             if ($var(contact_uri) =~ "@([^:>]+)") {
                                 $var(caller_ip) = $re;
                                 xlog("Caller endpoint IP from location table (contact): $var(caller_ip) (user=$var(from_user))\n");
                             }
+                        } else {
+                            xlog("L_WARN", "Caller lookup: contact field is empty or NULL for user=$var(from_user), domain=$var(from_domain)\n");
                         }
+                    } else {
+                        xlog("L_WARN", "Caller lookup: SQL query failed for user=$var(from_user), domain=$var(from_domain)\n");
                     }
                 }
+            } else {
+                xlog("L_WARN", "Caller lookup: SQL query failed for user=$var(from_user), domain=$var(from_domain)\n");
             }
         }
     }
@@ -1714,6 +1886,32 @@ onreply_route[handle_reply_reg] {
             xlog("REGISTER: Modified Contact AVP (from registrar module): [$avp(mcontact)]\n");
             xlog("REGISTER: Source IP:Port: $si:$sp\n");
             xlog("REGISTER: Call-ID: $hdr(Call-ID)\n");
+            # CRITICAL: Check if received_avp AVP is available in onreply_route
+            xlog("REGISTER: DEBUG - AVP reg_received (for received_avp): [$avp(reg_received)]\n");
+            xlog("REGISTER: DEBUG - AVP tu:reg_received (transaction-scoped): [$avp(tu:reg_received)]\n");
+            xlog("REGISTER: DEBUG - If received_avp parameter is working, save() should use: $avp(reg_received)\n");
+            
+            # Check if this is a deregistration (Expires: 0)
+            # REGISTER with Expires: 0 means the endpoint wants to unregister
+            # save() will delete the contact from the location table
+            # NOTE: This is a common SIP pattern - many phones (including Yealink) deregister
+            #       before re-registering. The sequence is:
+            #       1. REGISTER with Expires: 0 (deregister) - deletes contact
+            #       2. REGISTER with normal Expires (re-register) - creates new contact
+            #       This code handles both cases correctly.
+            $var(is_deregister) = 0;
+            if ($hdr(Expires) == "0" || $hdr(Expires) == "0\r\n") {
+                $var(is_deregister) = 1;
+                xlog("REGISTER: DETECTED DEREGISTRATION (Expires: 0) for $tU@$(tu{uri.domain})\n");
+                xlog("REGISTER: save() will DELETE the contact from location table\n");
+            } else {
+                # Check Contact header expires parameter (format: Contact: <sip:user@ip>;expires=0)
+                if ($hdr(Contact) =~ ";expires=0[;>]") {
+                    $var(is_deregister) = 1;
+                    xlog("REGISTER: DETECTED DEREGISTRATION (Contact expires=0) for $tU@$(tu{uri.domain})\n");
+                    xlog("REGISTER: save() will DELETE the contact from location table\n");
+                }
+            }
             
             # Check if Contact is actually null/empty
             # CRITICAL: save() extracts contact from the REPLY, not the request
@@ -1757,174 +1955,144 @@ onreply_route[handle_reply_reg] {
             
             if (save("location")) {
                 $var(endpoint_aor) = $tU + "@" + $(tu{uri.domain});
-                xlog("REGISTER: save(\"location\") returned TRUE for $var(endpoint_aor) (response $rs $rr)\n");
-                xlog("REGISTER: Note: With db_mode=1 (write-through), save() writes to DB immediately\n");
                 
-                # CRITICAL FIX: Manually populate 'received' field for NAT traversal
-                # save() should populate 'received' automatically, but it doesn't always work in proxy-registrar mode
-                # We captured the original request source IP:port in $avp(reg_received) before forwarding
-                # However, AVPs don't always persist to onreply_route, so we need a fallback approach
-                
-                # Try to get the value from AVP first (preferred method)
-                # Check transaction-scoped AVP first (tu:), then regular AVP
-                # Transaction-scoped AVPs persist across transaction boundaries
-                $var(has_received) = 0;
-                $var(received_value) = "";
-                
-                # Method 1: Try transaction-scoped AVP (tu:reg_received)
-                if ($avp(tu:reg_received) != "" && $avp(tu:reg_received) != "<null>") {
-                    $var(received_value) = $avp(tu:reg_received);
-                    xlog("REGISTER: DEBUG - AVP tu:reg_received (transaction-scoped): [$var(received_value)]\n");
-                    # Validate it's a valid IP:port format
-                    if ($var(received_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:[0-9]+$") {
-                        $var(has_received) = 1;
-                    }
-                }
-                
-                # Method 2: Try regular AVP if transaction-scoped AVP not available
-                if ($var(has_received) == 0 && $avp(reg_received) != "" && $avp(reg_received) != "<null>") {
-                    $var(received_value) = $avp(reg_received);
-                    xlog("REGISTER: DEBUG - AVP reg_received (direct): [$var(received_value)]\n");
-                    # Validate it's a valid IP:port format
-                    if ($var(received_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:[0-9]+$") {
-                        $var(has_received) = 1;
-                    }
-                }
-                
-                # Method 3: Try array-style access as fallback
-                if ($var(has_received) == 0) {
-                    if ($(avp(reg_received)[0]) != "" && $(avp(reg_received)[0]) != "<null>") {
-                        $var(received_value) = $(avp(reg_received)[0]);
-                        xlog("REGISTER: DEBUG - AVP reg_received (array): [$var(received_value)]\n");
-                        # Validate it's a valid IP:port format
-                        if ($var(received_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:[0-9]+$") {
-                            $var(has_received) = 1;
+                if ($var(is_deregister) == 1) {
+                    xlog("REGISTER: save(\"location\") returned TRUE for DEREGISTRATION of $var(endpoint_aor) (response $rs $rr)\n");
+                    xlog("REGISTER: Note: With working_mode_preset='single-instance-sql-write-through', save() deletes from DB immediately\n");
+                    
+                    # VERIFICATION: Verify the record was deleted by save()
+                    $var(verify_delete_query) = "SELECT contact_id FROM location WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' ORDER BY expires DESC LIMIT 1";
+                    if (sql_query($var(verify_delete_query), "$avp(verify_delete)")) {
+                        if ($(avp(verify_delete)[0]) == "" || $(avp(verify_delete)[0]) == "<null>") {
+                            xlog("REGISTER: VERIFICATION SUCCESS - Record deleted from database (deregistration successful)\n");
+                        } else {
+                            xlog("L_WARN", "REGISTER: VERIFICATION WARNING - Record still exists after deregistration! contact_id: $(avp(verify_delete)[0])\n");
+                            xlog("L_WARN", "REGISTER: This might indicate save() did not delete the contact properly\n");
                         }
                     } else {
-                        xlog("REGISTER: DEBUG - AVP reg_received (all methods) is empty or null\n");
-                    }
-                }
-                
-                # If AVP is still empty, try to extract from Via header (fallback method)
-                # In responses, there are multiple Via headers (in reverse order):
-                #   - First Via [0]: OpenSIPS's own Via (received=3.93.26.82)
-                #   - Second Via [1]: Original endpoint's Via (received=74.83.23.44;rport=5060)
-                # We use $hdr(Via)[1] to access the second Via header directly with built-in transformations
-                if ($var(has_received) == 0) {
-                    xlog("REGISTER: AVP reg_received not available, trying Via header extraction\n");
-                    xlog("REGISTER: DEBUG - Via[0] (first/OpenSIPS): [$hdr(Via)[0]]\n");
-                    xlog("REGISTER: DEBUG - Via[1] (second/endpoint): [$hdr(Via)[1]]\n");
-                    
-                    $var(via_ip) = "";
-                    $var(via_port) = "";
-                    
-                    # Method 1: Extract from second Via header [1] using built-in transformations
-                    # This should be the endpoint's Via header with received=74.83.23.44;rport=5060
-                    # In OpenSIPS 3.6, use $(hdr(Via)[1]{via.received}) syntax with $() wrapper
-                    if ($(hdr(Via)[1]{via.received}) != "" && $(hdr(Via)[1]{via.received}) != "<null>") {
-                        $var(via_ip) = $(hdr(Via)[1]{via.received});
-                        xlog("REGISTER: DEBUG - Extracted IP from Via[1]{via.received}: $var(via_ip)\n");
-                        
-                        # Extract port from rport parameter in the same Via header
-                        if ($(hdr(Via)[1]{via.rport}) != "" && $(hdr(Via)[1]{via.rport}) != "<null>") {
-                            $var(via_port) = $(hdr(Via)[1]{via.rport});
-                            xlog("REGISTER: DEBUG - Extracted port from Via[1]{via.rport}: $var(via_port)\n");
-                        } else {
-                            # Fallback to port from Via header itself
-                            if ($(hdr(Via)[1]{via.port}) != "" && $(hdr(Via)[1]{via.port}) != "<null>") {
-                                $var(via_port) = $(hdr(Via)[1]{via.port});
-                            } else {
-                                $var(via_port) = "5060";  # Default SIP port
-                            }
-                        }
+                        xlog("L_WARN", "REGISTER: VERIFICATION QUERY FAILED - Could not verify deletion\n");
                     }
                     
-                    # Method 2: Fallback - try first Via header if second didn't work
-                    # (though this should be OpenSIPS's IP, not the endpoint's)
-                    if ($var(via_ip) == "" && $(hdr(Via)[0]{via.received}) != "" && $(hdr(Via)[0]{via.received}) != "<null>") {
-                        $var(temp_ip) = $(hdr(Via)[0]{via.received});
-                        $var(opensips_ip) = "3.93.26.82";  # OpenSIPS's public IP
-                        # Only use if it's not OpenSIPS's IP (unlikely but check anyway)
-                        if ($var(temp_ip) != $var(opensips_ip)) {
-                            $var(via_ip) = $var(temp_ip);
-                            xlog("REGISTER: DEBUG - Extracted IP from Via[0]{via.received}: $var(via_ip)\n");
-                            if ($(hdr(Via)[0]{via.rport}) != "" && $(hdr(Via)[0]{via.rport}) != "<null>") {
-                                $var(via_port) = $(hdr(Via)[0]{via.rport});
-                            } else {
-                                $var(via_port) = "5060";
-                            }
-                        }
-                    }
-                    
-                    # Method 2: Fallback - extract from main Via header IP:port (if received parameter not found)
-                    if ($var(via_ip) == "" && $hdr(Via) =~ "SIP/2\\.0/UDP ([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}):([0-9]+)") {
-                        $var(via_ip) = $re;
-                        # Extract port separately
-                        if ($hdr(Via) =~ "SIP/2\\.0/UDP [0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:([0-9]+)") {
-                            $var(via_port) = $re;
-                        } else {
-                            $var(via_port) = "5060";
-                        }
-                        xlog("REGISTER: DEBUG - Extracted IP:port from Via header (fallback): $var(via_ip):$var(via_port)\n");
-                    }
-                    
-                    # Method 3: Last fallback - IP without port
-                    if ($var(via_ip) == "" && $hdr(Via) =~ "SIP/2\\.0/UDP ([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})[; ]") {
-                        $var(via_ip) = $re;
-                        $var(via_port) = "5060";  # Default SIP port
-                        xlog("REGISTER: DEBUG - Extracted IP from Via header (no port): $var(via_ip)\n");
-                    }
-                    
-                    if ($var(via_ip) != "") {
-                        if ($var(via_port) == "") {
-                            $var(via_port) = "5060";  # Default if port not found
-                        }
-                        $var(received_value) = $var(via_ip) + ":" + $var(via_port);
-                        xlog("REGISTER: Extracted source IP:port from Via header: $var(received_value)\n");
-                        # Validate the extracted value matches IP:port pattern
-                        if ($var(received_value) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:[0-9]+$") {
-                            $var(has_received) = 1;
-                        } else {
-                            xlog("L_WARN", "REGISTER: Extracted value doesn't match IP:port pattern: [$var(received_value)]\n");
-                        }
-                    } else {
-                        xlog("L_WARN", "REGISTER: Could not extract IP:port from Via header: [$hdr(Via)]\n");
-                    }
-                }
-                
-                # Validate that we have a valid IP:port format before attempting UPDATE
-                # Check if received_value matches IP:port pattern (e.g., 74.83.23.44:5060)
-                if ($var(has_received) == 0) {
-                    xlog("L_WARN", "REGISTER: Cannot determine original request source IP:port for 'received' field\n");
-                    xlog("L_WARN", "REGISTER: received_value is: [$var(received_value)] (not a valid IP:port format)\n");
-                    xlog("L_WARN", "REGISTER: AVP reg_received and Via header extraction both failed\n");
-                    xlog("L_WARN", "REGISTER: This will cause OPTIONS/NOTIFY routing to fail - endpoint behind NAT\n");
+                    # For deregistration, we don't need to update the 'received' field (record is deleted)
+                    exit;
                 } else {
-                    xlog("REGISTER: Updating 'received' field with source IP:port: $var(received_value)\n");
-                    
-                    # Update the location record's 'received' field using SQL
-                    # This ensures lookup() can find the endpoint's public NAT IP:port for routing OPTIONS/NOTIFY
-                    # With db_mode=1 (write-through), save() writes to DB immediately, so our UPDATE will work right away
-                    # The 'received' field will be available for lookup() immediately after the UPDATE
-                    $var(update_query) = "UPDATE location SET received='" + $var(received_value) + "' WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' AND expires > UNIX_TIMESTAMP()";
-                    xlog("REGISTER: DEBUG - Executing SQL UPDATE query: $var(update_query)\n");
-                    if (sql_query($var(update_query))) {
-                        xlog("REGISTER: Successfully updated 'received' field to $var(received_value) for $var(endpoint_aor)\n");
-                        xlog("REGISTER: With db_mode=1 (write-through), UPDATE works immediately - 'received' field is now available for lookup()\n");
-                    } else {
-                        xlog("L_WARN", "REGISTER: SQL UPDATE query failed for 'received' field: $var(received_value) for $var(endpoint_aor)\n");
-                        xlog("L_WARN", "REGISTER: Failed query was: $var(update_query)\n");
-                        xlog("L_WARN", "REGISTER: Check OpenSIPS error logs for SQL error details\n");
-                        # Try to verify the record exists in the database
-                        $var(check_query) = "SELECT contact_id FROM location WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
-                        if (sql_query($var(check_query), "$avp(check_contact_id)")) {
-                            if ($(avp(check_contact_id)[0]) != "") {
-                                xlog("REGISTER: DEBUG - Record exists in DB (contact_id: $(avp(check_contact_id)[0])), but UPDATE still failed\n");
+                    xlog("REGISTER: save(\"location\") returned TRUE for $var(endpoint_aor) (response $rs $rr)\n");
+                    xlog("REGISTER: Note: With working_mode_preset='single-instance-sql-write-through', save() writes to DB immediately\n");
+                }
+                
+                # VERIFICATION: Verify the record was created/updated by save() and check if 'received' field was populated
+                # Note: save() handles INSERT/UPDATE internally based on whether contact exists
+                # With received_avp parameter configured, save() should automatically populate 'received' field from $avp(reg_received)
+                # Use last_modified DESC to get the most recently created/updated record (more reliable than expires)
+                $var(verify_query) = "SELECT contact_id, contact, received, expires, domain, username FROM location WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' ORDER BY last_modified DESC, expires DESC LIMIT 1";
+                if (sql_query($var(verify_query), "$avp(verify_result)")) {
+                    if ($(avp(verify_result)[0]) != "" && $(avp(verify_result)[0]) != "<null>") {
+                        xlog("REGISTER: VERIFICATION - Record saved by save():\n");
+                        xlog("REGISTER:   contact_id: $(avp(verify_result)[0])\n");
+                        xlog("REGISTER:   contact: $(avp(verify_result)[1])\n");
+                        xlog("REGISTER:   received: $(avp(verify_result)[2])\n");
+                        xlog("REGISTER:   expires: $(avp(verify_result)[3]) (Unix timestamp)\n");
+                        xlog("REGISTER:   domain: $(avp(verify_result)[4])\n");
+                        xlog("REGISTER:   username: $(avp(verify_result)[5])\n");
+                        
+                        # Verify received field was populated by save() via received_avp parameter
+                        $var(received_from_db) = $(avp(verify_result)[2]);
+                        if ($var(received_from_db) != "" && $var(received_from_db) != "<null>" && $var(received_from_db) =~ "^sip:") {
+                            # Check if received field matches the AVP we set (SIP URI format)
+                            if ($var(received_from_db) == $avp(reg_received)) {
+                                xlog("REGISTER: VERIFICATION SUCCESS - 'received' field matches AVP value: $var(received_from_db)\n");
                             } else {
-                                xlog("REGISTER: DEBUG - Record not found in DB yet - this might be a timing issue\n");
+                                xlog("L_WARN", "REGISTER: VERIFICATION WARNING - 'received' field mismatch! Expected: $avp(reg_received), Got: $var(received_from_db)\n");
+                                xlog("L_WARN", "REGISTER: This may indicate received_avp parameter is not working correctly\n");
+                            }
+                        } else {
+                            xlog("L_WARN", "REGISTER: VERIFICATION WARNING - 'received' field is NULL or empty after save()\n");
+                            xlog("L_WARN", "REGISTER: received_avp parameter is not working - attempting manual UPDATE\n");
+                            xlog("L_WARN", "REGISTER: AVP reg_received value was: $avp(reg_received)\n");
+                            
+                            # MANUAL UPDATE: Since received_avp parameter is not working, manually update received field
+                            # Get the received value from AVP (should be SIP URI format: sip:IP:port;transport=udp)
+                            $var(received_uri) = "";
+                            if ($avp(reg_received) != "" && $avp(reg_received) != "<null>") {
+                                $var(received_uri) = $avp(reg_received);
+                            } else if ($avp(tu:reg_received) != "" && $avp(tu:reg_received) != "<null>") {
+                                $var(received_uri) = $avp(tu:reg_received);
+                            }
+                            
+                            if ($var(received_uri) != "" && $var(received_uri) =~ "^sip:") {
+                                # MANUAL UPDATE WORKAROUND: received_avp doesn't work when save() is called in onreply_route
+                                # This is a known limitation of proxy-registrar mode in OpenSIPS
+                                # We manually update the received field after save() to ensure correct NAT traversal
+                                
+                                # Note: received_uri format is sip:IP:port;transport=udp (no single quotes, so no escaping needed)
+                                # Use contact_id from verification query (most precise match)
+                                $var(update_contact_id) = $(avp(verify_result)[0]);
+                                if ($var(update_contact_id) != "" && $var(update_contact_id) != "<null>") {
+                                    # Primary: UPDATE using contact_id (most reliable)
+                                    $var(update_query) = "UPDATE location SET received='" + $var(received_uri) + "' WHERE contact_id=" + $var(update_contact_id);
+                                    xlog("REGISTER: Executing manual UPDATE for received field (contact_id): $var(update_query)\n");
+                                    
+                                    if (sql_query($var(update_query))) {
+                                        xlog("REGISTER: SUCCESS - Manually updated 'received' field to: $var(received_uri)\n");
+                                        
+                                        # Verify the UPDATE worked
+                                        $var(verify_update_query) = "SELECT received FROM location WHERE contact_id=" + $var(update_contact_id);
+                                        if (sql_query($var(verify_update_query), "$avp(verify_received)")) {
+                                            if ($(avp(verify_received)[0]) == $var(received_uri)) {
+                                                xlog("REGISTER: VERIFICATION SUCCESS - 'received' field updated correctly: $(avp(verify_received)[0])\n");
+                                            } else {
+                                                xlog("L_WARN", "REGISTER: VERIFICATION WARNING - UPDATE may have failed. Expected: $var(received_uri), Got: $(avp(verify_received)[0])\n");
+                                            }
+                                        }
+                                    } else {
+                                        # Fallback: Try with username+domain (less precise but may work if contact_id fails)
+                                        # Note: UPDATE doesn't support ORDER BY or LIMIT - update all matching records
+                                        $var(update_query2) = "UPDATE location SET received='" + $var(received_uri) + "' WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' AND expires > UNIX_TIMESTAMP()";
+                                        xlog("L_WARN", "REGISTER: First UPDATE failed, trying with username+domain: $var(update_query2)\n");
+                                        
+                                        if (sql_query($var(update_query2))) {
+                                            xlog("REGISTER: SUCCESS - Manually updated 'received' field using username+domain: $var(received_uri)\n");
+                                        } else {
+                                            xlog("L_ERR", "REGISTER: ERROR - Both UPDATE queries failed for received field\n");
+                                            xlog("L_ERR", "REGISTER: Failed queries: 1) $var(update_query) 2) $var(update_query2)\n");
+                                            xlog("L_ERR", "REGISTER: This is a workaround for received_avp limitation in proxy-registrar mode\n");
+                                            xlog("L_ERR", "REGISTER: Routing may still work if received is in memory cache\n");
+                                        }
+                                    }
+                                } else {
+                                    xlog("L_ERR", "REGISTER: ERROR - Cannot perform manual UPDATE - contact_id is invalid: $var(update_contact_id)\n");
+                                    xlog("L_ERR", "REGISTER: This is a workaround for received_avp limitation in proxy-registrar mode\n");
+                                }
+                            } else {
+                                xlog("L_WARN", "REGISTER: Cannot perform manual UPDATE - received_uri is invalid or empty: $var(received_uri)\n");
                             }
                         }
+                        
+                        # Calculate expiration time in seconds from now (only if expires is not NULL)
+                        $var(expires_value) = $(avp(verify_result)[3]);
+                        if ($var(expires_value) != "" && $var(expires_value) != "<null>" && $var(expires_value) != "0" && $var(expires_value) =~ "^[0-9]+$") {
+                            $var(current_time) = $Ts;
+                            # Only do arithmetic if both values are valid integers
+                            if ($var(current_time) =~ "^[0-9]+$") {
+                                $var(expires_seconds) = $var(expires_value) - $var(current_time);
+                                if ($var(expires_seconds) > 0) {
+                                    xlog("REGISTER: VERIFICATION SUCCESS - expires is in the future (expires in $var(expires_seconds) seconds)\n");
+                                } else {
+                                    xlog("L_WARN", "REGISTER: VERIFICATION WARNING - expires is in the past! expires=$var(expires_value), current=$var(current_time)\n");
+                                }
+                            } else {
+                                xlog("L_WARN", "REGISTER: VERIFICATION WARNING - current_time is invalid: $var(current_time)\n");
+                            }
+                            xlog("REGISTER:   Note: Expiration time comes from Asterisk's 200 OK reply (Expires header or Contact expires parameter)\n");
+                        } else {
+                            xlog("L_WARN", "REGISTER: VERIFICATION WARNING - expires field is NULL or invalid (record may be in transition state, expires=$var(expires_value))\n");
+                        }
+                    } else {
+                        xlog("L_WARN", "REGISTER: VERIFICATION WARNING - save() returned TRUE but record not found in database yet\n");
+                        xlog("L_WARN", "REGISTER: This might be a timing issue with write-through mode\n");
                     }
+                } else {
+                    xlog("L_WARN", "REGISTER: VERIFICATION QUERY FAILED - Could not verify record after save()\n");
                 }
             } else {
                 xlog("L_ERR", "REGISTER: save(\"location\") returned FALSE for $tU@$(tu{uri.domain}) (response $rs $rr)\n");
