@@ -935,6 +935,11 @@ route[DOMAIN_CHECK] {
     
     # Lookup dispatcher set for this domain
     # Use domain.setid as the dispatcher setid (explicit mapping)
+    # NOTE: Custom SQL is used here because:
+    # 1. Domain module only provides is_domain() for validation, not attribute retrieval
+    # 2. OpenSIPS no longer favors the setid approach for domain-destination linking
+    # 3. However, for our user base, the simpler setid approach is justified and appropriate
+    # 4. This custom SQL is acceptable given our requirements (see docs/DOMAIN-MODULE-RESEARCH.md)
     $var(query) = "SELECT setid FROM domain WHERE domain='" + $var(domain) + "'";
     if (!sql_query($var(query), "$avp(domain_setid)")) {
         xlog("L_NOTICE",

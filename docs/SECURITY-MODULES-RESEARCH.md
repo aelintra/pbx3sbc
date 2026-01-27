@@ -23,19 +23,46 @@ Research and evaluate OpenSIPS built-in security modules to determine what can b
 - Tracks request density from source IPs
 - Marks/blocks/reports IPs exceeding thresholds
 - Can whitelist trusted sources via `check_route` parameter
-- Emits `E_PIKE_BLOCKED` event for monitoring
+- Emits `E_PIKE_BLOCKED` event for monitoring ✅ **RECOMMENDED METHOD**
+- Works for both IPv4 and IPv6
+- Automatic high-speed rate limiting of suspicious traffic
+- Prevents DoS/scanning attacks by blocking IPs that exceed defined transaction thresholds
+
+**Operational Modes:**
+1. **Automatic Mode (Recommended):** Pike installs internal hooks to monitor all incoming requests/replies and automatically drops packets when floods are detected
+2. **Manual Mode:** Call `pike_check_req()` function in routing script to check specific requests and decide action based on return code
+
+**Configuration Parameters:**
+- `sampling_time_unit` - Time period for sampling (default 2 seconds; smaller = better detection of peaks, but slower)
+- `reqs_density_per_unit` - Request threshold before blocking an IP (default varies)
+- `remove_latency` - Cleanup timing for old entries (default varies)
+- `pike_log_level` - Logging detail level (0=none, 1=blocked IPs, 2=all)
+- `check_route` - Optional route to run before analyzing each packet (for whitelisting logic)
+
+**Recommended Implementation:**
+- Use `pike` module as primary method for IP banning
+- Use **automatic mode** for simplicity (internal hooks handle detection)
+- Configure thresholds for traffic volume within the pike module
+- Use `event_route[E_PIKE_BLOCKED]` to handle blocked IPs
+- Log blocked IPs via xlog or trigger external scripts
+- For long-term/permanent bans, pipe blocked IPs to system-level tools like iptables/ipset
+- Consider using `ipset` instead of raw iptables to avoid duplicate rules
 
 **Research Questions:**
 - [x] Does it exist in OpenSIPS 3.6.3? ✅ Yes
 - [x] What types of floods can it detect? ✅ SIP floods, DoS/DDoS attacks
 - [x] How does it block attacks? ✅ Blocks/marks IPs exceeding thresholds
+- [x] Does it emit events? ✅ Yes, E_PIKE_BLOCKED event
 - [ ] Can it be configured per-IP or per-domain? (needs verification)
 - [ ] Does it integrate with database for persistence? (needs verification)
 - [ ] What are the performance characteristics? (needs testing)
+- [ ] Optimal threshold configuration? (needs testing)
 
 **Documentation:** https://opensips.org/docs/modules/3.6.x/pike.html
 
 **Status:** ✅ Basic research complete - needs testing
+
+**Note:** This is the **recommended primary method** for IP banning and flood detection in OpenSIPS.
 
 #### `ratelimit` Module
 **Purpose:** Built-in rate limiting
@@ -120,8 +147,10 @@ route {
 
 **Alternative Approaches:**
 - Use `permissions` module with database ACLs
-- Use `pike` module for automatic blocking based on flood detection
+- Use `pike` module for automatic blocking based on flood detection ✅ **RECOMMENDED**
 - Use `htable` module (if available) for in-memory IP tracking
+- Use `dst_blacklist` module for destination-based blocking
+- Use Fail2ban for brute force detection (monitors logs, adds iptables rules) ✅ **RECOMMENDED**
 
 **Research Questions:**
 - [x] Does dedicated ipban module exist? ❌ No
@@ -157,7 +186,84 @@ route {
 
 **Note:** Could potentially replace `ipban` module functionality
 
-### 3. Authentication & Authorization
+#### `dst_blacklist` Module
+**Purpose:** Prevent OpenSIPS from sending requests to known bad destinations
+
+**Availability:** 🔍 **NEEDS VERIFICATION**
+
+**Key Features:**
+- Used to prevent OpenSIPS from sending requests to known bad destinations
+- Can manage temporary bans
+- Can be used for scanner protection
+
+**Research Questions:**
+- [ ] Does it exist in OpenSIPS 3.6.3? (needs verification)
+- [ ] What is the API and configuration?
+- [ ] How does it integrate with IP blocking system?
+- [ ] What is the performance impact?
+- [ ] Can it be used for scanner IP blocking?
+
+**Documentation:** https://opensips.org/docs/modules/3.6.x/dst_blacklist.html (if available)
+
+**Status:** 🔍 Needs verification
+
+#### `event_route` Module
+**Purpose:** Event-driven routing for handling module events
+
+**Availability:** ✅ **BUILT-IN** (core functionality, not separate module)
+
+**Key Features:**
+- Allows handling of module events via `event_route[EVENT_NAME]`
+- Used with `pike` module to handle `E_PIKE_BLOCKED` events
+- Enables logging and external script triggers when events occur
+
+**Usage Example:**
+```opensips
+event_route[E_PIKE_BLOCKED] {
+    # Log blocked IP
+    xlog("L_WARN", "PIKE: IP $si blocked due to flood detection\n");
+    
+    # Log to database or trigger external script
+    # exec("/usr/local/bin/block-ip.sh", "$si");
+}
+```
+
+**Research Questions:**
+- [x] Does it exist? ✅ Yes, built into OpenSIPS core
+- [x] How does it work with pike module? ✅ Via E_PIKE_BLOCKED event
+- [ ] What other events are available?
+- [ ] Can it trigger external scripts?
+- [ ] Performance impact of event routes?
+
+**Status:** ✅ Basic understanding - needs testing
+
+**Note:** This is the recommended method for handling pike module blocking events.
+
+### 3. Scanner Protection
+
+#### APIBan
+**Purpose:** Shared threat intelligence for scanner protection
+
+**Availability:** 🔍 **EXTERNAL SERVICE** (needs research)
+
+**Key Features:**
+- Provides threat intelligence for known scanners
+- Shared community database of malicious IPs
+- Can protect against known scanners using threat intelligence
+
+**Research Questions:**
+- [ ] Is APIBan service available and active?
+- [ ] What is the API and integration method?
+- [ ] Cost and rate limits?
+- [ ] Performance impact (API calls vs cached data)?
+- [ ] Privacy considerations?
+- [ ] How to integrate with OpenSIPS?
+
+**Status:** 🔍 Needs research
+
+**Note:** Suggested for protecting against known scanners by utilizing shared threat intelligence.
+
+### 4. Authentication & Authorization
 
 #### `auth_aaa` Module
 **Purpose:** AAA authentication framework
@@ -222,12 +328,26 @@ From `config/opensips.cfg.template`, these modules are already in use:
 
 ## Research Methodology
 
+**⚠️ CRITICAL: Always check module documentation before implementation**
+
+Before implementing any module feature, follow this checklist:
+1. ✅ Look up module documentation at https://opensips.org/html/docs/modules/3.6.x/
+2. ✅ Review all available `modparam` configuration parameters
+3. ✅ Review all available functions (e.g., `pike_check_req()`, `rl_check()`, etc.)
+4. ✅ Review all available events (e.g., `E_PIKE_BLOCKED`)
+5. ✅ Check for examples and usage patterns in documentation
+6. ✅ Verify compatibility with OpenSIPS 3.6.3
+7. ✅ Compare findings with implementation plan to identify conflicts or enhancements
+
+### Research Steps
+
 1. **Check Module Availability**
    - Verify modules exist in OpenSIPS 3.6.3 installation
    - Check module paths: `/usr/lib/x86_64-linux-gnu/opensips/modules/`
    - List available security modules
 
 2. **Review Documentation**
+   - **OpenSIPS 3.6 Module Documentation Index:** https://opensips.org/html/docs/modules/3.6.x/ ⭐ **PRIMARY REFERENCE**
    - OpenSIPS 3.6.3 module documentation: https://opensips.org/docs/modules/
    - Module README files
    - Example configurations
@@ -265,9 +385,15 @@ From `config/opensips.cfg.template`, these modules are already in use:
 
 ### Attack Mitigation
 - **Need:** Flood detection
-  - **Solution:** `pike` module
+  - **Solution:** `pike` module ✅ **RECOMMENDED PRIMARY METHOD**
+  - **Implementation:** Use `event_route[E_PIKE_BLOCKED]` for logging and monitoring
 - **Need:** Automatic IP blocking
-  - **Solution:** `pike` module (automatic) or `permissions` module (manual) or custom scripting
+  - **Solution:** `pike` module (automatic) ✅ **RECOMMENDED** or `permissions` module (manual) or custom scripting
+  - **Enhancement:** Pipe blocked IPs to iptables via event_route for system-level blocking
+- **Need:** Brute force detection
+  - **Solution:** Fail2ban ✅ **RECOMMENDED** (monitors logs, adds iptables rules) or custom database tracking
+- **Need:** Scanner protection
+  - **Solution:** Current User-Agent matching + `dst_blacklist` module (if available) + APIBan (external threat intelligence)
 - **Need:** Whitelist support
   - **Solution:** `permissions` module allow lists or custom scripting
 
@@ -365,9 +491,12 @@ Since there's no dedicated `ipban` module, we have three options:
 
 ## References
 
+- **OpenSIPS 3.6 Module Documentation Index:** https://opensips.org/html/docs/modules/3.6.x/ ⭐ **PRIMARY REFERENCE**
 - OpenSIPS 3.6 Documentation: https://opensips.org/docs/
 - OpenSIPS Module Index: https://opensips.org/docs/modules/
 - Security & Threat Detection Project Plan: `docs/SECURITY-THREAT-DETECTION-PROJECT.md`
+
+**Note:** Use the module documentation index (https://opensips.org/html/docs/modules/3.6.x/) to find specific module documentation for any OpenSIPS 3.6 modules, including security modules like `pike`, `ratelimit`, `permissions`, `dst_blacklist`, etc.
 
 ---
 
