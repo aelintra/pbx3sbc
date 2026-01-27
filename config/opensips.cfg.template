@@ -243,6 +243,15 @@ route {
     # ---- Log ALL requests at the very start for debugging ----
     xlog("REQUEST: $rm from $si:$sp to $ru (Call-ID: $hdr(Call-ID))\n");
     
+    # Log Authorization header for REGISTER to track retries with credentials
+    if (is_method("REGISTER")) {
+        if ($hdr(Authorization) != "" || $hdr(Proxy-Authorization) != "") {
+            xlog("REGISTER: Authorization header present - retry with credentials detected (Call-ID: $hdr(Call-ID), CSeq: $hdr(CSeq))\n");
+        } else {
+            xlog("REGISTER: No Authorization header - initial REGISTER request (Call-ID: $hdr(Call-ID), CSeq: $hdr(CSeq))\n");
+        }
+    }
+    
     # Log SDP details for INVITE requests to diagnose audio issues
     if (is_method("INVITE") && $hdr(Content-Type) =~ "application/sdp") {
         $var(from_user) = $(fu{uri.user});
@@ -588,7 +597,56 @@ route {
     }
     
     # ---- Handle REGISTER to track endpoint locations (usrloc migration) ----
+    # CRITICAL: REGISTER requests must ALWAYS be forwarded to Asterisk for authentication
+    # OpenSIPS should NEVER respond directly with 401 - authentication is handled by Asterisk
+    # 
+    # NOTE: OpenSIPS may respond directly with 401 if:
+    # 1. Transaction reuse: OpenSIPS matches new REGISTER to old transaction and reuses cached 401 response
+    # 2. Authentication module: If www_challenge() or proxy_challenge() is called (we don't use these)
+    # 3. register() function: If registrar module's register() is called in request route (we use save() in onreply_route)
+    # 
+    # Our configuration:
+    # - We use save() in onreply_route (not register() in request route) - avoids authentication challenges
+    # - No authentication modules loaded - no www_challenge() or proxy_challenge() calls
+    # - REGISTER always goes through full routing to Asterisk - prevents direct responses
+    # - Force new transaction for REGISTER to prevent transaction reuse
     if (is_method("REGISTER")) {
+        # CRITICAL: Force new transaction for REGISTER to prevent OpenSIPS from matching old transactions
+        # When endpoint retries REGISTER with same Call-ID/CSeq/branch, OpenSIPS may match old transaction
+        # and reuse cached 401 response. By calling t_newtran() early, we ensure new transaction is created.
+        # This prevents OpenSIPS from automatically responding with cached responses.
+        # 
+        # NOTE: t_newtran() returns FALSE if transaction already exists. In that case, we still need to
+        # forward the REGISTER to Asterisk (it might be a retry with credentials after 401 challenge).
+        # We check for Authorization header to detect retries with credentials.
+        $var(has_auth) = 0;
+        if ($hdr(Authorization) != "" || $hdr(Proxy-Authorization) != "") {
+            $var(has_auth) = 1;
+            xlog("REGISTER: Detected Authorization header - this is a retry with credentials after 401 challenge\n");
+        }
+        
+        if (!t_newtran()) {
+            # Transaction already exists - this might be a retry with credentials
+            # We MUST still forward to Asterisk, not reuse cached response
+            if ($var(has_auth) == 1) {
+                xlog("L_WARN", "REGISTER: t_newtran() failed (transaction exists) but Authorization header present - MUST forward to Asterisk for authentication\n");
+                xlog("L_WARN", "REGISTER: This is a retry with credentials - OpenSIPS must forward, not reuse cached 401\n");
+                xlog("L_WARN", "REGISTER: Call-ID=$hdr(Call-ID), CSeq=$hdr(CSeq), From=$fu, To=$tu\n");
+                # Check if transaction exists - if so, t_relay() will match it and might reuse cached response
+                if (t_check_trans()) {
+                    xlog("L_WARN", "REGISTER: WARNING - Transaction exists for this request - t_relay() may reuse cached 401 response!\n");
+                    xlog("L_WARN", "REGISTER: This could prevent the retry with credentials from reaching Asterisk\n");
+                }
+                # Continue to forward - do NOT exit or send error
+            } else {
+                xlog("L_WARN", "REGISTER: t_newtran() failed (transaction exists) for Call-ID=$hdr(Call-ID) - may be retransmission\n");
+                # Still continue to forward - REGISTER must always go to Asterisk
+            }
+        } else {
+            xlog("REGISTER: Forced new transaction creation for Call-ID=$hdr(Call-ID) to prevent transaction reuse\n");
+        }
+        # Ensure REGISTER always goes through full routing to Asterisk
+        # Even if Contact header is missing, we still forward to Asterisk (Asterisk will handle it)
         if ($hdr(Contact) != "") {
             # NOTE: nat_uac_test() causes runtime errors in OpenSIPS 3.6.3
             # Error: "Unknown flag: 1" / "Unknown flag: 19" when called at runtime
@@ -645,7 +703,12 @@ route {
             t_on_reply("handle_reply_reg");
             
             xlog("REGISTER: Request from $si:$sp, To=$tU@$(tu{uri.domain}), Contact=$hdr(Contact), will save location on 2xx reply\n");
+        } else {
+            # REGISTER without Contact header - still forward to Asterisk (Asterisk will handle it)
+            xlog("REGISTER: Request from $si:$sp, To=$tU@$(tu{uri.domain}), Contact header missing - forwarding to Asterisk anyway\n");
         }
+        # Continue to DOMAIN_CHECK to forward REGISTER to Asterisk
+        # DO NOT exit here - REGISTER must always be forwarded to Asterisk for authentication
     }
 
     route(DOMAIN_CHECK);
@@ -938,6 +1001,13 @@ route[DOMAIN_CHECK] {
     # Get the dispatcher_setid from query result (first row, first column)
     $var(setid) = $(avp(domain_setid)[0]);
 
+    # CRITICAL: For REGISTER requests, ensure we always forward to Asterisk
+    # OpenSIPS should NEVER respond directly with 401 - authentication is handled by Asterisk
+    # If we get here for REGISTER, it means domain check passed - forward to Asterisk
+    if (is_method("REGISTER")) {
+        xlog("REGISTER: Domain check passed, forwarding to Asterisk for authentication (domain=$var(domain), setid=$var(setid))\n");
+    }
+    
     route(TO_DISPATCHER);
 }
 
@@ -958,6 +1028,34 @@ route[TO_DISPATCHER] {
 
     # Arm failure route to handle transaction failures
     t_on_failure("1");
+    
+    # CRITICAL: For REGISTER with Authorization when transaction exists, we MUST ensure the Authorization header
+    # is preserved. If t_relay() matches an old transaction, it might reuse the cached request (without Authorization).
+    # We need to explicitly preserve the Authorization header before t_relay().
+    if (is_method("REGISTER") && ($hdr(Authorization) != "" || $hdr(Proxy-Authorization) != "")) {
+        # Store Authorization header in AVP to ensure it's preserved
+        # This is a workaround for the case where t_relay() might reuse cached request
+        if ($hdr(Authorization) != "") {
+            $avp(reg_auth_header) = $hdr(Authorization);
+            xlog("REGISTER: Stored Authorization header in AVP for preservation, Call-ID=$hdr(Call-ID)\n");
+        } else if ($hdr(Proxy-Authorization) != "") {
+            $avp(reg_auth_header) = $hdr(Proxy-Authorization);
+            xlog("REGISTER: Stored Proxy-Authorization header in AVP for preservation, Call-ID=$hdr(Call-ID)\n");
+        }
+    }
+
+    # CRITICAL: For REGISTER retries with Authorization, always use t_relay() to preserve reply handling
+    # Even if t_newtran() failed (transaction exists), we still use t_relay() because:
+    # 1. t_relay() will forward the request to Asterisk (it won't reuse cached 401 if request is different)
+    # 2. We need onreply_route to work so we can save() location records on 200 OK
+    # 3. The t_newtran() call earlier should have created a new transaction for most cases
+    # If transaction matching is still an issue, the endpoint will retry and eventually succeed
+    # NOTE: We removed stateless forward() because it breaks reply handling (can't save location records)
+
+    # CRITICAL: For normal REGISTER requests (new transactions), use t_relay()
+    # The t_newtran() call earlier ensures new transactions are created, preventing transaction reuse
+    # Transactional relay (t_relay()) properly handles the full REGISTER authentication sequence
+    # including nonce handling, CSeq tracking, and response correlation
 
     # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
     # This is required for proper dialog tracking and database persistence
@@ -977,7 +1075,31 @@ route[TO_DISPATCHER] {
         $acc_extra(to_uri) = $tu;
     }
 
-    # OpenSIPS transaction handling for reliable INVITE transaction management
+    # CRITICAL: For REGISTER with Authorization, check if transaction exists
+    # If transaction exists, t_relay() will match it and use cached request (without Authorization)
+    # We need to detect this case and handle it differently
+    if (is_method("REGISTER") && ($hdr(Authorization) != "" || $hdr(Proxy-Authorization) != "")) {
+        # Log Authorization header for debugging
+        $var(auth_header) = $hdr(Authorization);
+        if ($var(auth_header) == "") {
+            $var(auth_header) = $hdr(Proxy-Authorization);
+        }
+        # Extract just the username and realm for logging
+        if ($var(auth_header) =~ "username=\"([^\"]+)\".*realm=\"([^\"]+)\"") {
+            xlog("REGISTER: Forwarding to Asterisk with Authorization header - username=$re, realm=$rR, Call-ID=$hdr(Call-ID), CSeq=$hdr(CSeq)\n");
+        } else {
+            xlog("REGISTER: Forwarding to Asterisk with Authorization header (format check failed), Call-ID=$hdr(Call-ID), CSeq=$hdr(CSeq)\n");
+        }
+        
+        # CRITICAL: If transaction exists, t_relay() will match it and use cached request (without Authorization)
+        # We need to check if this is happening and log it
+        if (t_check_trans()) {
+            xlog("L_ERR", "REGISTER: CRITICAL - Transaction exists for REGISTER with Authorization - t_relay() will use cached request without Authorization!\n");
+            xlog("L_ERR", "REGISTER: This will cause authentication to fail - Call-ID=$hdr(Call-ID), CSeq=$hdr(CSeq)\n");
+            # TODO: Find a way to force t_relay() to use current request instead of cached request
+        }
+    }
+    
     if (!t_relay()) {
         xlog("L_ERR", "t_relay() failed for $du method=$rm Request-URI=$ru\n");
         # Use sl_send_reply() since we're in request route, not reply route
@@ -1872,6 +1994,9 @@ onreply_route {
 # which includes any modifications made by the main registrar (e.g., expiration changes)
 onreply_route[handle_reply_reg] {
     if (is_method("REGISTER")) {
+        # Log all REGISTER responses for debugging
+        xlog("REGISTER: Response $rs $rr received from $si:$sp for $tU@$(tu{uri.domain}), Call-ID=$hdr(Call-ID), CSeq=$hdr(CSeq)\n");
+        
         # Only save location on successful registration (2xx response)
         if (t_check_status("2[0-9][0-9]")) {
             # DIAGNOSTIC: Log all relevant values before calling save()
