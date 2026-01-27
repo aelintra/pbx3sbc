@@ -606,28 +606,42 @@ route {
             $avp(reg_contact) = $hdr(Contact);
             
             # CRITICAL: Capture original request source IP:port for NAT traversal
-            # fix_nated_register() may have populated $avp(reg_received) with IP:port format
-            # But registrar module expects SIP URI format: sip:IP:port;transport=udp
-            # Convert to SIP URI format if needed (check if it's already in SIP URI format or just IP:port)
+            # FORCE RPORT BEHAVIOR: If endpoint is behind NAT, always use actual source IP:port
+            # This ensures responses go to the correct NAT-mapped port even if phone doesn't send rport parameter
+            # This effectively "forces" rport behavior for all NAT endpoints
+            route(CHECK_NAT_ENVIRONMENT);
+            
             $var(received_value) = "";
-            if ($avp(reg_received) != "" && $avp(reg_received) != "<null>") {
-                # fix_nated_register() may have populated it - check format
-                if ($avp(reg_received) =~ "^sip:") {
-                    # Already in SIP URI format - check if it has transport parameter
-                    if ($avp(reg_received) =~ ";transport=") {
-                        # Already has transport parameter - use as-is
-                        $var(received_value) = $avp(reg_received);
+            if ($var(enable_nat_fixes) == 1) {
+                # Endpoint is behind NAT - FORCE use of actual source IP:port (rport behavior)
+                # This ensures responses always go to the correct NAT-mapped port
+                # regardless of whether the phone sent rport parameter
+                $var(received_value) = "sip:" + $si + ":" + $sp + ";transport=udp";
+                xlog("REGISTER: NAT detected - forcing rport behavior: using actual source $si:$sp (endpoint may not have sent rport parameter)\n");
+            } else {
+                # Endpoint is NOT behind NAT - use fix_nated_register() result if available
+                # fix_nated_register() may have populated $avp(reg_received) with IP:port format
+                # But registrar module expects SIP URI format: sip:IP:port;transport=udp
+                # Convert to SIP URI format if needed (check if it's already in SIP URI format or just IP:port)
+                if ($avp(reg_received) != "" && $avp(reg_received) != "<null>") {
+                    # fix_nated_register() may have populated it - check format
+                    if ($avp(reg_received) =~ "^sip:") {
+                        # Already in SIP URI format - check if it has transport parameter
+                        if ($avp(reg_received) =~ ";transport=") {
+                            # Already has transport parameter - use as-is
+                            $var(received_value) = $avp(reg_received);
+                        } else {
+                            # Has sip: prefix but missing transport - add it
+                            $var(received_value) = $avp(reg_received) + ";transport=udp";
+                        }
                     } else {
-                        # Has sip: prefix but missing transport - add it
-                        $var(received_value) = $avp(reg_received) + ";transport=udp";
+                        # IP:port format - convert to SIP URI
+                        $var(received_value) = "sip:" + $avp(reg_received) + ";transport=udp";
                     }
                 } else {
-                    # IP:port format - convert to SIP URI
-                    $var(received_value) = "sip:" + $avp(reg_received) + ";transport=udp";
+                    # Fallback: Use current source IP:port (shouldn't happen if fix_nated_register() worked)
+                    $var(received_value) = "sip:" + $si + ":" + $sp + ";transport=udp";
                 }
-            } else {
-                # Fallback: Use current source IP:port (shouldn't happen if fix_nated_register() worked)
-                $var(received_value) = "sip:" + $si + ":" + $sp + ";transport=udp";
             }
             
             # Set AVP in SIP URI format for registrar module
@@ -958,6 +972,27 @@ route[TO_DISPATCHER] {
 
     # Arm failure route to handle transaction failures
     t_on_failure("1");
+    
+    # FORCE RPORT: Add rport parameter to Via header for NAT traversal
+    # This ensures upstream servers (Asterisk) send responses back to the source IP:port
+    # where OpenSIPS received the request, not the port in the Via header
+    # This is critical for endpoints behind NAT that don't send rport parameter
+    # force_rport() adds rport to the topmost Via header (RFC 3581)
+    # Should be called before t_relay() to affect how responses are routed
+    if (is_method("REGISTER")) {
+        # For REGISTER requests, always force rport to ensure authentication responses reach OpenSIPS
+        # This works even if the phone didn't send rport parameter
+        force_rport();
+        xlog("REGISTER: force_rport() called - Asterisk will send responses to source IP:port $si:$sp\n");
+    } else {
+        # For other requests, only force rport if endpoint is behind NAT
+        # This avoids unnecessary Via header modification for LAN endpoints
+        route(CHECK_NAT_ENVIRONMENT);
+        if ($var(enable_nat_fixes) == 1) {
+            force_rport();
+            xlog("$rm: force_rport() called for NAT endpoint - responses will use source IP:port $si:$sp\n");
+        }
+    }
 
     # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
     # This is required for proper dialog tracking and database persistence
