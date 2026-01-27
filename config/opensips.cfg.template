@@ -66,6 +66,8 @@ loadmodule "domain.so"
 loadmodule "httpd.so"
 # Prometheus module for metrics export (requires opensips-prometheus-module package)
 loadmodule "prometheus.so"
+# Pike module for flood detection (Phase 0 testing)
+loadmodule "pike.so"
 
 ####### Module Parameters ########
 
@@ -218,6 +220,20 @@ modparam("prometheus", "statistics", "acc:")
 # Or export ALL statistics (uncomment to enable - exports everything)
 # modparam("prometheus", "statistics", "all")
 # Note: If "all" is specified, other statistics parameters are ignored
+
+# --- Pike module (flood detection) - Phase 0 Testing ---
+# NOTE: This is a TEST configuration for Phase 0 evaluation
+# Configuration will be refined based on testing results
+# sampling_time_unit: Time period for sampling (default 2 seconds; smaller = better detection of peaks, but slower)
+modparam("pike", "sampling_time_unit", 2)
+# reqs_density_per_unit: Request threshold before blocking an IP (16 requests per 2 seconds = 8 req/sec)
+modparam("pike", "reqs_density_per_unit", 16)
+# remove_latency: Cleanup timing for old entries (4 sampling units = 8 seconds block duration)
+modparam("pike", "remove_latency", 4)
+# pike_log_level: Logging detail level (0=none, 1=blocked IPs, 2=all)
+modparam("pike", "pike_log_level", 1)
+# Note: Using automatic mode (pike installs internal hooks automatically)
+# Manual mode would require calling pike_check_req() in routing script
 
 # --- Transaction timers ---
 # Note: fr_timer is not a modparam in OpenSIPS - transaction timeouts are handled differently
@@ -2015,6 +2031,25 @@ failure_route[1] {
     }
     # t_relay will handle forwarding the failure response automatically
     exit;
+}
+
+####### Event Routes ########
+
+# Pike module event route - triggered when IP is blocked due to flood detection
+# Phase 0 Testing: This event route logs blocked IPs for evaluation
+event_route[E_PIKE_BLOCKED] {
+    # Log blocked IP for monitoring and analysis
+    xlog("L_WARN", "PIKE: IP $si blocked due to flood detection (automatic mode)\n");
+    
+    # TODO Phase 3: Log to security_events table when Phase 3 is implemented
+    # $var(query) = "INSERT INTO security_events (event_type, source_ip, severity, details, event_time) 
+    #     VALUES ('flood_detected', '" + $si + "', 'high', 'Pike module blocked IP', NOW())";
+    # sql_query($var(query));
+    
+    # TODO Phase 5: Optional - Trigger external script for firewall integration (iptables/ipset)
+    # Using exec module to pipe blocked IPs to iptables/ipset
+    # Note: Consider using ipset instead of raw iptables to avoid duplicate rules
+    # exec("/usr/local/bin/block-ip.sh", "$si");
 }
 
 ####### Dispatcher events (visibility) ########
