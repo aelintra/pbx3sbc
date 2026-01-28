@@ -49,21 +49,21 @@ if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9\.-]*[a-zA-Z0-9]$ ]]; then
     exit 1
 fi
 
-# Insert domain with setid
+# Insert domain with setid and attrs
 if [ -z "$SETID" ]; then
     # No setid provided, insert and get auto-generated ID
     DOMAIN_ID=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN <<EOF
-INSERT INTO domain (domain, setid) VALUES ('$DOMAIN', 0);
+INSERT INTO domain (domain, setid, attrs) VALUES ('$DOMAIN', 0, NULL);
 SELECT LAST_INSERT_ID();
 EOF
     )
-    # Update setid to match id if it was 0
-    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "UPDATE domain SET setid = id WHERE id = $DOMAIN_ID AND setid = 0;" >/dev/null 2>&1
+    # Update setid to match id if it was 0, and populate attrs
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "UPDATE domain SET setid = id, attrs = CONCAT('setid=', id) WHERE id = $DOMAIN_ID AND setid = 0;" >/dev/null 2>&1
     SETID=$DOMAIN_ID
 else
-    # Setid provided, use it
+    # Setid provided, use it and populate attrs
     DOMAIN_ID=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN <<EOF
-INSERT INTO domain (domain, setid) VALUES ('$DOMAIN', $SETID);
+INSERT INTO domain (domain, setid, attrs) VALUES ('$DOMAIN', $SETID, CONCAT('setid=', $SETID));
 SELECT LAST_INSERT_ID();
 EOF
     )

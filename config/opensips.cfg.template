@@ -167,6 +167,8 @@ modparam("domain", "db_mode", 2)
 modparam("domain", "domain_table", "domain")
 # domain_col: Column name for domain (default: "domain")
 modparam("domain", "domain_col", "domain")
+# attrs_col: Column name for attributes (default: "attrs")
+modparam("domain", "attrs_col", "attrs")
 
 # --- HTTP Server (Required for Prometheus module) ---
 # Configure HTTP server for Prometheus metrics endpoint
@@ -916,32 +918,37 @@ route[DOMAIN_CHECK] {
     # (so Asterisk knows where to send calls TO the endpoint). Outbound calls from expired endpoints
     # are allowed if Asterisk authenticates and authorizes them.
     
-    # Lookup dispatcher set for this domain
-    # Use domain.setid as the dispatcher setid (explicit mapping)
-    # NOTE: Custom SQL is used here because:
-    # 1. Domain module only provides is_domain() for validation, not attribute retrieval
-    # 2. OpenSIPS no longer favors the setid approach for domain-destination linking
-    # 3. However, for our user base, the simpler setid approach is justified and appropriate
-    # 4. This custom SQL is acceptable given our requirements (see docs/DOMAIN-MODULE-RESEARCH.md)
-    $var(query) = "SELECT setid FROM domain WHERE domain='" + $var(domain) + "'";
-    if (!sql_query($var(query), "$avp(domain_setid)")) {
-        xlog("L_NOTICE",
-             "Door-knock blocked: domain=$var(domain) src=$si (query failed)\n");
+    # Lookup dispatcher set for this domain using standard OpenSIPS domain module
+    # Use is_domain_local() to validate domain and retrieve attributes
+    # Attributes format: "setid=10" or "setid=10;feature=enabled"
+    # Extract setid using standard {param.value} transformation
+    if (is_domain_local($var(domain), $var(attrs))) {
+        # Extract setid from attributes string using standard transformation
+        # {param.value} returns a string, convert to integer for ds_select_dst()
+        $var(setid_str) = $(var(attrs){param.value,setid});
         
-        # Phase 1.1: Log door-knock attempt to database for security tracking
-        $var(query) = "INSERT INTO door_knock_attempts " +
-            "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $var(domain) + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'query_failed', NOW())";
-        if (sql_query($var(query))) {
-            xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp (query failed)\n");
+        # Validate setid was found
+        if ($var(setid_str) == "" || $var(setid_str) == "<null>") {
+            xlog("L_ERR", "No setid found in domain attributes for domain=$var(domain) attrs=$var(attrs)\n");
+            
+            # Phase 1.1: Log door-knock attempt to database for security tracking
+            $var(query) = "INSERT INTO door_knock_attempts " +
+                "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
+                "VALUES ('" + $var(domain) + "', '" + $si + "', " + $sp + ", " +
+                "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'setid_not_found', NOW())";
+            if (sql_query($var(query))) {
+                xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp (setid_not_found)\n");
+            }
+            
+            exit;
         }
         
-        exit;
-    }
-    
-    # Check if domain was found
-    if ($(avp(domain_setid)[0]) == "") {
+        # Convert string to integer for ds_select_dst() function
+        $var(setid) = $(var(setid_str){s.int});
+        
+        xlog("Domain=$var(domain) setid=$var(setid) extracted from attrs=$var(attrs) (str=$var(setid_str))\n");
+    } else {
+        # Domain not found
         xlog("L_NOTICE",
              "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
         
@@ -956,9 +963,6 @@ route[DOMAIN_CHECK] {
         
         exit;
     }
-    
-    # Get the dispatcher_setid from query result (first row, first column)
-    $var(setid) = $(avp(domain_setid)[0]);
 
     route(TO_DISPATCHER);
 }

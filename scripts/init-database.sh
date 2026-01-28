@@ -160,8 +160,8 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Update any existing domains to use id as setid
-UPDATE domain SET setid = id WHERE setid = 0;
+-- Update any existing domains to use id as setid and populate attrs
+UPDATE domain SET setid = id, attrs = CONCAT('setid=', id) WHERE setid = 0 AND (attrs IS NULL OR attrs = '');
 
 -- Add index if it doesn't exist
 CREATE INDEX IF NOT EXISTS idx_domain_setid ON domain(setid);
