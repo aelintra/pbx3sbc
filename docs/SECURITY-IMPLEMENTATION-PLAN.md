@@ -797,23 +797,36 @@ A unified `security_events` table tracking:
 - **Confidence:** ⚠️ Medium - Depends on alert script implementation
 - **Implementation:** Use `exec()` or external script calls (need to verify OpenSIPS capabilities)
 
-### 3.3 Statistics & Reporting ✅ **HIGH CONFIDENCE**
+### 3.3 Statistics & Reporting ✅ **HIGH CONFIDENCE** (Admin Panel)
 
 **Objective:** Provide security statistics and reports
 
-#### Step 3.3.1: Create Database Views ✅ **HIGH CONFIDENCE**
-- **What:** Create SQL views for security statistics
-- **Where:** `scripts/init-database.sh`
-- **Confidence:** ✅ High - Standard SQL view creation
-- **Views:**
-  - `security_stats_hourly` - Hourly event counts
-  - `top_attacking_ips` - Top attacking IPs
-  - `registration_failure_stats` - Registration failure trends
+**Status:** ✅ **MOVED TO ADMIN PANEL** - Statistics and reporting belong in web interface
 
-#### Step 3.3.2: Create Reporting Scripts ✅ **HIGH CONFIDENCE**
-- **What:** Create scripts to generate security reports
-- **Where:** `scripts/security-report.sh`, `scripts/view-security-stats.sh`
-- **Confidence:** ✅ High - Standard SQL queries and shell scripting
+**Decision:** Phase 3.3 is primarily data visualization, reporting, and statistics - these are admin panel features, not core OpenSIPS functionality.
+
+**Implementation Location:** `pbx3sbc-admin` repository (Laravel + Filament)
+
+**What Belongs in Admin Panel:**
+- Statistics widgets (dashboard charts, trends, top IPs)
+- Reporting features (generate reports, export data)
+- Data visualization (charts, graphs, trends)
+- Security statistics views (computed via Laravel queries)
+- All user-facing statistics and reporting
+
+**What Stays in Core (Optional):**
+- SQL views (optional - can be computed in admin panel instead)
+  - If created, would be in `scripts/init-database.sh`
+  - But Laravel can compute these via Eloquent queries instead
+  - SQL views are optional optimization, not required
+
+**Admin Panel Implementation:**
+- See `docs/ADMIN-PANEL-SECURITY-REQUIREMENTS.md` for detailed requirements
+- Security Dashboard Widgets section already includes statistics requirements
+- Filament widgets for statistics visualization
+- Reporting features via Filament resources
+
+**Recommendation:** Implement all Phase 3.3 features in admin panel. SQL views are optional optimization - Laravel can compute statistics via queries.
 
 ---
 
@@ -998,7 +1011,7 @@ A unified `security_events` table tracking:
 - **Phase 2.2:** Brute Force Detection ✅ **COMPLETED:** Fail2ban integration implemented
 - **Phase 2.3:** Flood detection ✅ **UPDATED:** Pike module with event_route (recommended method)
 - **Phase 3.1:** Security event logging ❌ **DEFERRED - LOW VALUE** (see analysis above)
-- **Phase 3.3:** Statistics & reporting
+- **Phase 3.3:** Statistics & reporting ✅ **MOVED TO ADMIN PANEL** (see note above)
 - **Phase 5.1:** IP blocking system
 - **Phase 5.2:** Automatic block expiration
 
@@ -1043,7 +1056,7 @@ A unified `security_events` table tracking:
 ### Weeks 6-7: Monitoring (High Confidence)
 1. ❌ **SKIPPED:** Security event logging (low value - see analysis above)
 2. ⚠️ Implement alerting system (can monitor existing tables/logs)
-3. ✅ Create statistics views and reporting scripts (analyze existing data)
+3. ✅ **MOVED TO ADMIN PANEL:** Statistics & reporting (see Phase 3.3 note above)
 
 ### Weeks 8-9: Advanced Detection (Lower Confidence)
 1. ⚠️ Implement username enumeration detection
