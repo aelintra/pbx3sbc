@@ -24,10 +24,10 @@ This document outlines a comprehensive security and threat detection enhancement
 
 ### ⚠️ Security Gaps
 
-- **No registration failure tracking** - Cannot detect brute force attacks
-- **No rate limiting** - Vulnerable to flood attacks
-- **No response-based cleanup** - Failed registrations persist
-- **No security event monitoring** - Limited visibility into attacks
+- ✅ **Registration failure tracking** - ✅ **IMPLEMENTED** (failed_registrations table + Fail2Ban)
+- **No rate limiting** - Vulnerable to flood attacks (Pike module configured, testing pending)
+- ✅ **Response-based cleanup** - ✅ **IMPLEMENTED** (using usrloc module - no stale registrations)
+- ⚠️ **Limited security event monitoring** - Basic logging, no alerting system
 - **No alerting** - No notifications for security events
 - **No threat intelligence** - Cannot track attack patterns
 
@@ -167,9 +167,11 @@ This document outlines a comprehensive security and threat detection enhancement
 
 ---
 
-### Phase 1: Registration Security Foundation
+### Phase 1: Registration Security Foundation ✅ **MOSTLY COMPLETE**
 
 **Goal:** Secure the registration process and track registration attempts
+
+**Status:** ✅ **Failed Registration Tracking Complete** - Already implemented
 
 #### 1.1 Registration Status Tracking
 
@@ -233,40 +235,47 @@ onreply_route {
 **Files to Modify:**
 - `config/opensips.cfg.template` - Add cleanup logic to onreply_route
 
-#### 1.3 Failed Registration Tracking
+#### 1.3 Failed Registration Tracking ✅ **COMPLETE**
 
 **Objective:** Track all failed registration attempts for threat detection
+
+**Status:** ✅ **ALREADY IMPLEMENTED**
 
 **Database Schema:**
 ```sql
 CREATE TABLE failed_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    aor VARCHAR(255) NOT NULL,
+    username VARCHAR(64) NOT NULL,
+    domain VARCHAR(128) NOT NULL,
     source_ip VARCHAR(45) NOT NULL,
-    source_port VARCHAR(10) NOT NULL,
+    source_port INT NOT NULL,
     user_agent VARCHAR(255) DEFAULT NULL,
     response_code INT NOT NULL,
     response_reason VARCHAR(255) DEFAULT NULL,
     attempt_time DATETIME NOT NULL,
     expires_header INT DEFAULT NULL,
-    INDEX idx_aor_time (aor, attempt_time),
+    INDEX idx_username_domain_time (username, domain, attempt_time),
     INDEX idx_source_ip_time (source_ip, attempt_time),
     INDEX idx_attempt_time (attempt_time),
     INDEX idx_response_code (response_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-**OpenSIPS Changes:**
-- Log failed registrations to database in `onreply_route`
-- Include source IP, user agent, response code
-- Enable pattern detection
+**Implementation Status:**
+- ✅ **Table Created:** `scripts/init-database.sh` (lines 198-223)
+- ✅ **Logging Implemented:** `config/opensips.cfg.template` (lines 2088-2154)
+- ✅ **Request Metadata:** Stored in AVPs (lines 607-613)
+- ✅ **Fail2Ban Integration:** Configured to monitor failed registration logs
+- ✅ **Door-Knock Tracking:** Also implemented (`door_knock_attempts` table)
 
-**Files to Create:**
-- `scripts/init-database.sh` - Add failed_registrations table creation
-- `scripts/analyze-failed-registrations.sh` - Analysis tool
+**What's Logged:**
+- Failed registrations (403 Forbidden and other failures)
+- Excludes 401 (normal authentication challenge)
+- Captures: username, domain, source IP, source port, user agent, response code/reason, expires header
 
-**Files to Modify:**
-- `config/opensips.cfg.template` - Add failed registration logging
+**Files Already Modified:**
+- ✅ `scripts/init-database.sh` - Table creation complete
+- ✅ `config/opensips.cfg.template` - Logging complete
 
 ---
 
@@ -790,10 +799,11 @@ CREATE TABLE whitelisted_ips (
 ## Success Criteria
 
 ### Phase 1 Complete When:
-- ✅ Registration status tracked in database
-- ✅ Failed registrations logged
-- ✅ Response-based cleanup working
-- ✅ Can query registration status
+- ✅ Failed registrations logged ✅ **COMPLETE**
+- ✅ Door-knock attempts logged ✅ **COMPLETE**
+- ✅ Fail2Ban integration configured ✅ **COMPLETE**
+- ✅ Response-based cleanup working ✅ **COMPLETE** (usrloc module)
+- [ ] Registration status tracking (deferred - low value)
 
 ### Phase 2 Complete When:
 - ✅ Rate limiting active and blocking excessive requests

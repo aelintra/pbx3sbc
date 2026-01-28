@@ -127,9 +127,11 @@ This ensures we use modules correctly and don't miss important features or best 
 
 ## Phase 1: Registration Security Foundation (Weeks 2-3)
 
-### 1.1 Failed Registration Tracking ✅ **HIGH CONFIDENCE**
+### 1.1 Failed Registration Tracking ✅ **COMPLETE**
 
 **Objective:** Track all failed registration attempts in database
+
+**Status:** ✅ **ALREADY IMPLEMENTED**
 
 **⚠️ STANDARD APPROACH EVALUATION:** 
 - **Evaluated:** OpenSIPS `acc` module for failed transaction logging
@@ -137,12 +139,12 @@ This ensures we use modules correctly and don't miss important features or best 
 - **Decision:** Use custom `failed_registrations` table (justified deviation)
 - **See:** `docs/FAILED-REGISTRATION-TRACKING-COMPARISON.md` for detailed comparison
 
-**Implementation Steps:**
+**Implementation Status:**
 
-#### Step 1.1.1: Create Database Table ✅ **HIGH CONFIDENCE**
+#### Step 1.1.1: Create Database Table ✅ **COMPLETE**
 - **What:** Create `failed_registrations` table
-- **Where:** `scripts/init-database.sh`
-- **Confidence:** ✅ High - Standard SQL table creation
+- **Where:** `scripts/init-database.sh` (lines 198-223)
+- **Status:** ✅ **COMPLETE** - Table created with proper schema and indexes
 - **Schema:**
   ```sql
   CREATE TABLE failed_registrations (
@@ -164,59 +166,45 @@ This ensures we use modules correctly and don't miss important features or best 
   ```
 - **Note:** Using `username` and `domain` instead of `aor` to match `location` table structure
 
-#### Step 1.1.2: Add Logging in onreply_route ✅ **HIGH CONFIDENCE**
+#### Step 1.1.2: Add Logging in onreply_route ✅ **COMPLETE**
 - **What:** Log failed registrations (403 and other failures, excluding 401) to database
-- **Where:** `config/opensips.cfg.template` - `onreply_route[handle_reply_reg]`
-- **Confidence:** ✅ High - We know how onreply_route works, have access to `$rs`, `$rr`, `$si`, `$sp`
-- **Important:** 401 Unauthorized is a normal part of SIP authentication (challenge-response), so we skip logging it. Only log 403 Forbidden and other actual failures.
-- **Implementation:**
-  ```opensips
-  onreply_route[handle_reply_reg] {
-      if (is_method("REGISTER")) {
-          if (t_check_status("2[0-9][0-9]")) {
-              # Success - existing save() logic
-              ...
-          } else if ($rs >= 400) {
-              # Skip 401 (normal auth challenge)
-              if ($rs == 401) {
-                  exit;
-              }
-              # Log 403 and other failures
-              $var(query) = "INSERT INTO failed_registrations 
-                  (username, domain, source_ip, source_port, user_agent, 
-                   response_code, response_reason, attempt_time) 
-                  VALUES ('" + $tU + "', '" + $(tu{uri.domain}) + "', 
-                          '" + $si + "', " + $sp + ", '" + $ua + "', 
-                          " + $rs + ", '" + $rr + "', NOW())";
-              sql_query($var(query));
-              xlog("REGISTER: Failed registration logged - $tU@$(tu{uri.domain}) from $si:$sp, response $rs $rr\n");
-          }
-      }
-  }
-  ```
-- **Challenges:**
-  - Need to capture source IP:port from original request (may need AVP storage)
-  - User agent extraction from request (need to store in request route)
-  - SQL injection prevention (use parameterized queries if available)
+- **Where:** `config/opensips.cfg.template` - `onreply_route[handle_reply_reg]` (lines 2088-2154)
+- **Status:** ✅ **COMPLETE** - Fully implemented and working
+- **Implementation Details:**
+  - Logs 403 Forbidden and other failures (4xx/5xx except 401)
+  - Skips 401 (normal authentication challenge)
+  - Captures username, domain, source IP, source port, user agent, response code/reason
+  - Includes Expires header value if present
+  - Uses AVPs stored in request route for source IP/port/user agent
 
-#### Step 1.1.3: Store Request Metadata in Request Route ⚠️ **MEDIUM CONFIDENCE**
+#### Step 1.1.3: Store Request Metadata in Request Route ✅ **COMPLETE**
 - **What:** Capture source IP, port, user agent in request route for use in onreply_route
-- **Where:** `config/opensips.cfg.template` - REGISTER handling block
-- **Confidence:** ⚠️ Medium - Need to verify AVP persistence across transaction boundaries
+- **Where:** `config/opensips.cfg.template` - REGISTER handling block (line ~607)
+- **Status:** ✅ **COMPLETE** - AVPs stored in request route, available in onreply_route
 - **Implementation:**
   ```opensips
-  if (is_method("REGISTER")) {
-      # Store request metadata for security tracking
-      $avp(reg_source_ip) = $si;
-      $avp(reg_source_port) = $sp;
-      $avp(reg_user_agent) = $ua;
-      # These AVPs should persist to onreply_route via onreply_avp_mode=1
-  }
+  # Phase 1.1: Store request metadata for security tracking (failed registration logging)
+  $avp(reg_source_ip) = $si;
+  $avp(reg_source_port) = $sp;
+  $avp(reg_user_agent) = $ua;
   ```
-- **Research Needed:**
-  - Verify `onreply_avp_mode=1` makes AVPs available in onreply_route
-  - Test AVP persistence across transaction boundaries
-  - Check if transaction-scoped AVPs (`tu:`) are needed
+- **AVP Persistence:** Uses `onreply_avp_mode=1` (configured in tm module) to make AVPs available in onreply_route
+
+### 1.1 Summary ✅ **COMPLETE**
+
+**Phase 1.1 Status:** ✅ **ALREADY IMPLEMENTED**
+
+**What's Complete:**
+- ✅ `failed_registrations` table created (`scripts/init-database.sh`)
+- ✅ Failed registration logging implemented (`config/opensips.cfg.template` lines 2088-2154)
+- ✅ Request metadata storage (source IP, port, user agent) via AVPs (line ~607)
+- ✅ Logs 403 Forbidden and other failures (excludes 401 - normal auth challenge)
+- ✅ Fail2Ban integration configured to monitor failed registration logs
+- ✅ `door_knock_attempts` table and logging also implemented
+
+**Next Steps:** Phase 1.1 is complete - can proceed to Phase 2 (Rate Limiting & Attack Mitigation)
+
+---
 
 ### 1.2 Registration Status Tracking ❌ **DEFERRED - LOW VALUE**
 

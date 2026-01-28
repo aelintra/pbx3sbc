@@ -8,7 +8,12 @@
 
 ## Overview
 
-Phase 0 involves testing three key OpenSIPS security modules in a controlled environment to determine if they meet our requirements before committing to implementation. This follows the "standard approach first" principle.
+Phase 0 involves testing key OpenSIPS security modules in a controlled environment to determine if they meet our requirements before committing to implementation. This follows the "standard approach first" principle.
+
+**Modules to Test:**
+- Pike module (flood detection) ✅ **ACTIVE**
+- Ratelimit module (rate limiting) ⏸️ **DEFERRED** - Will revisit later
+- Permissions module ❌ **SKIPPED** - Using Fail2Ban instead (see `docs/PHASE-0-PERMISSIONS-DECISION.md`)
 
 ---
 
@@ -25,7 +30,7 @@ Phase 0 involves testing three key OpenSIPS security modules in a controlled env
 - OpenSIPS 3.6 Module Documentation: https://opensips.org/html/docs/modules/3.6.x/
 - Pike Module: https://opensips.org/html/docs/modules/3.6.x/pike.html
 - Ratelimit Module: https://opensips.org/html/docs/modules/3.6.x/ratelimit.html
-- Permissions Module: https://opensips.org/html/docs/modules/3.6.x/permissions.html
+- Permissions Module: **SKIPPED** - Using Fail2Ban for IP blocking (see `docs/PHASE-0-PERMISSIONS-DECISION.md`)
 
 ---
 
@@ -147,7 +152,18 @@ Create `docs/PHASE-0-PIKE-RESULTS.md` with:
 
 ---
 
-## Task 0.1.2: Test Ratelimit Module (Rate Limiting)
+## Task 0.1.2: Test Ratelimit Module (Rate Limiting) - **DEFERRED**
+
+**Decision:** Defer ratelimit module testing for now
+
+**Rationale:**
+- Rate limiting is a future consideration
+- Current priority is flood detection (Pike module)
+- Can be evaluated later when rate limiting requirements are clearer
+
+**Status:** ⏸️ **DEFERRED** - Will revisit in future phase
+
+---
 
 ### Step 1: Review Ratelimit Module Documentation
 **Time:** 15 minutes
@@ -260,124 +276,22 @@ Create `docs/PHASE-0-RATELIMIT-RESULTS.md` with:
 
 ---
 
-## Task 0.1.3: Test Permissions Module (IP Access Control)
+## Task 0.1.3: Permissions Module - **SKIPPED**
 
-### Step 1: Review Permissions Module Documentation
-**Time:** 15 minutes
+**Decision:** Skip permissions module testing
 
-1. Read the permissions module documentation
-2. Note key parameters:
-   - Database URL
-   - Table name
-   - Default allow/deny behavior
-3. Note available functions:
-   - `allow_address()` - Check if IP is allowed
-   - `allow_source_address()` - Check source IP
-   - `allow_trusted()` - Check trusted IPs
-4. Note database schema requirements
+**Rationale:**
+- Fail2Ban already provides effective IP blocking at firewall level (iptables/ufw)
+- Fail2Ban blocks packets before they reach OpenSIPS (more effective)
+- Permissions module would block at application level (less effective, adds load)
+- Fail2Ban already implemented and working for brute force detection
+- No clear advantage of permissions module over Fail2Ban for our use case
+- Pike module handles automatic flood-based IP blocking
+- Manual IP blocking can use Fail2Ban whitelist/ban management
 
-**Deliverable:** Notes on permissions module capabilities
+**Conclusion:** Fail2Ban is sufficient for IP blocking needs. Permissions module testing is unnecessary.
 
-### Step 2: Create Test Configuration
-**Time:** 30 minutes
-
-1. Create a test branch: `git checkout -b phase0-permissions-test`
-2. Review database schema requirements
-3. Add permissions module to `config/opensips.cfg.template`:
-   ```opensips
-   loadmodule "permissions.so"
-   
-   modparam("permissions", "db_url", "mysql://opensips:password@localhost/opensips")
-   modparam("permissions", "db_table", "permissions")
-   modparam("permissions", "default_allow_file", "/etc/opensips/permissions.allow")
-   ```
-
-4. Create database table:
-   ```sql
-   CREATE TABLE permissions (
-       id INT AUTO_INCREMENT PRIMARY KEY,
-       grp INT NOT NULL DEFAULT 1,
-       ip_addr VARCHAR(50) NOT NULL,
-       mask INT NOT NULL DEFAULT 32,
-       port INT NOT NULL DEFAULT 0,
-       proto VARCHAR(4) DEFAULT NULL,
-       pattern VARCHAR(64) DEFAULT NULL,
-       context_info VARCHAR(32) DEFAULT NULL,
-       INDEX idx_grp (grp),
-       INDEX idx_ip_addr (ip_addr)
-   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-   ```
-
-5. Add permission check in request route:
-   ```opensips
-   route {
-       # Check IP permissions first
-       if (!allow_source_address("1")) {  # Check group 1
-           xlog("L_WARN", "PERMISSIONS: IP $si not allowed\n");
-           sl_send_reply(403, "Forbidden");
-           exit;
-       }
-       # ... rest of routing
-   }
-   ```
-
-6. Test configuration syntax:
-   ```bash
-   opensips -C -f /etc/opensips/opensips.cfg
-   ```
-
-**Deliverable:** Test configuration file
-
-### Step 3: Test Permissions Module
-**Time:** 30 minutes
-
-1. **Deploy test configuration:**
-   ```bash
-   sudo systemctl restart opensips
-   sudo systemctl status opensips
-   ```
-
-2. **Test whitelist:**
-   - Add test IP to permissions table:
-     ```sql
-     INSERT INTO permissions (grp, ip_addr, mask, port) 
-     VALUES (1, '192.168.1.100', 32, 0);
-     ```
-   - Send request from whitelisted IP
-   - Verify request succeeds
-
-3. **Test blacklist:**
-   - Remove IP from permissions table (or use different group)
-   - Send request from non-whitelisted IP
-   - Verify request gets 403 response
-
-4. **Test database performance:**
-   - Measure lookup time for permission checks
-   - Check database query performance
-   - Test with multiple entries
-
-5. **Test multi-tenant support:**
-   - Try different groups
-   - Verify group-based access control works
-
-**Deliverable:** Test results documenting:
-- Does IP blocking work?
-- Database lookups performant: Yes/No
-- Multi-tenant support: Yes/No
-- Whitelist/blacklist management: Easy/Complex
-- Any issues encountered
-
-### Step 4: Document Permissions Findings
-**Time:** 15 minutes
-
-Create `docs/PHASE-0-PERMISSIONS-RESULTS.md` with:
-- Module loaded successfully: Yes/No
-- IP blocking works: Yes/No
-- Database performance: Good/Acceptable/Slow
-- Multi-tenant support: Yes/No
-- Configuration recommendations
-- Any issues encountered
-- Recommendation: Use/Don't use/Needs more testing
+**See:** `docs/PHASE-0-PERMISSIONS-DECISION.md` for detailed analysis
 
 ---
 
@@ -388,13 +302,13 @@ Create `docs/PHASE-0-PERMISSIONS-RESULTS.md` with:
 
 1. Review all test results:
    - Pike module results
-   - Ratelimit module results
-   - Permissions module results
+   - Ratelimit module decision (deferred - will revisit later)
+   - Permissions module decision (skipped - using Fail2Ban)
 
 2. Compare modules against requirements:
    - Does pike meet flood detection needs?
-   - Does ratelimit meet rate limiting needs?
-   - Does permissions meet IP blocking needs?
+   - Rate limiting: Deferred for future evaluation
+   - Does Fail2Ban meet IP blocking needs? (permissions module skipped)
 
 3. Identify gaps:
    - What features are missing?
@@ -416,13 +330,13 @@ Create `docs/SECURITY-ARCHITECTURE-DECISIONS.md` with:
      - Rationale
      - Configuration approach
    - **Ratelimit Module:**
-     - Decision: Use/Don't use/Custom
-     - Rationale
-     - Configuration approach
-   - **Permissions Module:**
-     - Decision: Use/Don't use/Custom
-     - Rationale
-     - Configuration approach
+     - Decision: Deferred - Will evaluate in future phase
+     - Rationale: Not immediate priority, can be added later
+     - Configuration approach: TBD when evaluated
+   - **IP Blocking:**
+     - Decision: Use Fail2Ban (permissions module skipped)
+     - Rationale: Fail2Ban provides firewall-level blocking (more effective)
+     - Configuration: Already implemented
 
 3. **Implementation Plan**
    - Phase 1 approach (based on module decisions)
@@ -441,8 +355,8 @@ Create `docs/SECURITY-ARCHITECTURE-DECISIONS.md` with:
 ## Phase 0 Completion Checklist
 
 - [ ] Pike module tested and documented
-- [ ] Ratelimit module tested and documented
-- [ ] Permissions module tested and documented
+- [x] Ratelimit module decision made (deferred - will revisit later)
+- [x] Permissions module decision made (skipped - using Fail2Ban)
 - [ ] Architecture decision document created
 - [ ] All findings reviewed and decisions made
 - [ ] Ready to proceed to Phase 1
@@ -452,10 +366,10 @@ Create `docs/SECURITY-ARCHITECTURE-DECISIONS.md` with:
 ## Estimated Time
 
 - Task 0.1.1 (Pike): ~2 hours
-- Task 0.1.2 (Ratelimit): ~2 hours
-- Task 0.1.3 (Permissions): ~2 hours
+- Task 0.1.2 (Ratelimit): **DEFERRED** - Will revisit later
+- Task 0.1.3 (Permissions): **SKIPPED** - Decision made (using Fail2Ban)
 - Task 0.1.4 (Architecture): ~1.5 hours
-- **Total:** ~7.5 hours (can be done over multiple sessions)
+- **Total:** ~3.5 hours (can be done over multiple sessions)
 
 ---
 
