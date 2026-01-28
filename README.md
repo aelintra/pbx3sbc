@@ -10,7 +10,7 @@ cd PBX3sbc
 sudo ./install.sh
 ```
 
-See [03-Install_notes.md](03-Install_notes.md) for detailed installation instructions.
+See [03-Install_notes.md](docs/03-Install_notes.md) for detailed installation instructions.
 
 ## Features
 
@@ -24,8 +24,8 @@ See [03-Install_notes.md](03-Install_notes.md) for detailed installation instruc
 ## Documentation
 
 - **[Project Context](docs/PROJECT-CONTEXT.md)** - Quick start guide for understanding the project (start here!)
-- [Installation Guide](03-Install_notes.md) - Complete installation instructions
-- [Testing Guide](docs/TESTING.md) - How to test the installation
+- [Installation Guide](docs/03-Install_notes.md) - Complete installation instructions
+- [Testing Guide](docs/05-Testing.md) - How to test the installation
 
 ## Project Structure
 
@@ -33,8 +33,9 @@ See [03-Install_notes.md](03-Install_notes.md) for detailed installation instruc
 PBX3sbc/
 ├── install.sh              # Main installation script
 ├── test-installation.sh    # Automated test suite
-├── 03-Install_notes.md              # Installation guide
-├── TESTING.md              # Testing guide
+├── docs/
+│   ├── 03-Install_notes.md # Installation guide
+│   └── 05-Testing.md       # Testing guide
 ├── scripts/                # Helper scripts
 │   ├── init-database.sh    # Initialize database
 │   ├── add-domain.sh       # Add domain to routing
@@ -82,7 +83,7 @@ sudo ./scripts/restore-database.sh "2024-01-15T10:30:00Z"
 sudo ./test-installation.sh
 
 # Or follow the manual testing guide
-# See TESTING.md for detailed testing procedures
+# See docs/05-Testing.md for detailed testing procedures
 ```
 
 ## Requirements

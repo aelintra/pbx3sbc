@@ -21,6 +21,16 @@ fi
 
 echo "Initializing OpenSIPS MySQL database '${DB_NAME}'..."
 
+# Verify database connection before proceeding
+echo "Verifying database connection..."
+if ! mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1;" >/dev/null 2>&1; then
+    echo "Error: Cannot connect to database '${DB_NAME}' as user '${DB_USER}'"
+    echo "Please verify database credentials are correct"
+    exit 1
+fi
+echo "Database connection verified."
+echo
+
 # Schema files location (installed with OpenSIPS packages)
 SCHEMA_DIR="/usr/share/opensips/mysql"
 
@@ -52,7 +62,21 @@ done
 # Load core schema (standard-create.sql) - includes version table
 # Idempotent: version table uses CREATE TABLE IF NOT EXISTS
 echo "Loading core OpenSIPS schema from ${SCHEMA_DIR}/standard-create.sql..."
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1 | grep -v "already exists" || true
+# Capture output and check for errors
+SCHEMA_OUTPUT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCHEMA_DIR}/standard-create.sql" 2>&1)
+SCHEMA_EXIT_CODE=$?
+
+if [[ $SCHEMA_EXIT_CODE -ne 0 ]]; then
+    echo "Error: Failed to load core schema (exit code: $SCHEMA_EXIT_CODE)"
+    echo "$SCHEMA_OUTPUT" | grep -v "already exists" || echo "$SCHEMA_OUTPUT"
+    exit 1
+fi
+
+# Show any warnings (but not "already exists" messages)
+if echo "$SCHEMA_OUTPUT" | grep -v "already exists" | grep -v "^$" | grep -q "."; then
+    echo "$SCHEMA_OUTPUT" | grep -v "already exists" | grep -v "^$"
+fi
+
 echo "Core schema loaded successfully."
 
 # Load accounting schema (acc, missed_calls tables)

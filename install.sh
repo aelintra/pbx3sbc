@@ -753,9 +753,11 @@ initialize_database() {
             log_info "Database already exists - if you need to reinitialize, run: sudo ${SCRIPT_DIR}/init-database.sh"
             return
         fi
-        log_info "Dropping existing database for reinitialization..."
+        log_info "Dropping existing database and user for reinitialization..."
         mysql -u root <<EOF
 DROP DATABASE IF EXISTS ${DB_NAME};
+DROP USER IF EXISTS '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
 EOF
     fi
     
@@ -774,6 +776,38 @@ EOF
     fi
     
     log_success "MySQL database and user created"
+    
+    # Small delay to ensure privileges are flushed
+    sleep 1
+    
+    # Verify database user can connect before proceeding
+    log_info "Verifying database user credentials..."
+    if mysql -u "$DB_USER" -p"$DB_PASS" -e "SELECT 1;" 2>/dev/null; then
+        log_success "Database user credentials verified"
+    else
+        log_error "Database user cannot connect - password may be incorrect"
+        log_error "Attempting to verify with root access..."
+        # Try to verify user exists and check password
+        if mysql -u root -e "SELECT User, Host FROM mysql.user WHERE User='${DB_USER}' AND Host='localhost';" 2>/dev/null | grep -q "${DB_USER}"; then
+            log_warn "User exists but password verification failed"
+            log_warn "Trying to reset password..."
+            mysql -u root <<EOF
+ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+FLUSH PRIVILEGES;
+EOF
+            sleep 1
+            # Retry verification
+            if mysql -u "$DB_USER" -p"$DB_PASS" -e "SELECT 1;" 2>/dev/null; then
+                log_success "Password reset successful - database user credentials verified"
+            else
+                log_error "Password reset failed - please check MySQL configuration"
+                return 1
+            fi
+        else
+            log_error "User does not exist - please check MySQL configuration"
+            return 1
+        fi
+    fi
     
     # Use the dedicated init-database.sh script
     # Set environment variables for MySQL configuration
