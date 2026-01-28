@@ -2171,10 +2171,10 @@ event_route[E_PIKE_BLOCKED] {
     # Log blocked IP for monitoring and analysis
     xlog("L_WARN", "PIKE: IP $si blocked due to flood detection (automatic mode)\n");
     
-    # TODO Phase 3: Log to security_events table when Phase 3 is implemented
-    # $var(query) = "INSERT INTO security_events (event_type, source_ip, severity, details, event_time) 
-    #     VALUES ('flood_detected', '" + $si + "', 'high', 'Pike module blocked IP', NOW())";
-    # sql_query($var(query));
+    # NOTE: Phase 3.1 (security_events table) was deferred - low value
+    # Pike flood detection is already logged via xlog() above
+    # Detailed security data is in failed_registrations and door_knock_attempts tables
+    # If security_events table is needed in future, can be added here
     
     # TODO Phase 5: Optional - Trigger external script for firewall integration (iptables/ipset)
     # Using exec module to pipe blocked IPs to iptables/ipset

@@ -674,9 +674,82 @@ Both should be considered when detecting brute force patterns.
 
 ## Phase 3: Monitoring & Alerting (Weeks 6-7)
 
-### 3.1 Security Event Logging ✅ **HIGH CONFIDENCE**
+### 3.1 Security Event Logging ❌ **DEFERRED - LOW VALUE**
 
 **Objective:** Comprehensive logging of all security events
+
+**Status:** ❌ **DEFERRED** - Decision made to skip this phase based on value analysis
+
+**Decision:** Skip Phase 3.1 - Detailed logging already exists, and OpenSIPS cannot log most security events
+
+---
+
+## Why Phase 3.1 Has Low Value
+
+### What `security_events` Table Would Provide
+
+A unified `security_events` table tracking:
+- Event type: `registration_failure`, `scanner_detected`, `flood_detected`, `brute_force_detected`, `rate_limit_exceeded`, `ip_blocked`, `username_enumeration`
+- Severity levels: `info`, `warning`, `error`, `critical`
+- Resolved status: For alerting/triage workflow
+- Summary data: Less detailed than dedicated tables
+
+### What We Already Have
+
+1. **Detailed Tables (Phase 1.1):**
+   - `failed_registrations` - Detailed registration failure data (username, domain, source IP, user agent, response code, etc.)
+   - `door_knock_attempts` - Detailed door-knock data (domain, source IP, user agent, method, reason, etc.)
+
+2. **Pike Flood Detection:**
+   - `event_route[E_PIKE_BLOCKED]` - Already logs via `xlog()` when Pike blocks an IP
+   - Can be monitored via log files
+
+3. **Fail2ban Brute Force Detection:**
+   - Monitors OpenSIPS logs and blocks at firewall level
+   - OpenSIPS cannot detect when Fail2ban triggers (external process)
+   - Fail2ban logs its own actions
+
+### Analysis: What Can OpenSIPS Actually Log?
+
+**Unique events OpenSIPS can log:**
+- ✅ `flood_detected` - From Pike module `event_route[E_PIKE_BLOCKED]` (only one unique event!)
+
+**Events already in detailed tables:**
+- ❌ `registration_failure` - Already in `failed_registrations` table
+- ❌ `scanner_detected` - Already in `door_knock_attempts` table (when `reason='scanner_detected'`)
+
+**Events OpenSIPS cannot log:**
+- ❌ `brute_force_detected` - Fail2ban runs outside OpenSIPS, OpenSIPS doesn't know when it triggers
+- ❌ `ip_blocked` - Manual blocking (not an OpenSIPS event) or Fail2ban (OpenSIPS doesn't know)
+- ⏸️ `rate_limit_exceeded` - Deferred/not implemented
+- ⏸️ `username_enumeration` - Future/deferred
+
+**Conclusion:** Only one unique event (`flood_detected` from Pike) can be logged from OpenSIPS. Everything else is either already captured in detailed tables or happens outside OpenSIPS.
+
+### Why Skip Phase 3.1
+
+1. **Minimal Unique Value:** Only one unique event type (`flood_detected`) that isn't already captured
+2. **Duplication Risk:** Would duplicate data already in `failed_registrations` and `door_knock_attempts`
+3. **External Events:** Most security events (Fail2ban, manual blocking) happen outside OpenSIPS
+4. **Existing Logging:** Pike floods already logged via `xlog()`, Fail2ban has its own logging
+5. **Complexity vs. Value:** Adding another table for minimal benefit
+
+### Alternative: Use Existing Logging
+
+- **Detailed Analysis:** Use `failed_registrations` and `door_knock_attempts` tables
+- **Flood Detection:** Monitor Pike `xlog()` entries or Fail2ban logs
+- **Brute Force:** Monitor Fail2ban logs and status
+- **Summary Views:** Create SQL views if summary/aggregation needed (similar to Phase 1.2 approach)
+
+**Skip Phase 3.1** - Focus on higher-value features:
+- Phase 3.3: Statistics & Reporting (create views/scripts to analyze existing data)
+- Phase 5.1: IP Blocking System (manual/administrative blocking)
+- Phase 3.2: Alerting System (can monitor existing tables/logs)
+
+---
+
+<details>
+<summary>Original Phase 3.1 Implementation Plan (Deferred)</summary>
 
 #### Step 3.1.1: Create Security Events Table ✅ **HIGH CONFIDENCE**
 - **What:** Create `security_events` table
@@ -695,6 +768,8 @@ Both should be considered when detecting brute force patterns.
   - Rate limit violations → `rate_limit_exceeded` event
   - IP blocking → `ip_blocked` event
   - Scanner detection → `scanner_detected` event
+
+</details>
 
 ### 3.2 Alerting System ⚠️ **MEDIUM CONFIDENCE**
 
@@ -922,7 +997,7 @@ Both should be considered when detecting brute force patterns.
 - **Phase 1.2:** Registration status tracking ❌ **DEFERRED - LOW VALUE** (see analysis above)
 - **Phase 2.2:** Brute Force Detection ✅ **COMPLETED:** Fail2ban integration implemented
 - **Phase 2.3:** Flood detection ✅ **UPDATED:** Pike module with event_route (recommended method)
-- **Phase 3.1:** Security event logging
+- **Phase 3.1:** Security event logging ❌ **DEFERRED - LOW VALUE** (see analysis above)
 - **Phase 3.3:** Statistics & reporting
 - **Phase 5.1:** IP blocking system
 - **Phase 5.2:** Automatic block expiration
@@ -966,10 +1041,9 @@ Both should be considered when detecting brute force patterns.
 4. ✅ Create brute force detection
 
 ### Weeks 6-7: Monitoring (High Confidence)
-1. ✅ Create security_events table
-2. ✅ Add security event logging throughout
-3. ⚠️ Implement alerting system
-4. ✅ Create statistics views and reporting scripts
+1. ❌ **SKIPPED:** Security event logging (low value - see analysis above)
+2. ⚠️ Implement alerting system (can monitor existing tables/logs)
+3. ✅ Create statistics views and reporting scripts (analyze existing data)
 
 ### Weeks 8-9: Advanced Detection (Lower Confidence)
 1. ⚠️ Implement username enumeration detection
@@ -1034,7 +1108,7 @@ Both should be considered when detecting brute force patterns.
 ---
 
 **Last Updated:** January 2026  
-**Status:** Planning complete, ready for Phase 0 research
+**Status:** Phase 1.1 and 2.2 complete, Phase 3.1 deferred
 
 ## Reference Links
 
