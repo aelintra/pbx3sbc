@@ -293,6 +293,37 @@ EOF
     echo "  ✓ sessions table created successfully."
 fi
 
+# Create Laravel cache tables for admin panel
+# Idempotent: check if table exists before creating
+echo "Creating Laravel cache tables (for admin panel)..."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'cache';" 2>/dev/null | grep -q "cache"; then
+    echo "  ✓ cache table already exists - skipping creation (idempotent)"
+else
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+CREATE TABLE cache (
+    \`key\` VARCHAR(255) NOT NULL PRIMARY KEY,
+    value MEDIUMTEXT NOT NULL,
+    expiration INT NOT NULL,
+    INDEX idx_cache_expiration (expiration)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+EOF
+    echo "  ✓ cache table created successfully."
+fi
+
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'cache_locks';" 2>/dev/null | grep -q "cache_locks"; then
+    echo "  ✓ cache_locks table already exists - skipping creation (idempotent)"
+else
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+CREATE TABLE cache_locks (
+    \`key\` VARCHAR(255) NOT NULL PRIMARY KEY,
+    owner VARCHAR(255) NOT NULL,
+    expiration INT NOT NULL,
+    INDEX idx_cache_locks_expiration (expiration)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+EOF
+    echo "  ✓ cache_locks table created successfully."
+fi
+
 echo "Custom tables and schema modifications created successfully."
 
 echo "Database initialized successfully!"
