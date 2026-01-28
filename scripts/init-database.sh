@@ -272,6 +272,27 @@ EOF
     echo "  ✓ door_knock_attempts table created successfully."
 fi
 
+# Create Laravel sessions table for admin panel
+# Idempotent: check if table exists before creating
+echo "Creating Laravel sessions table (for admin panel)..."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'sessions';" 2>/dev/null | grep -q "sessions"; then
+    echo "  ✓ sessions table already exists - skipping creation (idempotent)"
+else
+    mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
+CREATE TABLE sessions (
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    user_id BIGINT UNSIGNED NULL,
+    ip_address VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    payload LONGTEXT NOT NULL,
+    last_activity INT NOT NULL,
+    INDEX idx_sessions_user_id (user_id),
+    INDEX idx_sessions_last_activity (last_activity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+EOF
+    echo "  ✓ sessions table created successfully."
+fi
+
 echo "Custom tables and schema modifications created successfully."
 
 echo "Database initialized successfully!"
