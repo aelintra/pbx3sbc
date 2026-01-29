@@ -324,6 +324,21 @@ EOF
     echo "  ✓ cache_locks table created successfully."
 fi
 
+# Peering tables (drouting, uac_registrant, alias_db) - Phase 0 peering
+# See workingdocs/PEERING-PLAN.md
+echo "Creating peering tables (dr_gateways, dr_rules, dr_carriers, dr_groups, registrant, dbaliases)..."
+if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SHOW TABLES LIKE 'dr_gateways';" 2>/dev/null | grep -q "dr_gateways"; then
+    echo "  ✓ Peering tables already exist - skipping creation (idempotent)"
+else
+    if [[ -f "${SCRIPT_DIR}/peering-create.sql" ]]; then
+        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "${SCRIPT_DIR}/peering-create.sql"
+        echo "  ✓ Peering tables created successfully."
+    else
+        echo "  Warning: peering-create.sql not found at ${SCRIPT_DIR}/peering-create.sql"
+        echo "  Peering tables will not be created - see workingdocs/PEERING-PLAN.md"
+    fi
+fi
+
 echo "Custom tables and schema modifications created successfully."
 
 echo "Database initialized successfully!"

@@ -35,6 +35,7 @@
 - **pbx3sbc-admin** – Laravel/Filament admin panel (separate repo).
 - **docs/** – User-facing and project docs (see [docs/index.md](../docs/index.md)).
 - **config/fail2ban/** – Fail2ban filters and jail config.
+- **OpenSIPS DB schema (all tables, all modules):** [https://opensips.org/html/docs/db/db-schema-3.2.x.html](https://opensips.org/html/docs/db/db-schema-3.2.x.html) — drouting, carrierroute, location, dispatcher, alias, acc, dialog, etc.
 
 ---
 
