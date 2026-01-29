@@ -277,8 +277,8 @@ www-data ALL=(ALL) NOPASSWD: /home/ubuntu/pbx3sbc/scripts/sync-fail2ban-whitelis
 
 ## Related Documentation
 
-- `docs/F2B-ADMIN-PANEL-IMPLEMENTATION-SUMMARY.md` - Admin panel implementation details
-- `docs/F2B-REMOTE-MANAGEMENT-OPTIONS.md` - Remote management architecture
+- `docs/security/fail2ban/ADMIN-PANEL-IMPLEMENTATION.md` - Admin panel implementation details
+- `docs/security/fail2ban/REMOTE-MANAGEMENT-OPTIONS.md` - Remote management architecture
 - `config/fail2ban/README.md` - Fail2ban configuration guide
 - `scripts/setup-admin-panel-sudoers.sh` - Sudoers setup script
 
