@@ -49,6 +49,9 @@ cat > "$SUDOERS_FILE" <<EOF
 # Sudoers configuration for pbx3sbc-admin panel
 # Allows www-data user to run Fail2ban management commands without password
 
+# Preserve environment variables for sync script (DB_NAME, DB_USER, DB_PASS)
+Defaults:www-data env_keep += "DB_NAME DB_USER DB_PASS"
+
 # Systemd service status check
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active fail2ban
 
@@ -58,8 +61,7 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force b
 www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force unbanip *
 www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force unban --all
 
-# Whitelist sync script
-# Note: Use 'sudo -E' when calling to preserve environment variables
+# Whitelist sync script (with environment variable preservation)
 www-data ALL=(ALL) NOPASSWD: $SYNC_SCRIPT_PATH
 EOF
 
