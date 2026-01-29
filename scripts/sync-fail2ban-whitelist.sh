@@ -56,18 +56,47 @@ BACKUP_FILE="${BACKUP_DIR}/opensips-brute-force.conf.$(date +%Y%m%d_%H%M%S)"
 cp "$JAIL_CONFIG" "$BACKUP_FILE"
 echo -e "${GREEN}Backup created: $BACKUP_FILE${NC}"
 
-# Update ignoreip line in config
-if grep -q "^ignoreip\s*=" "$JAIL_CONFIG"; then
-    # Replace existing ignoreip line
-    sed -i "s|^ignoreip\s*=.*|ignoreip = $IPS|" "$JAIL_CONFIG"
-else
-    # Add new ignoreip line
-    if grep -q "^# ignoreip" "$JAIL_CONFIG"; then
-        # Add after commented ignoreip line
-        sed -i "/^# ignoreip/a ignoreip = $IPS" "$JAIL_CONFIG"
-    else
-        # Add before Notes section
+# Remove ALL existing ignoreip lines (including duplicates) to prevent configuration errors
+# This ensures we only have one ignoreip line
+sed -i '/^ignoreip\s*=/d' "$JAIL_CONFIG"
+
+# Remove any comment lines that were added by previous syncs (lines starting with # followed by IP/CIDR)
+sed -i '/^#\s\+[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+/d' "$JAIL_CONFIG"
+
+# Add new ignoreip line in a safe location
+# Prefer to add before the Notes section, or after commented ignoreip examples
+if grep -q "^# Notes:" "$JAIL_CONFIG"; then
+    # Insert before Notes section (most reliable location)
+    if [[ -n "$IPS" ]]; then
         sed -i "/^# Notes:/i ignoreip = $IPS" "$JAIL_CONFIG"
+    else
+        # Empty ignoreip (Fail2ban allows this)
+        sed -i "/^# Notes:/i ignoreip =" "$JAIL_CONFIG"
+    fi
+elif grep -q "^# ignoreip" "$JAIL_CONFIG"; then
+    # Insert after the last commented ignoreip example
+    # Use awk to find the last occurrence and add after it
+    LAST_LINE=$(grep -n "^# ignoreip" "$JAIL_CONFIG" | tail -1 | cut -d: -f1)
+    if [[ -n "$LAST_LINE" ]]; then
+        if [[ -n "$IPS" ]]; then
+            sed -i "${LAST_LINE}a ignoreip = $IPS" "$JAIL_CONFIG"
+        else
+            sed -i "${LAST_LINE}a ignoreip =" "$JAIL_CONFIG"
+        fi
+    else
+        # Fallback: add at end of file
+        if [[ -n "$IPS" ]]; then
+            echo "ignoreip = $IPS" >> "$JAIL_CONFIG"
+        else
+            echo "ignoreip =" >> "$JAIL_CONFIG"
+        fi
+    fi
+else
+    # Fallback: add at end of file
+    if [[ -n "$IPS" ]]; then
+        echo "ignoreip = $IPS" >> "$JAIL_CONFIG"
+    else
+        echo "ignoreip =" >> "$JAIL_CONFIG"
     fi
 fi
 
