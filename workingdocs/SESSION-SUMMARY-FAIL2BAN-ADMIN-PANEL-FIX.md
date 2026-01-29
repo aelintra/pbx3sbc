@@ -249,12 +249,29 @@ www-data ALL=(ALL) NOPASSWD: /home/ubuntu/pbx3sbc/scripts/sync-fail2ban-whitelis
 
 ---
 
+## Installer Updates
+
+✅ **Completed:**
+- Updated `install.sh` to automatically run `setup-admin-panel-sudoers.sh` during Fail2ban configuration
+- Added check for duplicate `ignoreip` entries in existing configs (calls fix script if found)
+- Added notes about web server restart requirement after admin panel installation
+- Improved installation instructions for admin panel integration
+
+**Commit:** `902d426` - Update installer to include admin panel sudoers setup
+
+**What happens during fresh install:**
+1. Fail2ban configuration is copied
+2. If existing config has duplicate `ignoreip` entries, they're automatically fixed
+3. Sudoers configuration for admin panel is automatically set up
+4. User is reminded to restart web server after installing admin panel
+
 ## Next Steps / Future Work
 
 1. **Test Whitelist Sync:** Verify that adding a whitelist entry in admin panel automatically syncs to Fail2ban config
 2. **Test Ban/Unban:** Verify ban and unban functionality works from admin panel
 3. **Monitor Logs:** Watch for any edge cases or errors in production use
 4. **Documentation:** Update admin panel documentation with sudoers setup requirements
+5. ✅ **Update Installers:** Completed - installers now include all fixes
 
 ---
 
