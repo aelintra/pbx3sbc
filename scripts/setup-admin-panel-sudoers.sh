@@ -59,6 +59,7 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force u
 www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force unban --all
 
 # Whitelist sync script
+# Note: Use 'sudo -E' when calling to preserve environment variables
 www-data ALL=(ALL) NOPASSWD: $SYNC_SCRIPT_PATH
 EOF
 
