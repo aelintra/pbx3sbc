@@ -1180,6 +1180,20 @@ configure_fail2ban() {
             log_info "Fail2ban jail configuration already exists - backing up..."
             cp /etc/fail2ban/jail.d/opensips-brute-force.conf \
                /etc/fail2ban/jail.d/opensips-brute-force.conf.backup.$(date +%Y%m%d_%H%M%S) || true
+            
+            # Check for duplicate ignoreip entries and fix if found
+            if grep -c "^ignoreip\s*=" /etc/fail2ban/jail.d/opensips-brute-force.conf 2>/dev/null | grep -q "^[2-9]"; then
+                log_warn "Found duplicate ignoreip entries in existing config - fixing..."
+                if [[ -f "${SCRIPT_DIR}/fix-duplicate-ignoreip.sh" ]]; then
+                    "${SCRIPT_DIR}/fix-duplicate-ignoreip.sh" || {
+                        log_warn "Failed to fix duplicate entries - you may need to fix manually"
+                    }
+                else
+                    # Manual fix: remove all ignoreip lines, will be added by sync script
+                    sed -i '/^ignoreip\s*=/d' /etc/fail2ban/jail.d/opensips-brute-force.conf
+                    log_info "Removed duplicate ignoreip entries"
+                fi
+            fi
         fi
         
         cp "${CONFIG_DIR}/fail2ban/opensips-brute-force.conf" /etc/fail2ban/jail.d/ || {
@@ -1205,6 +1219,21 @@ configure_fail2ban() {
         log_warn "IMPORTANT: Before enabling Fail2ban in production, whitelist trusted customer IPs:"
         log_warn "  sudo ./scripts/manage-fail2ban-whitelist.sh add <IP_or_CIDR> [comment]"
         log_warn "  See config/fail2ban/README.md for details"
+        
+        # Setup sudoers for admin panel (if admin panel will be installed)
+        if [[ -f "${SCRIPT_DIR}/setup-admin-panel-sudoers.sh" ]]; then
+            log_info "Setting up sudoers configuration for admin panel..."
+            if "${SCRIPT_DIR}/setup-admin-panel-sudoers.sh" 2>/dev/null; then
+                log_success "Sudoers configuration for admin panel created"
+                log_info "Note: Restart web server after installing admin panel to apply sudoers changes"
+            else
+                log_warn "Failed to setup sudoers for admin panel - you can run it manually later:"
+                log_warn "  sudo ${SCRIPT_DIR}/setup-admin-panel-sudoers.sh"
+            fi
+        else
+            log_warn "Admin panel sudoers setup script not found - skipping"
+            log_warn "If installing admin panel, run manually: sudo ./scripts/setup-admin-panel-sudoers.sh"
+        fi
         
         # Don't restart Fail2ban yet - let user configure whitelist first
         # They can restart it manually or we can add a flag to enable it immediately
@@ -1400,8 +1429,13 @@ verify_installation() {
     if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
         echo "1. Configure Fail2ban whitelist (IMPORTANT before production):"
         echo "   sudo ./scripts/manage-fail2ban-whitelist.sh add <IP_or_CIDR> [comment]"
+        echo "   Or use the sync script: sudo ./scripts/sync-fail2ban-whitelist.sh"
         echo "   See config/fail2ban/README.md for details"
         echo "   Then start Fail2ban: sudo systemctl start fail2ban"
+        echo
+        echo "   Note: Sudoers configuration for admin panel has been set up."
+        echo "   If installing admin panel, restart web server after installation:"
+        echo "     sudo systemctl restart php*-fpm  # or apache2/nginx"
         echo
     fi
     echo "1. Add domains and dispatcher entries to the database:"
