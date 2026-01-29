@@ -11,7 +11,7 @@
 Successfully implemented Fail2Ban management capabilities in the admin panel, allowing administrators to manage whitelists, view banned IPs, and quickly unban blocked IPs without requiring SSH access.
 
 **Current Deployment:** Admin panel is **colocated** with OpenSIPS server (required for Fail2Ban management).  
-**Future Plan:** SSH-based remote execution for decoupled deployment (see [Remote Management Options](F2B-REMOTE-MANAGEMENT-OPTIONS.md)).
+**Future Plan:** SSH-based remote execution for decoupled deployment (see [Remote Management Options](REMOTE-MANAGEMENT-OPTIONS.md)).
 
 ---
 
@@ -196,7 +196,7 @@ Successfully implemented Fail2Ban management capabilities in the admin panel, al
 
 **Plan:** Refactor to support SSH-based remote execution for decoupled deployment.
 
-**Approach:** SSH-based remote execution (see [Remote Management Options](F2B-REMOTE-MANAGEMENT-OPTIONS.md))
+**Approach:** SSH-based remote execution (see [Remote Management Options](REMOTE-MANAGEMENT-OPTIONS.md))
 
 **Rationale:**
 - Message queue (RabbitMQ/Redis) would be more "modern" but is overkill for current needs
@@ -210,7 +210,7 @@ Successfully implemented Fail2Ban management capabilities in the admin panel, al
 3. **Phase 3 (Future):** Add server management (multiple OpenSIPS instances)
 4. **Phase 4 (Future):** Deploy admin panel independently
 
-**See:** `docs/F2B-REMOTE-MANAGEMENT-OPTIONS.md` for detailed architecture options
+**See:** `REMOTE-MANAGEMENT-OPTIONS.md` for detailed architecture options
 
 ---
 
@@ -335,7 +335,7 @@ php artisan migrate
 - Add server selection UI in admin panel
 - Update configuration to support SSH credentials per server
 
-**See:** `docs/F2B-REMOTE-MANAGEMENT-OPTIONS.md` for detailed implementation plan
+**See:** `REMOTE-MANAGEMENT-OPTIONS.md` for detailed implementation plan
 
 ### ⏸️ Permanent Blacklist Management
 
@@ -368,12 +368,12 @@ php artisan migrate
 
 ## Related Documentation
 
-- [Fail2Ban Deployment Decision](F2B-DEPLOYMENT-DECISION.md) - Colocated vs remote deployment strategy
-- [Fail2Ban Remote Management Options](F2B-REMOTE-MANAGEMENT-OPTIONS.md) - Future SSH-based architecture
-- [Fail2Ban Admin Panel Enhancement](F2B-ADMIN-PANEL-ENHANCEMENT.md) - Detailed enhancement specification
+- [Fail2Ban Deployment Decision](DEPLOYMENT-DECISION.md) - Colocated vs remote deployment strategy
+- [Fail2Ban Remote Management Options](REMOTE-MANAGEMENT-OPTIONS.md) - Future SSH-based architecture
+- [Fail2Ban Admin Panel Enhancement](ADMIN-PANEL-ENHANCEMENT.md) - Detailed enhancement specification
 - [Admin Panel Security Requirements](../pbx3sbc-admin/workingdocs/ADMIN-PANEL-SECURITY-REQUIREMENTS.md) - Overall security features
 - [Fail2Ban Configuration](../config/fail2ban/README.md) - Fail2Ban setup and configuration
-- [Security Implementation Plan](SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
+- [Security Implementation Plan](../SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
 
 ---
 

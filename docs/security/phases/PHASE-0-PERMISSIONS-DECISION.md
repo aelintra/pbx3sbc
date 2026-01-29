@@ -153,8 +153,8 @@
 
 - `config/fail2ban/README.md` - Fail2Ban configuration and usage
 - `scripts/manage-fail2ban-whitelist.sh` - Whitelist management
-- `docs/SECURITY-IMPLEMENTATION-PLAN.md` - Security project overview
-- `docs/PHASE-0-EXECUTION-PLAN.md` - Phase 0 testing plan
+- `../SECURITY-IMPLEMENTATION-PLAN.md` - Security project overview
+- `PHASE-0-EXECUTION-PLAN.md` - Phase 0 testing plan
 
 ---
 

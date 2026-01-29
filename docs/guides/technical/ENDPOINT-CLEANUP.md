@@ -219,4 +219,4 @@ sudo systemctl start cleanup-expired-endpoints.service
 
 - [Database Initialization](../scripts/init-database.sh)
 - [MySQL Port Opening Procedure](MYSQL-PORT-OPENING-PROCEDURE.md)
-- [OpenSIPS Routing Logic](opensips-routing-logic.md)
+- [OpenSIPS Routing Logic](../../architecture/routing-logic.md)

@@ -464,7 +464,7 @@ fail2ban-client set opensips-brute-force unban --all
 
 ## Related Documentation
 
-- [Security Implementation Plan](SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
+- [Security Implementation Plan](../SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
 - [Failed Registration Tracking](FAILED-REGISTRATION-TRACKING-COMPARISON.md) - Details on failed registration logging
 - [Fail2ban Configuration](../config/fail2ban/README.md) - Fail2ban setup and configuration
 

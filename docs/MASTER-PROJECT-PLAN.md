@@ -103,7 +103,7 @@ SIP Endpoints → OpenSIPS SBC → Asterisk Backends
 **Priority:** High  
 **Timeline:** 11 weeks (Phase 0-5)
 
-**Sub-Project:** See [SECURITY-THREAT-DETECTION-PROJECT.md](SECURITY-THREAT-DETECTION-PROJECT.md)
+**Sub-Project:** See [SECURITY-THREAT-DETECTION-PROJECT.md](security/SECURITY-THREAT-DETECTION-PROJECT.md)
 
 **Overview:**
 Comprehensive security enhancement project including registration security, rate limiting, threat detection, monitoring, and IP management.
@@ -892,11 +892,11 @@ High Availability
 
 ## Related Documents
 
-- [Security & Threat Detection Project](SECURITY-THREAT-DETECTION-PROJECT.md) - Detailed security project plan
-- [Endpoint Location Creation](ENDPOINT-LOCATION-CREATION.md) - Endpoint location handling documentation
-- [Endpoint Cleanup](ENDPOINT-CLEANUP.md) - Endpoint cleanup procedures
-- [Dialog State Explanation](DIALOG-STATE-EXPLANATION.md) - Dialog state values and troubleshooting
-- [MySQL Port Opening Procedure](MYSQL-PORT-OPENING-PROCEDURE.md) - MySQL port configuration guide
+- [Security & Threat Detection Project](security/SECURITY-THREAT-DETECTION-PROJECT.md) - Detailed security project plan
+- [Endpoint Location Creation](guides/technical/ENDPOINT-LOCATION-CREATION.md) - Endpoint location handling documentation
+- [Endpoint Cleanup](guides/technical/ENDPOINT-CLEANUP.md) - Endpoint cleanup procedures
+- [Dialog State Explanation](guides/technical/DIALOG-STATE-EXPLANATION.md) - Dialog state values and troubleshooting
+- [MySQL Port Opening Procedure](guides/technical/MYSQL-PORT-OPENING-PROCEDURE.md) - MySQL port configuration guide
 
 ---
 

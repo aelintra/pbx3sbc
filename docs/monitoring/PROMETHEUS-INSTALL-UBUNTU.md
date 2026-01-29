@@ -13,7 +13,7 @@ This guide covers installing Prometheus from the official Debian package reposit
 
 - Ubuntu 24.04 LTS (AMD64)
 - Root or sudo access
-- OpenSIPS with Prometheus module configured (see `docs/PROMETHEUS-GRAFANA-PLAN.md`)
+- OpenSIPS with Prometheus module configured (see `PROMETHEUS-GRAFANA-PLAN.md`)
 - Network access to download packages
 
 ---
@@ -782,7 +782,7 @@ After Prometheus and Node Exporter are installed and configured:
 
 1. **Verify OpenSIPS Integration** - Ensure OpenSIPS metrics are being collected
 2. **Verify Node Exporter Integration** - Ensure system metrics are being collected
-3. **Install Grafana** - See `docs/PROMETHEUS-GRAFANA-PLAN.md` for Grafana setup
+3. **Install Grafana** - See `PROMETHEUS-GRAFANA-PLAN.md` for Grafana setup
 4. **Import Grafana Dashboard** - Use OpenSIPS dashboard template (ID 6935) which requires both OpenSIPS and Node Exporter metrics
 5. **Create Custom Dashboards** - Build additional visualization dashboards
 6. **Configure Alerting** - Set up Alertmanager (optional)

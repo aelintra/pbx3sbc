@@ -339,7 +339,7 @@ mysql -u opensips -p opensips -e "SELECT * FROM failed_registrations ORDER BY at
 ## Related Documentation
 
 - [Endpoint Cleanup Documentation](ENDPOINT-CLEANUP.md)
-- [OpenSIPS Routing Logic](opensips-routing-logic.md)
+- [OpenSIPS Routing Logic](../../architecture/routing-logic.md)
 - [Database Schema](../scripts/init-database.sh)
 
 ## Summary

@@ -839,9 +839,9 @@ CREATE TABLE whitelisted_ips (
 
 ## Related Documentation
 
-- [Endpoint Location Creation](ENDPOINT-LOCATION-CREATION.md) - Current registration handling
-- [Endpoint Cleanup](ENDPOINT-CLEANUP.md) - Current cleanup procedures
-- [OpenSIPS Routing Logic](opensips-routing-logic.md) - Current routing implementation
+- [Endpoint Location Creation](../guides/technical/ENDPOINT-LOCATION-CREATION.md) - Current registration handling
+- [Endpoint Cleanup](../guides/technical/ENDPOINT-CLEANUP.md) - Current cleanup procedures
+- [OpenSIPS Routing Logic](../architecture/routing-logic.md) - Current routing implementation
 
 ## Notes
 

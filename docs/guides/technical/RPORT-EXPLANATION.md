@@ -165,7 +165,7 @@ Your current configuration already handles Rport correctly:
 
 - **RFC 3581**: "An Extension to the Session Initiation Protocol (SIP) for Symmetric Response Routing"
 - **OpenSIPS nathelper module**: Handles NAT traversal including Rport support
-- **docs/NAT-AUTO-DETECTION.md**: Your NAT environment auto-detection implementation
+- **NAT-AUTO-DETECTION.md**: Your NAT environment auto-detection implementation
 - **docs/ASTERISK-NAT-WITH-PROXY.md**: NAT configuration for Asterisk with OpenSIPS proxy
 
 ## Summary

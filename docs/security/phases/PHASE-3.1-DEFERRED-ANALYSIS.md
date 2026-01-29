@@ -174,5 +174,5 @@ If needed in the future, `security_events` table can be added when:
 
 ## Related Documentation
 
-- [Security Implementation Plan](SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
+- [Security Implementation Plan](../SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
 - [Phase 1.2 Deferred Analysis](PHASE-1.2-DEFERRED-ANALYSIS.md) - Similar value analysis for registration status tracking

@@ -13,7 +13,7 @@ Phase 0 involves testing key OpenSIPS security modules in a controlled environme
 **Modules to Test:**
 - Pike module (flood detection) ✅ **ACTIVE**
 - Ratelimit module (rate limiting) ⏸️ **DEFERRED** - Will revisit later
-- Permissions module ❌ **SKIPPED** - Using Fail2Ban instead (see `docs/PHASE-0-PERMISSIONS-DECISION.md`)
+- Permissions module ❌ **SKIPPED** - Using Fail2Ban instead (see `PHASE-0-PERMISSIONS-DECISION.md`)
 
 ---
 
@@ -30,7 +30,7 @@ Phase 0 involves testing key OpenSIPS security modules in a controlled environme
 - OpenSIPS 3.6 Module Documentation: https://opensips.org/html/docs/modules/3.6.x/
 - Pike Module: https://opensips.org/html/docs/modules/3.6.x/pike.html
 - Ratelimit Module: https://opensips.org/html/docs/modules/3.6.x/ratelimit.html
-- Permissions Module: **SKIPPED** - Using Fail2Ban for IP blocking (see `docs/PHASE-0-PERMISSIONS-DECISION.md`)
+- Permissions Module: **SKIPPED** - Using Fail2Ban for IP blocking (see `PHASE-0-PERMISSIONS-DECISION.md`)
 
 ---
 
@@ -141,7 +141,7 @@ Phase 0 involves testing key OpenSIPS security modules in a controlled environme
 ### Step 5: Document Pike Findings
 **Time:** 15 minutes
 
-Create `docs/PHASE-0-PIKE-RESULTS.md` with:
+Create `PHASE-0-PIKE-RESULTS.md` with:
 - Module loaded successfully: Yes/No
 - Automatic mode works: Yes/No
 - Event route works: Yes/No
@@ -264,7 +264,7 @@ Create `docs/PHASE-0-PIKE-RESULTS.md` with:
 ### Step 4: Document Ratelimit Findings
 **Time:** 15 minutes
 
-Create `docs/PHASE-0-RATELIMIT-RESULTS.md` with:
+Create `PHASE-0-RATELIMIT-RESULTS.md` with:
 - Module loaded successfully: Yes/No
 - Rate limiting works: Yes/No
 - Database persistence works: Yes/No
@@ -291,7 +291,7 @@ Create `docs/PHASE-0-RATELIMIT-RESULTS.md` with:
 
 **Conclusion:** Fail2Ban is sufficient for IP blocking needs. Permissions module testing is unnecessary.
 
-**See:** `docs/PHASE-0-PERMISSIONS-DECISION.md` for detailed analysis
+**See:** `PHASE-0-PERMISSIONS-DECISION.md` for detailed analysis
 
 ---
 
@@ -318,7 +318,7 @@ Create `docs/PHASE-0-RATELIMIT-RESULTS.md` with:
 ### Step 2: Create Decision Document
 **Time:** 45 minutes
 
-Create `docs/SECURITY-ARCHITECTURE-DECISIONS.md` with:
+Create `../SECURITY-ARCHITECTURE-DECISIONS.md` with:
 
 1. **Executive Summary**
    - Overall recommendation

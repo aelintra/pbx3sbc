@@ -683,16 +683,16 @@ curl http://localhost:8080/mi/get_statistics
 **References:**
 - OpenSIPS 3.6 Core Statistics Documentation: https://opensips.org/docs/modules/3.6.x/core.html#statistics
 - OpenSIPS Management Interface: https://opensips.org/docs/modules/3.6.x/mi_fifo.html
-- **Prometheus/Grafana Deployment Plan:** `docs/PROMETHEUS-GRAFANA-PLAN.md` - Complete deployment plan
+- **Prometheus/Grafana Deployment Plan:** `PROMETHEUS-GRAFANA-PLAN.md` - Complete deployment plan
 
 ---
 
 ## Related Documentation
 
 - `docs/PROJECT-CONTEXT.md` - Project overview
-- `docs/DIALOG-STATE-EXPLANATION.md` - Dialog state details
-- `docs/MASTER-PROJECT-PLAN.md` - Planned enhancements (includes Prometheus/Grafana)
-- `docs/PROMETHEUS-GRAFANA-PLAN.md` - **Complete Prometheus/Grafana deployment plan**
+- `../guides/technical/DIALOG-STATE-EXPLANATION.md` - Dialog state details
+- `../MASTER-PROJECT-PLAN.md` - Planned enhancements (includes Prometheus/Grafana)
+- `PROMETHEUS-GRAFANA-PLAN.md` - **Complete Prometheus/Grafana deployment plan**
 - `workingdocs/SESSION-SUMMARY-ACCOUNTING-CDR.md` - CDR implementation details
 - OpenSIPS 3.6 Statistics Documentation: https://opensips.org/docs/modules/3.6.x/core.html#statistics
 

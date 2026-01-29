@@ -599,7 +599,7 @@ sudo rm /usr/local/bin/node_exporter
 ## Next Steps After Successful Test
 
 1. **Deploy to additional test servers** (if multiple)
-2. **Set up Grafana** (optional - see `docs/PROMETHEUS-GRAFANA-PLAN.md`)
+2. **Set up Grafana** (optional - see `../monitoring/PROMETHEUS-GRAFANA-PLAN.md`)
 3. **Configure alerting** (optional - see Prometheus alerts.yml)
 4. **Document any issues** encountered
 5. **Plan production deployment**
@@ -608,7 +608,7 @@ sudo rm /usr/local/bin/node_exporter
 
 ## References
 
-- **Prometheus Installation Guide:** `docs/PROMETHEUS-INSTALL-UBUNTU.md`
-- **Prometheus & Grafana Plan:** `docs/PROMETHEUS-GRAFANA-PLAN.md`
-- **Statistics Overview:** `docs/STATISTICS-OVERVIEW.md`
+- **Prometheus Installation Guide:** `../monitoring/PROMETHEUS-INSTALL-UBUNTU.md`
+- **Prometheus & Grafana Plan:** `../monitoring/PROMETHEUS-GRAFANA-PLAN.md`
+- **Statistics Overview:** `../monitoring/STATISTICS-OVERVIEW.md`
 - **OpenSIPS Prometheus Module:** https://opensips.org/docs/modules/3.6.x/prometheus.html

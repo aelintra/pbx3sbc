@@ -230,7 +230,7 @@ modparam("prometheus", "statistics", "dispatcher:") # All dispatcher statistics
 
 **Deployment Options:**
 - **Native (Recommended):** Install via Debian package on Ubuntu 24.04 AMD64
-  - **See:** `docs/PROMETHEUS-INSTALL-UBUNTU.md` for detailed installation guide
+  - **See:** `PROMETHEUS-INSTALL-UBUNTU.md` for detailed installation guide
 - **Docker:** `prom/prometheus` container (alternative)
 - **Kubernetes:** If using K8s (future)
 
@@ -253,7 +253,7 @@ modparam("prometheus", "statistics", "dispatcher:") # All dispatcher statistics
 - System load (`node_load*`)
 - Process counts (`node_procs_*`)
 
-**Installation:** See `docs/PROMETHEUS-INSTALL-UBUNTU.md` for Node Exporter installation guide
+**Installation:** See `PROMETHEUS-INSTALL-UBUNTU.md` for Node Exporter installation guide
 
 ### 5. Grafana
 
@@ -678,11 +678,11 @@ curl http://localhost:8888/metrics
 
 **Goal:** Deploy Prometheus server to collect metrics
 
-**See:** `docs/PROMETHEUS-INSTALL-UBUNTU.md` for complete Ubuntu 24.04 AMD64 installation guide
+**See:** `PROMETHEUS-INSTALL-UBUNTU.md` for complete Ubuntu 24.04 AMD64 installation guide
 
 1. **Install Prometheus**
    ```bash
-   # Follow detailed guide: docs/PROMETHEUS-INSTALL-UBUNTU.md
+   # Follow detailed guide: PROMETHEUS-INSTALL-UBUNTU.md
    # Summary:
    # - Download Prometheus binary
    # - Create prometheus user
@@ -1196,7 +1196,7 @@ groups:
 
 - **OpenSIPS 3.6 Prometheus Module:** https://opensips.org/docs/modules/3.6.x/prometheus.html
 - **OpenSIPS 3.6 HTTPd Module:** https://opensips.org/docs/modules/3.6.x/httpd.html
-- **Prometheus Installation Guide (Ubuntu 24.04):** `docs/PROMETHEUS-INSTALL-UBUNTU.md`
+- **Prometheus Installation Guide (Ubuntu 24.04):** `PROMETHEUS-INSTALL-UBUNTU.md`
 - **Prometheus Documentation:** https://prometheus.io/docs/
 - **Grafana Documentation:** https://grafana.com/docs/
 

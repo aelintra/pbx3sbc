@@ -195,9 +195,9 @@
 
 ## Related Documentation
 
-- [Fail2Ban Admin Panel Implementation Summary](F2B-ADMIN-PANEL-IMPLEMENTATION-SUMMARY.md) - Current implementation details
-- [Fail2Ban Remote Management Options](F2B-REMOTE-MANAGEMENT-OPTIONS.md) - Detailed architecture options
-- [Fail2Ban Admin Panel Enhancement](F2B-ADMIN-PANEL-ENHANCEMENT.md) - Feature specifications
+- [Fail2Ban Admin Panel Implementation Summary](ADMIN-PANEL-IMPLEMENTATION.md) - Current implementation details
+- [Fail2Ban Remote Management Options](REMOTE-MANAGEMENT-OPTIONS.md) - Detailed architecture options
+- [Fail2Ban Admin Panel Enhancement](ADMIN-PANEL-ENHANCEMENT.md) - Feature specifications
 
 ---
 

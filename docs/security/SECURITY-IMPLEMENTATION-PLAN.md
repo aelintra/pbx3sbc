@@ -88,7 +88,7 @@ This ensures we use modules correctly and don't miss important features or best 
 - **Why:** Verify flood detection capabilities and performance impact
 - **Status:** ✅ **COMPLETE** - Module tested and merged to main
 - **Results:** Pike module is working without disruption, benign behavior confirmed
-- **Deliverable:** ✅ POC test results and configuration examples (see `docs/PHASE-0-PIKE-RESULTS.md`)
+- **Deliverable:** ✅ POC test results and configuration examples (see `phases/PHASE-0-PIKE-RESULTS.md`)
 
 #### Task 0.1.2: Test Ratelimit Module ⏸️ **DEFERRED**
 - **What:** Load and test `ratelimit` module
@@ -115,7 +115,7 @@ This ensures we use modules correctly and don't miss important features or best 
   - ✅ Modparam parameters verified (`address_table`, `db_url`, etc.)
   - ✅ Behavior understood: IP-based ACL system similar to hosts.allow/deny
 - **Finding:** This is an IP-based ACL system (like hosts.allow/deny), useful for future but not needed now
-- **Deliverable:** ✅ Research document complete (see `docs/PHASE-0-PERMISSIONS-RESEARCH.md`)
+- **Deliverable:** ✅ Research document complete (see `phases/PHASE-0-PERMISSIONS-RESEARCH.md`)
 
 #### Task 0.1.4: Architecture Decision Document ✅ **HIGH CONFIDENCE**
 - **What:** Document decisions on module usage vs custom implementation
@@ -1033,7 +1033,7 @@ A unified `security_events` table tracking:
 2. ✅ Add failed registration logging (403 and other failures, excluding 401)
 3. ✅ Add door-knock attempt logging (unknown domains, scanners, method not allowed, etc.)
 4. ✅ Test and verify logging works
-5. ❌ **SKIPPED:** Registration status tracking (low value - see `docs/PHASE-1.2-DEFERRED-ANALYSIS.md`)
+5. ❌ **SKIPPED:** Registration status tracking (low value - see `phases/PHASE-1.2-DEFERRED-ANALYSIS.md`)
 
 ### Weeks 4-5: Rate Limiting (Mixed Confidence)
 1. ⏸️ Test ratelimit module OR implement custom rate limiting - **DEFERRED** (moved down priority list)

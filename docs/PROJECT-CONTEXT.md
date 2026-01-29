@@ -180,7 +180,7 @@
   - Real-time statistics collection (core, dialog, transaction, dispatcher, usrloc, acc)
   - Historical metrics storage (30-day retention)
   - Automated installation via `install.sh` script
-  - **See:** `docs/PROMETHEUS-GRAFANA-PLAN.md` and `docs/PROMETHEUS-INSTALL-UBUNTU.md`
+  - **See:** `docs/monitoring/PROMETHEUS-GRAFANA-PLAN.md` and `docs/monitoring/PROMETHEUS-INSTALL-UBUNTU.md`
 
 - **Management Interface (MVP Complete):**
   - Web-based admin panel (Laravel + Filament)
@@ -290,16 +290,16 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
 ### Documentation
 
 - **`docs/MASTER-PROJECT-PLAN.md`** - Complete project plan
-- **`docs/opensips-routing-logic.md`** - Detailed routing logic explanation
-- **`docs/ENDPOINT-LOCATION-CREATION.md`** - When endpoint_location records are created
-- **`docs/DIALOG-STATE-EXPLANATION.md`** - Dialog state values and meanings
-- **`docs/NAT-AUTO-DETECTION.md`** - NAT environment auto-detection implementation
-- **`docs/AUDIO-FIX-ACK-HANDLING.md`** - ACK forwarding fix and troubleshooting notes
-- **`docs/SECURITY-THREAT-DETECTION-PROJECT.md`** - Security project plan
-- **`docs/PROMETHEUS-GRAFANA-PLAN.md`** - Prometheus & Grafana deployment plan
-- **`docs/PROMETHEUS-INSTALL-UBUNTU.md`** - Prometheus installation guide
-- **`docs/STATISTICS-OVERVIEW.md`** - Statistics collection overview
-- **`docs/TEST-DEPLOYMENT-CHECKLIST.md`** - Test deployment checklist
+- **`docs/architecture/routing-logic.md`** - Detailed routing logic explanation
+- **`docs/guides/technical/ENDPOINT-LOCATION-CREATION.md`** - When endpoint_location records are created
+- **`docs/guides/technical/DIALOG-STATE-EXPLANATION.md`** - Dialog state values and meanings
+- **`docs/guides/technical/NAT-AUTO-DETECTION.md`** - NAT environment auto-detection implementation
+- **`docs/guides/troubleshooting/AUDIO-FIX-ACK-HANDLING.md`** - ACK forwarding fix and troubleshooting notes
+- **`docs/security/SECURITY-THREAT-DETECTION-PROJECT.md`** - Security project plan
+- **`docs/monitoring/PROMETHEUS-GRAFANA-PLAN.md`** - Prometheus & Grafana deployment plan
+- **`docs/monitoring/PROMETHEUS-INSTALL-UBUNTU.md`** - Prometheus installation guide
+- **`docs/monitoring/STATISTICS-OVERVIEW.md`** - Statistics collection overview
+- **`docs/deployment/TEST-DEPLOYMENT-CHECKLIST.md`** - Test deployment checklist
 
 ### Working Documents
 
@@ -384,7 +384,7 @@ OpenSIPS dialog states (from `dialog` table):
 - **State 4:** Established (call active)
 - **State 5:** Ended (BYE received, call terminated)
 
-**See:** `docs/DIALOG-STATE-EXPLANATION.md`
+**See:** `docs/guides/technical/DIALOG-STATE-EXPLANATION.md`
 
 ### Endpoint Location Creation ✅ **UPDATED - Proxy-Registrar Pattern**
 
@@ -401,7 +401,7 @@ Endpoint locations are created using OpenSIPS `save("location")` function **only
 **See:** 
 - `docs/USRLOC-MIGRATION-PLAN.md` - Migration details
 - `workingdocs/SESSION-SUMMARY-USRLOC-LOOKUP-COMPLETE.md` - Implementation summary
-- `docs/ENDPOINT-LOCATION-CREATION.md` - Historical context (old approach)
+- `docs/guides/technical/ENDPOINT-LOCATION-CREATION.md` - Historical context (old approach)
 
 ### NAT Traversal
 
@@ -425,15 +425,15 @@ OpenSIPS handles NAT traversal with **automatic environment detection**:
 - `loose_route()` - Routes in-dialog requests
 - `route[CHECK_NAT_ENVIRONMENT]` - Auto-detects NAT environment
 
-**See:** `docs/NAT-AUTO-DETECTION.md` for detailed implementation
+**See:** `docs/guides/technical/NAT-AUTO-DETECTION.md` for detailed implementation
 
 ---
 
 ## Where to Find More Information
 
 ### Architecture & Design
-- `docs/opensips-routing-logic.md` - Detailed routing logic
-- `docs/OPENSIPS-LOGIC-DIAGRAM.md` - Visual routing flow
+- `docs/architecture/routing-logic.md` - Detailed routing logic
+- `docs/architecture/OPENSIPS-LOGIC-DIAGRAM.md` - Visual routing flow
 - `workingdocs/SIMPLIFIED-APPROACH.md` - Design decisions
 
 ### Installation & Setup
@@ -443,12 +443,12 @@ OpenSIPS handles NAT traversal with **automatic environment detection**:
 
 ### Troubleshooting
 - `workingdocs/SNOM-TROUBLESHOOTING.md` - Snom-specific issues
-- `docs/DIALOG-STATE-EXPLANATION.md` - Dialog state troubleshooting
-- `docs/ENDPOINT-CLEANUP.md` - Endpoint cleanup procedures
+- `docs/guides/technical/DIALOG-STATE-EXPLANATION.md` - Dialog state troubleshooting
+- `docs/guides/technical/ENDPOINT-CLEANUP.md` - Endpoint cleanup procedures
 
 ### Project Planning
 - `docs/MASTER-PROJECT-PLAN.md` - Complete project plan
-- `docs/SECURITY-THREAT-DETECTION-PROJECT.md` - Security project plan
+- `docs/security/SECURITY-THREAT-DETECTION-PROJECT.md` - Security project plan
 
 ### Historical Context
 - `workingdocs/SESSION-SUMMARY*.md` - Historical fix documentation

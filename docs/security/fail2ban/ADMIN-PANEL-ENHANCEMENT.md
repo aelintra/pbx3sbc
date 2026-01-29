@@ -529,7 +529,7 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force u
 
 - [Admin Panel Security Requirements](ADMIN-PANEL-SECURITY-REQUIREMENTS.md) - Overall admin panel security features
 - [Fail2Ban Configuration](../config/fail2ban/README.md) - Fail2Ban setup and configuration
-- [Security Implementation Plan](SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
+- [Security Implementation Plan](../SECURITY-IMPLEMENTATION-PLAN.md) - Overall security project plan
 
 ---
 

@@ -103,9 +103,9 @@
 
 ## Related Documentation
 
-- `docs/PHASE-0-EXECUTION-PLAN.md` - Phase 0 testing plan
-- `docs/SECURITY-THREAT-DETECTION-PROJECT.md` - Security project overview
-- `docs/SECURITY-IMPLEMENTATION-PLAN.md` - Security implementation plan
+- `PHASE-0-EXECUTION-PLAN.md` - Phase 0 testing plan
+- `../SECURITY-THREAT-DETECTION-PROJECT.md` - Security project overview
+- `../SECURITY-IMPLEMENTATION-PLAN.md` - Security implementation plan
 
 ---
 

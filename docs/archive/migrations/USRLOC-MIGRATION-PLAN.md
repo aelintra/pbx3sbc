@@ -1390,8 +1390,8 @@ $var(expires_value) = $(ct{nameaddr.param,expires});
 3. **Update Documentation**
    - [ ] Update `PROJECT-CONTEXT.md`
    - [ ] Update `MASTER-PROJECT-PLAN.md`
-   - [ ] Update `opensips-routing-logic.md`
-   - [ ] Update `ENDPOINT-LOCATION-CREATION.md`
+   - [ ] Update `../../architecture/routing-logic.md`
+   - [ ] Update `../../guides/technical/ENDPOINT-LOCATION-CREATION.md`
    - [ ] Create migration notes document
 
 4. **Final Validation**
@@ -1596,8 +1596,8 @@ $var(expires_value) = $(ct{nameaddr.param,expires});
 - [Why Username-Only Lookup is Needed](WHY-USERNAME-ONLY-LOOKUP.md) - Explanation of why this functionality is required
 - [Multiple Domains Same Username](MULTIPLE-DOMAINS-SAME-USERNAME.md) - Critical multi-tenant requirements and required solution
 - [Multiple Domains for Same Username](MULTIPLE-DOMAINS-SAME-USERNAME.md) - Behavior when same username exists in multiple domains
-- [Endpoint Location Creation Documentation](ENDPOINT-LOCATION-CREATION.md)
-- [OpenSIPS Routing Logic](opensips-routing-logic.md)
+- [Endpoint Location Creation Documentation](../../guides/technical/ENDPOINT-LOCATION-CREATION.md)
+- [OpenSIPS Routing Logic](../../architecture/routing-logic.md)
 - [Project Context](PROJECT-CONTEXT.md)
 - [Master Project Plan](MASTER-PROJECT-PLAN.md)
 

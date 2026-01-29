@@ -284,6 +284,6 @@ EXIT;
 
 ## Related Documentation
 
-- [OpenSIPS Installation Guide](03-Install_notes.md)
+- [OpenSIPS Installation Guide](../../INSTALLATION.md)
 - [Cloud Deployment Checklist](CLOUD-DEPLOYMENT-CHECKLIST.md)
 - [Manual Install Steps](../workingdocs/MANUAL-INSTALL-STEPS.md)

@@ -159,7 +159,7 @@ If installing the admin panel on a different server:
    - Update to mention that admin panel installer handles remote access configuration
    - Note that core installer keeps MySQL localhost-only
 
-3. **`docs/03-Install_notes.md`**
+3. **`docs/INSTALLATION.md`**
    - Add section about admin panel installation
    - Note that remote MySQL access is handled by admin panel installer
 

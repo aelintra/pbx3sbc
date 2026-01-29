@@ -53,7 +53,7 @@
 
 ### ❌ 1.1 Registration Status Tracking - **DEFERRED**
 
-**Status:** ❌ **DEFERRED** - Low value (see `docs/PHASE-1.2-DEFERRED-ANALYSIS.md`)
+**Status:** ❌ **DEFERRED** - Low value (see `PHASE-1.2-DEFERRED-ANALYSIS.md`)
 
 **Rationale:**
 - Information already available in `location` and `failed_registrations` tables
