@@ -49,6 +49,9 @@ cat > "$SUDOERS_FILE" <<EOF
 # Sudoers configuration for pbx3sbc-admin panel
 # Allows www-data user to run Fail2ban management commands without password
 
+# Systemd service status check
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active fail2ban
+
 # Fail2ban status and management commands
 www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status opensips-brute-force
 www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force banip *
