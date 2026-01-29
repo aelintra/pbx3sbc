@@ -50,6 +50,8 @@ cat > "$SUDOERS_FILE" <<EOF
 # Allows www-data user to run Fail2ban management commands without password
 
 # Preserve environment variables for sync script (DB_NAME, DB_USER, DB_PASS)
+# Try multiple syntaxes for compatibility
+Defaults:www-data !env_reset
 Defaults:www-data env_keep += "DB_NAME DB_USER DB_PASS"
 
 # Systemd service status check

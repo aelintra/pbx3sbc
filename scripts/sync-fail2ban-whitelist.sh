@@ -4,11 +4,14 @@
 # This script reads from the fail2ban_whitelist table and updates the Fail2Ban jail config
 #
 # Usage:
-#   ./sync-fail2ban-whitelist.sh
+#   ./sync-fail2ban-whitelist.sh [DB_NAME] [DB_USER] [DB_PASS]
+#
+# If credentials are not provided as arguments, they are read from environment variables:
+#   DB_NAME, DB_USER, DB_PASS
 #
 # This script is typically called:
-# - Via cron (periodic sync)
-# - From admin panel (on-demand sync)
+# - Via cron (periodic sync) - uses environment variables
+# - From admin panel (on-demand sync) - uses command-line arguments
 # - After whitelist changes in admin panel
 #
 
@@ -16,9 +19,19 @@ set -euo pipefail
 
 # Configuration
 JAIL_CONFIG="/etc/fail2ban/jail.d/opensips-brute-force.conf"
-DB_NAME="${DB_NAME:-opensips}"
-DB_USER="${DB_USER:-opensips}"
-DB_PASS="${DB_PASS:-}"
+
+# Accept credentials from environment variables or command-line arguments
+# Command-line arguments take precedence (more reliable with sudo)
+if [[ $# -ge 3 ]]; then
+    DB_NAME="$1"
+    DB_USER="$2"
+    DB_PASS="$3"
+else
+    # Fallback to environment variables
+    DB_NAME="${DB_NAME:-opensips}"
+    DB_USER="${DB_USER:-opensips}"
+    DB_PASS="${DB_PASS:-}"
+fi
 
 # Colors for output
 RED='\033[0;31m'
