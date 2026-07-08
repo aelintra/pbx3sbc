@@ -236,11 +236,13 @@ install_dependencies() {
             log_warn "MySQL module not found - check OpenSIPS module installation"
         fi
         
-        # Verify HTTP modules (httpd and prometheus) are available
-        if opensips -m 2>/dev/null | grep -qE "(httpd|prometheus)"; then
-            log_success "HTTP modules (httpd/prometheus) are available"
+        # Verify HTTP modules (httpd, mi_http, prometheus) are available
+        if opensips -m 2>/dev/null | grep -q "httpd" && \
+           opensips -m 2>/dev/null | grep -q "mi_http" && \
+           opensips -m 2>/dev/null | grep -q "prometheus"; then
+            log_success "HTTP modules (httpd/mi_http/prometheus) are available"
         else
-            log_warn "HTTP modules (httpd/prometheus) not found - check opensips-http-modules and opensips-prometheus-module package installation"
+            log_warn "HTTP modules (httpd/mi_http/prometheus) not all found - check opensips module packages"
         fi
     else
         log_error "OpenSIPS installation failed - opensips command not found"

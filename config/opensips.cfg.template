@@ -62,8 +62,10 @@ loadmodule "signaling.so"
 loadmodule "registrar.so"
 # Domain module for domain management (used with usrloc for multi-tenant support)
 loadmodule "domain.so"
-# HTTP server module (required for Prometheus module)
+# HTTP server module (required for Prometheus and MI HTTP modules)
 loadmodule "httpd.so"
+# Management Interface over HTTP (admin panel domain/dispatcher reload)
+loadmodule "mi_http.so"
 # Prometheus module for metrics export (requires opensips-prometheus-module package)
 loadmodule "prometheus.so"
 # Pike module for flood detection (Phase 0 testing)
@@ -170,12 +172,17 @@ modparam("domain", "domain_col", "domain")
 # attrs_col: Column name for attributes (default: "attrs")
 modparam("domain", "attrs_col", "attrs")
 
-# --- HTTP Server (Required for Prometheus module) ---
-# Configure HTTP server for Prometheus metrics endpoint
+# --- HTTP Server (Prometheus metrics + MI HTTP for admin panel) ---
+# Shared HTTP listener: /metrics (Prometheus), /mi (Management Interface)
 # Listen on all interfaces, port 8888
 modparam("httpd", "ip", "0.0.0.0")
 modparam("httpd", "port", 8888)
 # Note: For localhost-only access, use: modparam("httpd", "ip", "127.0.0.1")
+
+# --- MI HTTP (Management Interface for admin panel reloads) ---
+# JSON-RPC endpoint: POST http://127.0.0.1:8888/mi
+# Used by pbx3sbc-admin OpenSIPSMIService (domain_reload, ds_reload)
+modparam("mi_http", "root", "mi")
 
 # --- Prometheus Module (Metrics Export) ---
 # Metrics endpoint path (default: /metrics)
