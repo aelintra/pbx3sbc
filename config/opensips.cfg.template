@@ -546,11 +546,12 @@ route {
                                         
                                         # Validate and construct destination URI
                                         if ($var(extracted_ip) != "" && $var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
-                                            # Construct destination URI
+                                            $var(params_source_uri) = $var(original_ru);
+                                            route(GET_ENDPOINT_URI_PARAMS);
                                             if ($var(extracted_port) != "" && $var(extracted_port) != "<null>") {
-                                                $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port);
+                                                $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port) + $var(endpoint_uri_params);
                                             } else {
-                                                $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":5060";
+                                                $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":5060" + $var(endpoint_uri_params);
                                             }
                                             $ru = $du;
                                             xlog("OPTIONS/NOTIFY: SQL fallback found contact: $du (race condition resolved)\n");
@@ -809,7 +810,9 @@ route[DOMAIN_CHECK] {
                                 if ($var(nat_port) == "" || $var(nat_port) == "<null>") {
                                     $var(nat_port) = "5060";
                                 }
-                                $du = "sip:" + $var(endpoint_user) + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                                $var(params_source_uri) = $var(original_ru);
+                                route(GET_ENDPOINT_URI_PARAMS);
+                                $du = "sip:" + $var(endpoint_user) + "@" + $var(nat_ip) + ":" + $var(nat_port) + $var(endpoint_uri_params);
                                 $ru = $du;
                                 xlog("INVITE: Updated destination to NAT IP from received field: $du (was $var(dest_uri))\n");
                             } else {
@@ -860,10 +863,12 @@ route[DOMAIN_CHECK] {
                     # Validate and construct destination URI
                     if ($var(extracted_ip) != "" && $var(extracted_ip) != "<null>" && $var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
                         # Construct destination URI
+                        $var(params_source_uri) = $var(original_ru);
+                        route(GET_ENDPOINT_URI_PARAMS);
                         if ($var(extracted_port) != "" && $var(extracted_port) != "<null>") {
-                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port);
+                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port) + $var(endpoint_uri_params);
                         } else {
-                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":5060";
+                            $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":5060" + $var(endpoint_uri_params);
                         }
                         $ru = $du;
                         xlog("INVITE: SQL fallback found contact: $du (race condition resolved)\n");
@@ -885,14 +890,34 @@ route[DOMAIN_CHECK] {
         } else {
             # Domain not found - use SQL wildcard lookup as fallback (with warning)
             xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
-            $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
-            if (sql_query($var(query), "$avp(contact_uri)") && $(avp(contact_uri)[0]) != "") {
-                $du = $(avp(contact_uri)[0]);
-                $ru = $du;
-                xlog("INVITE: SQL wildcard lookup found contact: $du for user $var(endpoint_user)\n");
-                xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
-                route(RELAY);
-                exit;
+            # Use received field if available (NAT traversal), otherwise use contact field
+            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            if (sql_query($var(query), "$avp(contact_uri)")) {
+                if ($(avp(contact_uri)[0]) != "" && $(avp(contact_uri)[0]) != "<null>") {
+                    $var(contact_value) = $(avp(contact_uri)[0]);
+                    $var(extracted_ip) = "";
+                    $var(extracted_port) = "";
+                    if ($var(contact_value) =~ "^sip:") {
+                        $ru = $var(contact_value);
+                        $var(extracted_ip) = $(ru{uri.host});
+                        $var(extracted_port) = $(ru{uri.port});
+                        if ($var(extracted_port) == "" || $var(extracted_port) == "<null>") {
+                            $var(extracted_port) = "5060";
+                        }
+                    }
+                    if ($var(extracted_ip) != "" && $var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
+                        $var(params_source_uri) = $var(original_ru);
+                        route(GET_ENDPOINT_URI_PARAMS);
+                        $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port) + $var(endpoint_uri_params);
+                        $ru = $du;
+                        xlog("INVITE: SQL wildcard lookup found NAT/contact destination: $du for user $var(endpoint_user)\n");
+                        xlog("Routing INVITE from $si to endpoint: dest=$du, Request-URI=$ru\n");
+                        route(RELAY);
+                        exit;
+                    } else {
+                        xlog("L_WARN", "INVITE: SQL wildcard lookup found value but IP extraction failed: [$var(contact_value)]\n");
+                    }
+                }
             }
         }
         
@@ -1011,22 +1036,20 @@ route[TO_DISPATCHER] {
             force_rport();
             xlog("$rm: force_rport() called for NAT endpoint - responses will use source IP:port $si:$sp\n");
         }
+        # INVITE auth challenges (401/407) must reach the phone - always force rport
+        # so responses return to the actual source port (critical for Yealink behind NAT)
+        if (is_method("INVITE") && !has_totag()) {
+            force_rport();
+            xlog("INVITE: force_rport() called for outbound call - auth responses will use source IP:port $si:$sp\n");
+        }
     }
 
-    # For initial INVITE requests (no To-tag), create dialog BEFORE t_relay()
-    # This is required for proper dialog tracking and database persistence
+    # For initial outbound INVITE (endpoint -> Asterisk), skip create_dialog here.
+    # Creating dialog before 401/407 auth challenges prevents Yealink phones from receiving
+    # the challenge (Snom pre-authenticates and is unaffected). Inbound INVITEs from
+    # Asterisk still create dialogs in route[RELAY].
     if (is_method("INVITE") && !has_totag()) {
-        xlog("Initial INVITE detected, creating dialog for Call-ID=$hdr(Call-ID)\n");
-        # Create dialog for database persistence (required for Prometheus/Grafana monitoring)
-        # With db_mode=2, dialog will be cached in memory and written to database periodically
-        # Must be called before t_relay() for proper dialog tracking
-        if (!create_dialog()) {
-            xlog("L_WARN", "create_dialog() failed for INVITE Call-ID=$hdr(Call-ID)\n");
-        } else {
-            xlog("Dialog created successfully for Call-ID=$hdr(Call-ID)\n");
-        }
-        # Set extra fields for billing: From and To SIP URIs
-        # These will be stored in from_uri and to_uri columns in acc table
+        xlog("Initial outbound INVITE for Call-ID=$hdr(Call-ID) (dialog skipped until answered - allows 401 relay)\n");
         $acc_extra(from_uri) = $fu;
         $acc_extra(to_uri) = $tu;
     }
@@ -1224,7 +1247,20 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     
     $var(setid) = $(avp(source_setid)[0]);
     if ($var(setid) == "" || $var(setid) == "0") {
-        xlog("GET_DOMAIN_FROM_SOURCE_IP: No dispatcher setid found for source IP $si\n");
+        xlog("GET_DOMAIN_FROM_SOURCE_IP: No dispatcher setid found for source IP $si (dispatcher may use hostname instead of IP)\n");
+        # Fallback: hostname-based dispatcher entries (e.g. sip:08jzwn.pbx3.com) won't match source IP.
+        # When only one tenant is configured, use that domain for reverse lookup.
+        $var(query) = "SELECT COUNT(*) FROM domain";
+        if (sql_query($var(query), "$avp(domain_count)") && $(avp(domain_count)[0]) == "1") {
+            $var(query) = "SELECT domain FROM domain LIMIT 1";
+            if (sql_query($var(query), "$avp(source_domain)")) {
+                $var(domain_from_source) = $(avp(source_domain)[0]);
+                if ($var(domain_from_source) != "") {
+                    $var(domain_detection_success) = 1;
+                    xlog("GET_DOMAIN_FROM_SOURCE_IP: Single-tenant fallback - using domain $var(domain_from_source) for source IP $si\n");
+                }
+            }
+        }
         return;
     }
     
@@ -1315,6 +1351,51 @@ route[CHECK_PRIVATE_IP] {
     } else if ($var(check_ip) =~ "^172\\.3[01]\\.") {
         $var(is_private) = 1;
     }
+    return;
+}
+
+# Extract SIP URI parameters after the host (e.g. Snom ;line=2q8koga4) needed for INVITE routing
+# Input:  $var(params_source_uri) - SIP URI to parse (Request-URI or contact from location)
+#         $var(endpoint_user) - username for contact DB fallback if params_source_uri has none
+# Output: $var(endpoint_uri_params) - parameter string including leading ';', or empty
+route[GET_ENDPOINT_URI_PARAMS] {
+    $var(endpoint_uri_params) = "";
+    if ($var(params_source_uri) != "" && $var(params_source_uri) != "<null>") {
+        $var(all_params) = $(var(params_source_uri){uri.params});
+        if ($var(all_params) != "" && $var(all_params) != "<null>") {
+            if ($var(all_params) =~ "^;") {
+                $var(endpoint_uri_params) = $var(all_params);
+            } else {
+                $var(endpoint_uri_params) = ";" + $var(all_params);
+            }
+        }
+    }
+    if ($var(endpoint_uri_params) == "" && $var(endpoint_user) != "") {
+        $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+        if (sql_query($var(query), "$avp(param_contact)") && $(avp(param_contact)[0]) != "" && $(avp(param_contact)[0]) != "<null>") {
+            $var(params_source_uri) = $(avp(param_contact)[0]);
+            $var(all_params) = $(var(params_source_uri){uri.params});
+            if ($var(all_params) != "" && $var(all_params) != "<null>") {
+                if ($var(all_params) =~ "^;") {
+                    $var(endpoint_uri_params) = $var(all_params);
+                } else {
+                    $var(endpoint_uri_params) = ";" + $var(all_params);
+                }
+            }
+        }
+    }
+    # Fallback: To header from Asterisk often carries line= for Snom
+    if ($var(endpoint_uri_params) == "" && $tu != "" && $tu != "<null>") {
+        $var(all_params) = $(tu{uri.params});
+        if ($var(all_params) != "" && $var(all_params) != "<null>") {
+            if ($var(all_params) =~ "^;") {
+                $var(endpoint_uri_params) = $var(all_params);
+            } else {
+                $var(endpoint_uri_params) = ";" + $var(all_params);
+            }
+        }
+    }
+    xlog("GET_ENDPOINT_URI_PARAMS: user=$var(endpoint_user) params=[$var(endpoint_uri_params)] from=[$var(params_source_uri)]\n");
     return;
 }
 
@@ -1465,9 +1546,12 @@ route[RELAY] {
                     
                     # Only set $du if we successfully extracted both IP and port
                     if ($var(nat_ip) != "" && $var(nat_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" && $var(nat_port) != "" && $var(nat_port) =~ "^[0-9]+$") {
+                        $var(endpoint_user) = $var(original_username);
+                        $var(params_source_uri) = $var(original_ru);
+                        route(GET_ENDPOINT_URI_PARAMS);
                         # Construct destination URI: include username if it exists, otherwise just IP:port
                         if ($var(original_username) != "") {
-                            $du = "sip:" + $var(original_username) + "@" + $var(nat_ip) + ":" + $var(nat_port);
+                            $du = "sip:" + $var(original_username) + "@" + $var(nat_ip) + ":" + $var(nat_port) + $var(endpoint_uri_params);
                         } else {
                             $du = "sip:" + $var(nat_ip) + ":" + $var(nat_port);
                         }
@@ -1652,6 +1736,12 @@ route[RELAY] {
 
 onreply_route {
     xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
+    
+    # Auth challenges on INVITE must pass through unmodified so phones can retry with credentials
+    if (is_method("INVITE") && (t_check_status("401|407"))) {
+        xlog("INVITE auth challenge $rs - relaying to endpoint without modification\n");
+        exit;
+    }
     
     # Check if response is from Asterisk (dispatcher destination) vs endpoint
     # We should only fix NAT in responses FROM endpoints, not FROM Asterisk
@@ -2165,6 +2255,11 @@ onreply_route[handle_reply_reg] {
 }
 
 failure_route[1] {
+    # Auth challenges are normal for INVITE/REGISTER - forward to endpoint
+    if (t_check_status("401|407")) {
+        xlog("Auth challenge $rs for $rm Call-ID=$hdr(Call-ID) - allowing relay to endpoint\n");
+        exit;
+    }
     xlog("L_ERR", "Transaction failure: method=$rm, Call-ID: $hdr(Call-ID), From=$fu, To=$tu, Response code=$rs, Reason=$rr\n");
     # Log more details about the failure
     if ($rs == 408) {
