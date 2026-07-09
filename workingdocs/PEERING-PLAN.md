@@ -4,6 +4,14 @@
 **Status:** Planning only – no code changes yet  
 **Goal:** Route calls to and from external gateways (trunks, peers, carriers).
 
+**Architecture decision (locked):** Fleet deployments place **all carrier trunks on the SBC**; fleet nodes use **`Egress`** trunks to the SBC only. Solo / Rule 6 keeps trunks on the node. See **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`**.
+
+**Operational defaults (2026-07-09):**
+
+- **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is the exception, not the default path.
+- **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
+- **SBC HA:** **DNS SRV pool** of identical instances (preferred); phones provisioned with multiple proxy/path targets.
+
 ---
 
 ## 1. Objective
