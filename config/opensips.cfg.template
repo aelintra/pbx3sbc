@@ -696,21 +696,26 @@ route {
         }
     }
 
-    # ---- Peering: inbound from carrier (Phases 3–4) ----
-    if (is_method("INVITE") && is_from_gw(-1, "n")) {
-        route(FROM_CARRIER);
-        exit;
-    }
-
     # ---- Peering: outbound PSTN from Asterisk (Phases 1–2) ----
+    # Must run before is_from_gw: fleet node IPs also appear in dr_gateways as inbound destinations.
     route(CHECK_IS_FROM_ASTERISK);
     if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $(rU{s.len}) > 7) {
-        if (!do_routing("0")) {
+        if (!do_routing(0)) {
             sl_send_reply(404, "No Route");
             exit;
         }
+        # Record-Route so Asterisk ACKs the SBC; SBC must t_relay() ACK to carrier (not forward to self).
+        record_route();
         t_on_failure("DR_FAILOVER");
-        route(RELAY);
+        if (!t_relay()) {
+            sl_reply_error();
+        }
+        exit;
+    }
+
+    # ---- Peering: inbound from carrier (Phases 3–4) ----
+    if (is_method("INVITE") && is_from_gw(-1, "n")) {
+        route(FROM_CARRIER);
         exit;
     }
 
@@ -1704,13 +1709,17 @@ route[RELAY] {
         # This is critical to prevent retransmission loops where Yealink never receives ACK
         route(CHECK_IS_FROM_ASTERISK);
         if ($var(is_from_asterisk) == 1) {
-            # ACK is from Asterisk - use stateless forward to ensure it reaches endpoint
-            xlog("RELAY: $rm from Asterisk - using stateless forward to ensure delivery to $du\n");
-            if (!forward()) {
-                xlog("L_ERR", "RELAY: $rm from Asterisk - forward() failed for destination $du\n");
-                exit;
-            } else {
+            # Egress PSTN: Asterisk ACKs the SBC (Record-Route). t_relay() must forward to carrier leg.
+            # Endpoint delivery: t_relay() may miss; fall back to stateless forward() to phone Contact.
+            if (!t_relay()) {
+                xlog("L_WARN", "RELAY: $rm from Asterisk - t_relay() failed, trying stateless forward to $du\n");
+                if (!forward()) {
+                    xlog("L_ERR", "RELAY: $rm from Asterisk - forward() failed for destination $du\n");
+                    exit;
+                }
                 xlog("RELAY: $rm from Asterisk - stateless forward succeeded to $du\n");
+            } else {
+                xlog("RELAY: $rm from Asterisk - t_relay() succeeded to carrier/endpoint leg\n");
             }
         } else {
             # ACK is from endpoint - try transaction-based relay first
@@ -2308,12 +2317,14 @@ onreply_route[handle_reply_reg] {
 # Inbound carrier path — DID resolution via drouting group 1 (Phase 4)
 route[FROM_CARRIER] {
     xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru\n");
-    if (!do_routing("1")) {
+    if (!do_routing(1)) {
         sl_send_reply(404, "No inbound route");
         exit;
     }
     t_on_failure("DR_FAILOVER");
-    route(RELAY);
+    if (!t_relay()) {
+        sl_reply_error();
+    }
     exit;
 }
 
@@ -2321,12 +2332,16 @@ failure_route[DR_FAILOVER] {
     if (t_was_cancelled()) {
         exit;
     }
-    if (use_next_gw()) {
-        t_on_failure("DR_FAILOVER");
-        route(RELAY);
-    } else {
-        send_reply(503, "No gateways");
+    if (t_check_status("(408)|([456][0-9][0-9])")) {
+        if (use_next_gw()) {
+            t_on_failure("DR_FAILOVER");
+            if (!t_relay()) {
+                send_reply(503, "No gateways");
+            }
+            exit;
+        }
     }
+    send_reply(503, "No gateways");
     exit;
 }
 

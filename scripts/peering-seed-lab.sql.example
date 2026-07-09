@@ -10,9 +10,10 @@ VALUES
 ON DUPLICATE KEY UPDATE address=VALUES(address), description=VALUES(description);
 
 -- Outbound prefix rules (longest prefix wins — tune for your dial plan)
+-- groupid is string in dr_rules; do_routing() in script uses integer 0 / 1
 INSERT INTO dr_rules (ruleid, groupid, prefix, timerec, priority, routeid, gwlist, sort_alg, sort_profile, attrs, description)
 VALUES
-  (1, 0, '', '', 10, '', '1,2', 'N', NULL, '', 'Default outbound — primary + failover')
+  (1, '0', '', NULL, 10, NULL, '1,2', 'N', NULL, '', 'Default outbound — primary + failover')
 ON DUPLICATE KEY UPDATE gwlist=VALUES(gwlist);
 
 -- Inbound: carrier identified by is_from_gw (same gateway rows as outbound peers)
