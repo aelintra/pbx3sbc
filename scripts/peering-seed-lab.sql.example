@@ -1,0 +1,28 @@
+-- Lab peering seed (Phases 1–4) — edit carrier/Asterisk IPs before apply.
+-- Apply: mysql -u opensips -p opensips < scripts/peering-seed-lab.sql.example
+-- Prerequisite: peering-create.sql (Phase 0 tables).
+
+-- Outbound carrier gateways (group 0 via dr_rules prefix)
+INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
+VALUES
+  (1, 0, 'sip:203.0.113.50:5060', 0, '', '', 0, 0, 'Lab carrier primary'),
+  (2, 0, 'sip:203.0.113.51:5060', 0, '', '', 0, 0, 'Lab carrier failover')
+ON DUPLICATE KEY UPDATE address=VALUES(address), description=VALUES(description);
+
+-- Outbound prefix rules (longest prefix wins — tune for your dial plan)
+INSERT INTO dr_rules (ruleid, groupid, prefix, timerec, priority, routeid, gwlist, sort_alg, sort_profile, attrs, description)
+VALUES
+  (1, 0, '', '', 10, '', '1,2', 'N', NULL, '', 'Default outbound — primary + failover')
+ON DUPLICATE KEY UPDATE gwlist=VALUES(gwlist);
+
+-- Inbound: carrier identified by is_from_gw (same gateway rows as outbound peers)
+-- Inbound DID delivery — group 1 routes to Asterisk backend gateway id 10
+INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
+VALUES
+  (10, 0, 'sip:203.0.113.20:5060', 0, '', '', 0, 0, 'Lab Asterisk backend (golden)')
+ON DUPLICATE KEY UPDATE address=VALUES(address);
+
+INSERT INTO dr_rules (ruleid, groupid, prefix, timerec, priority, routeid, gwlist, sort_alg, sort_profile, attrs, description)
+VALUES
+  (10, 1, '', '', 10, '', '10', 'N', NULL, '', 'Inbound DID default → Asterisk backend')
+ON DUPLICATE KEY UPDATE gwlist=VALUES(gwlist);

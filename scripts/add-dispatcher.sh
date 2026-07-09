@@ -30,11 +30,11 @@ if [[ "$DB_PASS" == "your-password" ]]; then
 fi
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 <setid> <destination> [priority] [weight] [socket] [description]"
+    echo "Usage: $0 <setid> <destination> [priority] [weight] [socket] [description] [source_ip]"
     echo
     echo "Example:"
     echo "  $0 10 sip:10.0.1.10:5060"
-    echo "  $0 10 sip:10.0.1.10:5060 0 '1' 'udp:192.168.1.1:5060' 'Primary Asterisk'"
+    echo "  $0 10 sip:08jzwn.pbx3.com:5060 0 1 '' 'Golden' 203.0.113.10"
     exit 1
 fi
 
@@ -44,6 +44,7 @@ PRIORITY="${3:-0}"
 WEIGHT="${4:-1}"
 SOCKET="${5:-}"
 DESCRIPTION="${6:-}"
+SOURCE_IP="${7:-}"
 
 # Validate destination format (basic SIP URI check)
 if [[ ! "$DESTINATION" =~ ^sip: ]]; then
@@ -65,6 +66,11 @@ fi
 if [[ -n "$DESCRIPTION" ]]; then
     SQL="$SQL, description"
     VALUES="$VALUES, '$DESCRIPTION'"
+fi
+
+if [[ -n "$SOURCE_IP" ]]; then
+    SQL="$SQL, attrs"
+    VALUES="$VALUES, 'source_ip=${SOURCE_IP}'"
 fi
 
 SQL="$SQL) VALUES ($VALUES);"

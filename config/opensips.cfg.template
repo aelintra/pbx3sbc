@@ -47,6 +47,7 @@ loadmodule "db_mysql.so"
 # SQL operations module for database queries
 loadmodule "sqlops.so"
 loadmodule "dispatcher.so"
+loadmodule "drouting.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
@@ -94,6 +95,9 @@ modparam("dispatcher", "ds_probing_threshold", 2)
 # Note: ds_inactive_threshold doesn't exist in OpenSIPS dispatcher module
 # Note: ds_ping_reply_codes is called options_reply_codes in OpenSIPS
 modparam("dispatcher", "options_reply_codes", "200")
+
+# --- Drouting (carrier peering — Phases 0–4) ---
+modparam("drouting", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
 # --- Dialog module (required for CDR mode) ---
 modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -688,6 +692,24 @@ route {
         }
     }
 
+    # ---- Peering: inbound from carrier (Phases 3–4) ----
+    if (is_method("INVITE") && is_from_gw(-1, "n")) {
+        route(FROM_CARRIER);
+        exit;
+    }
+
+    # ---- Peering: outbound PSTN from Asterisk (Phases 1–2) ----
+    route(CHECK_IS_FROM_ASTERISK);
+    if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $(rU{s.len}) > 7) {
+        if (!do_routing("0")) {
+            sl_send_reply(404, "No Route");
+            exit;
+        }
+        t_on_failure("DR_FAILOVER");
+        route(RELAY);
+        exit;
+    }
+
     route(DOMAIN_CHECK);
 }
 
@@ -1239,7 +1261,7 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
     # We match the IP part using LIKE with proper delimiters to avoid substring matches
     # Match pattern: sip:IP: or sip:IP followed by end of string
     # This ensures we match the exact IP, not a substring (e.g., 10.0.1.10 vs 10.0.1.100)
-    $var(query) = "SELECT setid FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    $var(query) = "SELECT setid FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' OR attrs = 'source_ip=" + $si + "' LIMIT 1";
     if (!sql_query($var(query), "$avp(source_setid)")) {
         xlog("GET_DOMAIN_FROM_SOURCE_IP: Query failed for source IP $si\n");
         return;
@@ -1316,7 +1338,7 @@ route[CHECK_NAT_ENVIRONMENT] {
 # Refer to docs/DISPATCHER-REVERSE-LOOKUP-RESEARCH.md for detailed justification.
 route[CHECK_IS_FROM_ASTERISK] {
     $var(is_from_asterisk) = 0;
-    $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' LIMIT 1";
+    $var(query) = "SELECT COUNT(*) FROM dispatcher WHERE destination LIKE 'sip:" + $si + ":%' OR destination LIKE 'sip:" + $si + "' OR attrs = 'source_ip=" + $si + "' LIMIT 1";
     if (sql_query($var(query), "$avp(dispatcher_match)")) {
         if ($(avp(dispatcher_match)[0]) != "" && $(avp(dispatcher_match)[0]) != "0") {
             $var(is_from_asterisk) = 1;
@@ -2250,6 +2272,31 @@ onreply_route[handle_reply_reg] {
                 xlog("L_WARN", "REGISTER: Failed to log failed registration to database - query may have failed\n");
             }
         }
+    }
+    exit;
+}
+
+# Inbound carrier path — DID resolution via drouting group 1 (Phase 4)
+route[FROM_CARRIER] {
+    xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru\n");
+    if (!do_routing("1")) {
+        sl_send_reply(404, "No inbound route");
+        exit;
+    }
+    t_on_failure("DR_FAILOVER");
+    route(RELAY);
+    exit;
+}
+
+failure_route[DR_FAILOVER] {
+    if (t_was_cancelled()) {
+        exit;
+    }
+    if (use_next_gw()) {
+        t_on_failure("DR_FAILOVER");
+        route(RELAY);
+    } else {
+        send_reply(503, "No gateways");
     }
     exit;
 }

@@ -17,7 +17,7 @@
 | Path | Contents |
 |------|----------|
 | **QUICK-START.md** | Current state, recent context, next steps. **Read first.** |
-| **QUICK-REFERENCES/** | Usrloc quick reference, Snom troubleshooting. |
+| **QUICK-REFERENCES/** | Usrloc quick reference, Snom troubleshooting, **endpoint soak brand list**. |
 | **ARCHITECTURE/** | Proxy-registrar/NAT design, domain–dispatcher link, historical “simplified” approach. |
 | **SESSIONS/RECENT/** | Latest session summaries (Fail2ban admin panel, env vars). |
 | **SESSIONS/NAT-TRAVERSAL/** | NAT, received, OPTIONS/NOTIFY, INVITE/ACK fixes. |
@@ -25,7 +25,7 @@
 | **SESSIONS/AUDIO-ROUTING/** | ACK/BYE, received URI, regex, force-RPORT. |
 | **SESSIONS/OTHER/** | DB schema, accounting/CDR. |
 | **INSTALLATION/** | Manual install steps, install review. |
-| **VERIFICATION/** | CDR verification checklist and results. |
+| **SBC_SOAK_ENDPOINT_REFERENCE.md** | Desk phone + softphone brands for fleet SBC soak (UK list + Grandstream). |
 
 ---
 
