@@ -8,6 +8,8 @@
 
 **Operational defaults (2026-07-09):**
 
+- **Lab rollback (2026-07-09):** If fleet egress/peering regressions appear after push to **`main`**, see **`pbx3/workingdocs/FLEET_EGRESS_LAB_ROLLBACK.md`** — tags `rollback/pre-fleet-peering-egress-20260709` / `fleet-peering-lab-validated-20260709`.
+- **Future — Egress qualify / SBC failover:** **`pbx3/pbx3-directory/docs/FLEET_EGRESS_AVAILABILITY_REQUIREMENTS.md`** (OPTIONS from fleet nodes, **EgressFailover**, trunk health; Phase A uses **`qualify_frequency=0`** workaround only).
 - **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is the exception, not the default path.
 - **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
 - **SBC HA:** **DNS SRV pool** of identical instances (preferred); phones provisioned with multiple proxy/path targets.
