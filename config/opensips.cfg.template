@@ -621,6 +621,8 @@ route {
             # Store source IP, port, and user agent for security tracking
             $avp(reg_source_ip) = $si;
             $avp(reg_source_port) = $sp;
+            $avp(tu:reg_source_ip) = $si;
+            $avp(tu:reg_source_port) = $sp;
             $avp(reg_user_agent) = $ua;
             xlog("REGISTER: Stored request metadata for security tracking - source=$si:$sp, user_agent=$ua\n");
             
@@ -647,6 +649,8 @@ route {
                 # This ensures responses always go to the correct NAT-mapped port
                 # regardless of whether the phone sent rport parameter
                 $var(received_value) = "sip:" + $si + ":" + $sp + ";transport=udp";
+                # force_rport on ingress REGISTER so 401/200 relay to actual $si:$sp (Yealink NAT)
+                force_rport();
                 xlog("REGISTER: NAT detected - forcing rport behavior: using actual source $si:$sp (endpoint may not have sent rport parameter)\n");
             } else {
                 # Endpoint is NOT behind NAT - use fix_nated_register() result if available
@@ -1034,7 +1038,10 @@ route[TO_DISPATCHER] {
 
     xlog("Routing to $du for domain=$rd setid=$var(setid) method=$rm Request-URI=$ru\n");
 
-    record_route();
+    # REGISTER must not get Record-Route — it breaks 401 challenge relay to endpoints.
+    if (!is_method("REGISTER")) {
+        record_route();
+    }
 
     # Arm failure route to handle transaction failures
     t_on_failure("1");
@@ -1045,21 +1052,20 @@ route[TO_DISPATCHER] {
     # This is critical for endpoints behind NAT that don't send rport parameter
     # force_rport() adds rport to the topmost Via header (RFC 3581)
     # Should be called before t_relay() to affect how responses are routed
-    if (is_method("REGISTER")) {
-        # For REGISTER requests, always force rport to ensure authentication responses reach OpenSIPS
-        # This works even if the phone didn't send rport parameter
+    # REGISTER: force_rport on client Via immediately before t_relay (Yealink omits rport).
+    # fix_nated_register adds received= but without rport replies go to :5060 not NAT port.
+    route(CHECK_NAT_ENVIRONMENT);
+    if (is_method("REGISTER") && $var(enable_nat_fixes) == 1) {
         force_rport();
-        xlog("REGISTER: force_rport() called - Asterisk will send responses to source IP:port $si:$sp\n");
-    } else {
+        xlog("REGISTER: force_rport() before t_relay — client Via rport=$sp\n");
+    }
+    if (!is_method("REGISTER")) {
         # For other requests, only force rport if endpoint is behind NAT
-        # This avoids unnecessary Via header modification for LAN endpoints
-        route(CHECK_NAT_ENVIRONMENT);
         if ($var(enable_nat_fixes) == 1) {
             force_rport();
             xlog("$rm: force_rport() called for NAT endpoint - responses will use source IP:port $si:$sp\n");
         }
         # INVITE auth challenges (401/407) must reach the phone - always force rport
-        # so responses return to the actual source port (critical for Yealink behind NAT)
         if (is_method("INVITE") && !has_totag()) {
             force_rport();
             xlog("INVITE: force_rport() called for outbound call - auth responses will use source IP:port $si:$sp\n");
@@ -1311,20 +1317,40 @@ route[GET_DOMAIN_FROM_SOURCE_IP] {
 route[CHECK_NAT_ENVIRONMENT] {
     $var(enable_nat_fixes) = 0;
     
-    # Runtime detection: Check if endpoints are sending private IPs (indicates NAT environment)
-    # This works for both LAN and NAT environments
-    # If we receive requests with private IPs from endpoints (not Asterisk), enable NAT fixes
+    # Endpoints behind NAT often arrive from a public IP (customer router) while Via/Contact
+    # still advertise RFC1918 addresses. force_rport() must run for those REGISTERs.
     route(CHECK_IS_FROM_ASTERISK);
     if ($var(is_from_asterisk) == 0) {
-        # NOTE: nat_uac_test() causes runtime errors in OpenSIPS 3.6.3
-        # Error: "Unknown flag: 19" when called at runtime
-        # Using manual source IP check which works reliably
         $var(check_ip) = $si;
         route(CHECK_PRIVATE_IP);
         if ($var(is_private) == 1) {
-            # Endpoint is behind NAT - enable NAT fixes for this request
             $var(enable_nat_fixes) = 1;
-            xlog("NAT environment detected via source IP check: endpoint $si is behind NAT, enabling NAT fixes\n");
+            xlog("NAT detected: private source IP $si\n");
+        }
+        if ($var(enable_nat_fixes) == 0) {
+            $var(check_ip) = $(hdr(Via)[0]{via.host});
+            if ($var(check_ip) != "" && $var(check_ip) != "<null>") {
+                route(CHECK_PRIVATE_IP);
+                if ($var(is_private) == 1) {
+                    $var(enable_nat_fixes) = 1;
+                    xlog("NAT detected: private IP in Via sent-by $var(check_ip)\n");
+                }
+            }
+        }
+        if ($var(enable_nat_fixes) == 0 && $hdr(Contact) =~ "@([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+            $var(check_ip) = $re;
+            route(CHECK_PRIVATE_IP);
+            if ($var(is_private) == 1) {
+                $var(enable_nat_fixes) = 1;
+                xlog("NAT detected: private IP in Contact $var(check_ip)\n");
+            }
+        }
+        if ($var(enable_nat_fixes) == 0) {
+            $var(via_port) = $(hdr(Via)[0]{via.port});
+            if ($var(via_port) != "" && $var(via_port) != "<null>" && $sp != $var(via_port)) {
+                $var(enable_nat_fixes) = 1;
+                xlog("NAT detected: source port $sp != Via port $var(via_port)\n");
+            }
         }
     }
     
@@ -1759,8 +1785,9 @@ route[RELAY] {
 onreply_route {
     xlog("Response received: $rs $rr from $si (method=$rm, CSeq=$hdr(CSeq), To-tag=$tt, Contact=$hdr(Contact), Call-ID=$hdr(Call-ID))\n");
     
-    # Auth challenges on INVITE must pass through unmodified so phones can retry with credentials
-    if (is_method("INVITE") && (t_check_status("401|407"))) {
+    # INVITE auth challenges only here — REGISTER 401 is handled in handle_reply_reg
+    # (main onreply runs first; AVPs are not ready here and setting $du breaks NAT relay).
+    if (($rs == 401 || $rs == 407) && is_method("INVITE")) {
         xlog("INVITE auth challenge $rs - relaying to endpoint without modification\n");
         exit;
     }
@@ -2010,7 +2037,7 @@ onreply_route {
     } else if ($rs >= 200 && $rs < 300) {
         xlog("Final success response $rs received\n");
         exit;
-    } else if ($rs >= 300) {
+    } else if ($rs >= 300 && $rs != 401 && $rs != 407) {
         xlog("Final error response $rs received\n");
         exit;
     }
@@ -2024,6 +2051,12 @@ onreply_route {
 # The save() function uses contact information from the 200 OK reply (via mcontact_avp)
 # which includes any modifications made by the main registrar (e.g., expiration changes)
 onreply_route[handle_reply_reg] {
+    # Auth challenges must relay to the phone before any save()/logging logic.
+    if (is_method("REGISTER") && ($rs == 401 || $rs == 407)) {
+        xlog("REGISTER auth challenge $rs - relaying to endpoint (handle_reply_reg)\n");
+        exit;
+    }
+
     if (is_method("REGISTER")) {
         # Only save location on successful registration (2xx response)
         if (t_check_status("2[0-9][0-9]")) {
@@ -2208,11 +2241,7 @@ onreply_route[handle_reply_reg] {
             # NOTE: 401 Unauthorized is a normal part of SIP authentication (challenge-response)
             # We only log 403 Forbidden and other failures (not 401) for security tracking
             # 401 indicates normal auth challenge, 403 indicates actual authentication failure
-            # Skip logging 401 responses (they're part of normal authentication flow)
-            if ($rs == 401) {
-                # 401 is normal - skip logging (just part of authentication flow)
-                exit;
-            }
+            # 401/407 handled at top of handle_reply_reg — do not exit here (drops relay).
             
             # Log 403 Forbidden and other failures (4xx/5xx except 401)
             # Extract Expires header value if present (for analysis)
