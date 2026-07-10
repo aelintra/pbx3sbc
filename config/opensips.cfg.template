@@ -706,6 +706,11 @@ route {
         }
         # Record-Route so Asterisk ACKs the SBC; SBC must t_relay() ACK to carrier (not forward to self).
         record_route();
+        # Track in dialog module so Active Calls / dlg_list see the PSTN leg
+        # (phone→Asterisk leg is created separately in route[RELAY]).
+        if (!create_dialog()) {
+            xlog("L_WARN", "Outbound PSTN: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
+        }
         t_on_failure("DR_FAILOVER");
         if (!t_relay()) {
             sl_reply_error();
@@ -2328,6 +2333,10 @@ route[FROM_CARRIER] {
     # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
     # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
     record_route();
+    # Track carrier→Asterisk leg for Active Calls (Asterisk→phone is a second dialog via RELAY).
+    if (!create_dialog()) {
+        xlog("L_WARN", "FROM_CARRIER: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
+    }
     t_on_failure("DR_FAILOVER");
     if (!t_relay()) {
         sl_reply_error();
