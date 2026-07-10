@@ -2324,6 +2324,10 @@ route[FROM_CARRIER] {
         sl_send_reply(404, "No inbound route");
         exit;
     }
+    # Record-Route so Magrathea ACK/BYE and Asterisk BYE stay on the SBC path.
+    # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
+    # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
+    record_route();
     t_on_failure("DR_FAILOVER");
     if (!t_relay()) {
         sl_reply_error();
