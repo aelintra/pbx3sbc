@@ -714,7 +714,10 @@ route {
     }
 
     # ---- Peering: inbound from carrier (Phases 3–4) ----
-    if (is_method("INVITE") && is_from_gw(-1, "n")) {
+    # Fleet Asterisk IPs are also in dr_gateways (DID destinations). is_from_gw
+    # would steal Asterisk→phone INVITEs (shortuid RURI) into FROM_CARRIER → 404.
+    # CHECK_IS_FROM_ASTERISK already ran above; skip carrier path for those sources.
+    if (is_method("INVITE") && is_from_gw(-1, "n") && $var(is_from_asterisk) != 1) {
         route(FROM_CARRIER);
         exit;
     }

@@ -823,6 +823,8 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Prerequisite:** Phase 3 done. Inbound DID→internal is resolved (gwlist → gateway in dr_gateways whose address is Asterisk; see §11.2 item 4).
 
+**Lab status (2026-07-10):** Config already in `opensips.cfg.template` (`FROM_CARRIER` + `do_routing(1)`). Live seed: **Magrathea** signaling IPs (gwid 3–9, 11) for `is_from_gw`; inbound rule prefix **`01924918076`** → gwid **10** (golden `54.236.153.81`). Outbound gwid **1** remains **ael.vcloudpbx.com**. Golden `inroutes` DID → ext **1000** (tenant duns/`dhbm8x`). Admin CRUD: pbx3sbc-admin **Peering → Gateways / Routing Rules**. Re-seed: `scripts/peering-seed-lab.sh` (`SEED_MAGRATHEA=1`, `INBOUND_DID_PREFIX`).
+
 **Scope**
 
 - Populate `dr_rules` for **inbound groupid 1**: prefix(es) → **gwlist** pointing to gateway(s) in dr_gateways whose **address** is the Asterisk backend (sip:asterisk-ip:5060). Optionally use **routeid** for script-only ops (no signaling in that route).
