@@ -850,6 +850,8 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Prerequisite:** Phase 4 done. Requires: alias_db module and schema (if not already present). Use **`alias_db_lookup(table_name, [flags])`** per [alias_db 3.6](https://opensips.org/docs/modules/3.6.x/alias_db.html); flag **d** = username-only lookup (DID in R-URI user).
 
+**Lab status (2026-07-11):** **Done in config + admin.** `loadmodule "alias_db.so"` + `FROM_CARRIER` tries `do_routing(1)` then `alias_db_lookup("dbaliases","d")` → `is_domain_local` + `TO_DISPATCHER` (skips `DOMAIN_CHECK` To-header door-knock). Admin **Peering → DID aliases**. Table `dbaliases` already from Phase 0. No MI reload (DB lookup each call).
+
 **Scope**
 
 - In "from carrier" path: if `do_routing()` for inbound group returns no match, call **`alias_db_lookup("dbaliases", "d")`** (or configured table); if found, R-URI is replaced with user SIP URI; then continue (e.g. lookup location or relay to Asterisk as for local user).

@@ -48,6 +48,7 @@ loadmodule "db_mysql.so"
 loadmodule "sqlops.so"
 loadmodule "dispatcher.so"
 loadmodule "drouting.so"
+loadmodule "alias_db.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
@@ -98,6 +99,10 @@ modparam("dispatcher", "options_reply_codes", "200")
 
 # --- Drouting (carrier peering — Phases 0–4) ---
 modparam("drouting", "db_url", "mysql://opensips:your-password@localhost/opensips")
+
+# --- alias_db (Phase 5 — one-off inbound DID → user@domain) ---
+# No MI reload: lookups hit MySQL each time (see OpenSIPS alias_db docs).
+modparam("alias_db", "db_url", "mysql://opensips:your-password@localhost/opensips")
 
 # --- Dialog module (required for CDR mode) ---
 modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -2322,25 +2327,59 @@ onreply_route[handle_reply_reg] {
     exit;
 }
 
-# Inbound carrier path — DID resolution via drouting group 1 (Phase 4)
+# Inbound carrier path — DID via drouting group 1 (Phase 4) or alias_db (Phase 5)
 route[FROM_CARRIER] {
     xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru\n");
-    if (!do_routing(1)) {
-        sl_send_reply(404, "No inbound route");
+    if (do_routing(1)) {
+        # Phase 4: prefix group → Asterisk gateway from dr_gateways
+        # Record-Route so Magrathea ACK/BYE and Asterisk BYE stay on the SBC path.
+        # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
+        # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
+        record_route();
+        # Track carrier→Asterisk leg for Active Calls (Asterisk→phone is a second dialog via RELAY).
+        if (!create_dialog()) {
+            xlog("L_WARN", "FROM_CARRIER: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
+        }
+        t_on_failure("DR_FAILOVER");
+        if (!t_relay()) {
+            sl_reply_error();
+        }
         exit;
     }
-    # Record-Route so Magrathea ACK/BYE and Asterisk BYE stay on the SBC path.
-    # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
-    # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
-    record_route();
-    # Track carrier→Asterisk leg for Active Calls (Asterisk→phone is a second dialog via RELAY).
-    if (!create_dialog()) {
-        xlog("L_WARN", "FROM_CARRIER: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
+
+    # Phase 5: one-off DID not in dr_rules — alias_username → username@domain
+    # Flag "d" = match DID on username only (carrier RURI domain is usually the SBC/carrier).
+    if (alias_db_lookup("dbaliases", "d")) {
+        xlog("FROM_CARRIER: alias resolved RURI=$ru\n");
+        record_route();
+        if (!create_dialog()) {
+            xlog("L_WARN", "FROM_CARRIER alias: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
+        }
+        # Do not call DOMAIN_CHECK: To-header still has carrier DID/domain and would door-knock.
+        $var(domain) = $rd;
+        if ($var(domain) == "") {
+            xlog("L_WARN", "FROM_CARRIER alias: empty domain after lookup\n");
+            sl_send_reply(404, "No inbound route");
+            exit;
+        }
+        if (!is_domain_local($var(domain), $var(attrs))) {
+            xlog("L_WARN", "FROM_CARRIER alias: domain not local domain=$var(domain)\n");
+            sl_send_reply(404, "Unknown domain");
+            exit;
+        }
+        $var(setid_str) = $(var(attrs){param.value,setid});
+        if ($var(setid_str) == "" || $var(setid_str) == "<null>") {
+            xlog("L_ERR", "FROM_CARRIER alias: no setid for domain=$var(domain) attrs=$var(attrs)\n");
+            sl_send_reply(503, "Service Unavailable");
+            exit;
+        }
+        $var(setid) = $(var(setid_str){s.int});
+        xlog("FROM_CARRIER alias: domain=$var(domain) setid=$var(setid)\n");
+        route(TO_DISPATCHER);
+        exit;
     }
-    t_on_failure("DR_FAILOVER");
-    if (!t_relay()) {
-        sl_reply_error();
-    }
+
+    sl_send_reply(404, "No inbound route");
     exit;
 }
 
