@@ -11,11 +11,13 @@
 - **OpenSIPS:** Running; usrloc/registrar; Pike flood detection; failed-registration + door-knock logging; Fail2ban integration.
 - **Fail2ban:** Running; jail `opensips-brute-force`; admin panel shows status; sudoers set for www-data; sync script avoids duplicate `ignoreip`.
 - **Admin panel (pbx3sbc-admin):** Fail2ban status, whitelist, ban/unban; uses sync script with DB credentials (env or args).
-- **Peering (Phases 0–5 lab):** drouting live — outbound groupid **0**, inbound groupid **1**. Magrathea DID **01924918076** → golden via Number routes. **Phase 5:** `alias_db` / **Peering → DID aliases** for one-off DIDs not in a prefix rule (no MI reload). See **`PEERING-PLAN.md`**.
+- **Peering (Phases 0–5 lab + registrant prep):** drouting live — outbound groupid **0**, inbound groupid **1**. Magrathea DID **01924918076** → golden via Number routes. **Phase 5:** `alias_db` / **Peering → DID aliases**. **Carrier REGISTER prep (2026-07-13):** `uac_auth` + `uac_registrant` + **Peering → Registrations** (`reg_reload`). IP-trusted peers need Peer only; registration carriers need **Peer + Registration**. **Address model:** outbound Peer may be **DNS FQDN**; inbound trust = **separate IP Peer rows** (`is_from_gw`) — Magrathea pattern; not one IP-only field. No ITSP provider profiles. See **`PEERING-PLAN.md`** §0.1.
 
 ---
 
 ## Most recent work
+
+**Carrier REGISTER prep (2026-07-13):** `uac_auth` / `uac_registrant` loaded; admin **Peering → Registrations**. No live carrier credentials yet.
 
 **Peering Phase 5 (2026-07-11):** `alias_db` loaded; `FROM_CARRIER` falls through to DID aliases → domain dispatcher. Admin **Peering → DID aliases**.
 

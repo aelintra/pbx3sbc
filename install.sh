@@ -207,6 +207,7 @@ install_dependencies() {
         opensips-mysql-dbschema \
         opensips-http-modules \
         opensips-prometheus-module \
+        opensips-auth-modules \
         curl \
         wget \
         ufw \

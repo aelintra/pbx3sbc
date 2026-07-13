@@ -10,9 +10,37 @@
 
 - **Lab rollback (2026-07-09):** If fleet egress/peering regressions appear after push to **`main`**, see **`pbx3/workingdocs/FLEET_EGRESS_LAB_ROLLBACK.md`** — tags `rollback/pre-fleet-peering-egress-20260709` / `fleet-peering-lab-validated-20260709`.
 - **Future — Egress qualify / SBC failover:** **`pbx3/pbx3-directory/docs/FLEET_EGRESS_AVAILABILITY_REQUIREMENTS.md`** (OPTIONS from fleet nodes, **EgressFailover**, trunk health; Phase A uses **`qualify_frequency=0`** workaround only).
-- **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is the exception, not the default path.
+- **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is for carriers that require OpenSIPS→carrier REGISTER. **Implemented (2026-07-13):** modules + admin **Peering → Registrations**; Magrathea remains IP-only. Registration carriers need **Peer + Registration**.
 - **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
 - **SBC HA:** **DNS SRV pool** of identical instances (preferred); phones provisioned with multiple proxy/path targets.
+- **Carrier address model (DNS vs IP) — locked 2026-07-13:** see **§0.1** below. Magrathea pattern is the product shape; do not collapse outbound destination and inbound trust into one IP-only Peer.
+- **No provider “profiles” — locked 2026-07-13:** hundreds of ITSPs each want different console fields; profiles rot. Keep **generic SIP objects** (Peer / inbound allow gwids / optional Registration / Number routes / DID aliases). Operators map every carrier onto that surface.
+
+---
+
+## 0.1 Carrier address model — DNS outbound, IP inbound (2026-07-13)
+
+**Problem:** Many carriers publish a **DNS name** for termination (often Route53 / frequent A-record moves). They will not accept “pin our Peer to one IP.” Inbound signaling, however, arrives from **source IPs** that may be a published allow list, a pool larger than the outbound A record, or a different host entirely (lab: Brindley REGISTER host ≠ INVITE source).
+
+**Decision — split the two roles (already how Magrathea is seeded):**
+
+| Role | What to store | `dr_gateways` usage |
+|------|----------------|---------------------|
+| **Outbound destination** | Prefer **`sip:fqdn:5060`** (DNS/Route53-friendly). Resolve at send/probe time — **do not** bake a one-time A lookup into the Peer row. | One (or few) gateway row(s) in outbound **`dr_rules` gwlist** (groupid **0**). |
+| **Inbound trust** | **Literal IPs** (or known fixed URIs that resolve to the IPs that actually send INVITEs). | Separate gateway row(s) so **`is_from_gw(-1,"n")`** matches `$si`. **Not** required in outbound gwlist. Magrathea lab: gwid **3–9, 11**. |
+| **REGISTER** (if needed) | Registrar / AOR hostnames as DNS. | **`registrant`** table — independent of inbound IP list. |
+
+**Anti-patterns:**
+
+- Forcing a single Peer address to be both “where we dial” and “every IP they might call from.”
+- Replacing Magrathea’s multi-IP inbound rows with “one hostname and hope `is_from_gw` tracks Route53 forever.”
+- Per-ITSP UI packs (Twilio wizard, etc.) — see operational default above.
+
+**Lab note (2026-07-13):** Brindley / Aelintra was a convenient **second Asterisk trunker** (REGISTER + DID), not the template for carrier address design. Magrathea remains the reference for inbound IP pools + DNS-style outbound thinking.
+
+**Admin UX (future polish, not a schema break):** Today operators add multiple **Peers** (gwids) and description tags (“Magrathea inbound …”). Later the UI may **group** outbound FQDN + inbound IP set as one logical carrier without inventing provider profiles — still the same `dr_gateways` rows underneath. Fail2ban whitelist must cover inbound signaling IPs.
+
+**OpenSIPS note:** Hostname in `dr_gateways.address` is already valid for outbound. `is_from_gw` matches **source IP**; relying on a single FQDN for inbound trust is insufficient when the carrier’s SIP sources ≠ that name’s current A/AAAA set.
 
 ---
 
@@ -718,7 +746,7 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
      - Run this script from `scripts/init-database.sh` (which is invoked by `install.sh` during `initialize_database`). Use idempotent checks (e.g. create only if `dr_gateways` does not exist) so re-runs do not fail.
    - **Deliverable:** New file `scripts/peering-create.sql`; `scripts/init-database.sh` updated to run it when the DB is initialized. No seed data required; tables may be empty.
 2. **Config: drouting module (no route logic).** Add `loadmodule "drouting.so"` and `modparam("drouting", "db_url", ...)` to `opensips.cfg.template`. Do **not** call `do_routing()` or add any peering branches in `route {}`.
-3. **Optional (carrier requires registration):** Load **uac_auth** (first), then **uac_registrant**; ensure **registrant** table exists (already created in step 1) and add modparam `db_url`/`table_name`. No route logic change; registration runs from timer. MI `reg_list` to verify state; `reg_reload` to reload from DB.
+3. **Carrier registration (uac_registrant) — done 2026-07-13:** Load **uac_auth** (first), then **uac_registrant**; `registrant` table + modparam `db_url`/`table_name`. No route logic change; registration runs from timer. Admin **Peering → Registrations** CRUD calls MI `reg_reload`. Package **`opensips-auth-modules`** required for `uac_auth.so`. MI `reg_list` to verify state. Magrathea stays IP-trusted Peer only; registration carriers need Peer + Registration when credentials arrive.
 
 **Deliverables**
 
@@ -974,17 +1002,20 @@ This section answers: **what tables must be populated, and what would the data l
 
 **1. dr_gateways**
 
-- **CarrierAlpha:** One row so we can (a) send outbound INVITEs to them and (b) recognise inbound INVITEs from them (`is_from_gw(-1,"n")` matches source IP against `address`). Use carrier’s signaling IP or hostname and port.
+- **CarrierAlpha outbound:** One row with **DNS** destination (`sip:sip.carrieralpha.com:5060`) in outbound **gwlist** — Route53-friendly; see **§0.1**.
+- **CarrierAlpha inbound:** Separate row(s) with **signaling IP(s)** so `is_from_gw` matches `$si` (same pattern as Magrathea gwid 3–9, 11). Do not assume the outbound FQDN’s A record is the full inbound allow list.
 - **Asterisk backend:** One row per Asterisk we route inbound DIDs to; `address` = that Asterisk’s SIP URI. dr_rules (groupid 1) reference this gateway by `gwid`.
 
 Schema columns (see §6.4): `gwid`, `type`, `address`, `strip`, `pri_prefix`, `attrs`, `probe_mode`, `state`, `socket`, `description`. Typical 3.2/3.6 schema uses `id` (auto) and `gwid` (string, unique).
 
 | gwid | type | address | strip | pri_prefix | probe_mode | state | description |
 |------|------|---------|-------|------------|------------|-------|--------------|
-| 1 | 1 | sip:sip.carrieralpha.com:5060 | 0 | NULL | 0 | 0 | CarrierAlpha – outbound + inbound source |
+| 1 | 1 | sip:sip.carrieralpha.com:5060 | 0 | NULL | 0 | 0 | CarrierAlpha – outbound destination (DNS) |
+| 3 | 1 | sip:203.0.113.10:5060 | 0 | NULL | 0 | 0 | CarrierAlpha – inbound source IP (example) |
 | 2 | 1 | sip:10.0.0.20:5060 | 0 | NULL | 0 | 0 | Asterisk backend for DID block 19249181 |
 
-- **gwid "1"** = CarrierAlpha. Same row used for outbound (do_routing("0") sends to this address) and for inbound (is_from_gw checks source IP against this address; use hostname only if carrier sends from that hostname’s IP).
+- **gwid "1"** = outbound only for CarrierAlpha (`do_routing("0")` → this address). Prefer FQDN when the carrier uses DNS failover.
+- **gwid "3"** (+ more as needed) = inbound trust only; appear in `is_from_gw`, not necessarily in outbound gwlist.
 - **gwid "2"** = our Asterisk; inbound dr_rules (groupid 1) point DID prefix to this gwid.
 
 **2. dr_rules**
@@ -1025,7 +1056,8 @@ To populate the above for a CarrierAlpha-style trunk:
 
 | Data | Used in | Example |
 |------|---------|--------|
-| Signaling address (IP or hostname:port) | dr_gateways.address (gwid CarrierAlpha) | sip.carrieralpha.com:5060 |
+| Outbound destination (prefer DNS hostname:port) | dr_gateways.address (outbound gwid) | sip.carrieralpha.com:5060 |
+| Inbound signaling IP(s) (allow list) | dr_gateways.address (separate gwid(s); `is_from_gw`) | 203.0.113.10:5060, … |
 | Registrar URI (for REGISTER) | registrant.registrar | sip:registrar.carrieralpha.com:5060 |
 | AOR to register as | registrant.aor | sip:our-trunk@carrieralpha.com |
 | Our public SIP URI (Contact for registration) | registrant.binding_URI | sip:opensips-public-ip:5060 |
@@ -1068,7 +1100,7 @@ Use the **OpenSIPS DB schema** for exact types/lengths: [db-schema 3.2.x – Dyn
 | id | auto | No (PK) | No | Auto-increment; display only. |
 | gwid | string(64) | **Yes** | Yes | **Unique.** Referenced by dr_rules.gwlist (e.g. "1", "2"). Used in script as gateway id. |
 | type | int | Yes | Yes | User-defined; e.g. 1 = carrier, 1 = Asterisk (same type ok). |
-| address | string(128) | **Yes** | Yes | **SIP URI:** `sip:host:port` or `sip:host`. Host = IP or FQDN. Used for outbound relay and for `is_from_gw()` (inbound source match). |
+| address | string(128) | **Yes** | Yes | **SIP URI:** `sip:host:port` or `sip:host`. Host = **FQDN** (preferred for outbound / Route53) or **IP** (required for reliable inbound `is_from_gw`). Same column, **separate rows** for the two roles — **§0.1**. |
 | strip | int | Yes | Yes | Digits to strip from username (0 if none). |
 | pri_prefix | string(16) | No | Yes | Prefix to add to username (e.g. "00"); NULL = none. |
 | attrs | string(255) | No | Yes | Opaque attributes; script can use. |

@@ -49,6 +49,9 @@ loadmodule "sqlops.so"
 loadmodule "dispatcher.so"
 loadmodule "drouting.so"
 loadmodule "alias_db.so"
+# Upstream carrier REGISTER (OpenSIPS → carrier); uac_auth must load before uac_registrant
+loadmodule "uac_auth.so"
+loadmodule "uac_registrant.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
@@ -103,6 +106,12 @@ modparam("drouting", "db_url", "mysql://opensips:your-password@localhost/opensip
 # --- alias_db (Phase 5 — one-off inbound DID → user@domain) ---
 # No MI reload: lookups hit MySQL each time (see OpenSIPS alias_db docs).
 modparam("alias_db", "db_url", "mysql://opensips:your-password@localhost/opensips")
+
+# --- uac_registrant (OpenSIPS → carrier REGISTER; timer-driven from registrant table) ---
+# Credentials live in registrant rows (admin Peering → Registrations). MI: reg_list / reg_reload.
+# Magrathea-style IP-trusted peers do not need a registrant row.
+modparam("uac_registrant", "db_url", "mysql://opensips:your-password@localhost/opensips")
+modparam("uac_registrant", "table_name", "registrant")
 
 # --- Dialog module (required for CDR mode) ---
 modparam("dialog", "db_url", "mysql://opensips:your-password@localhost/opensips")
@@ -610,7 +619,14 @@ route {
                     exit;
         }
         
-        # If we get here, Request-URI doesn't look like an endpoint, continue normal routing
+        # If we get here, Request-URI doesn't look like an endpoint.
+        # Carrier / peer qualify (Asterisk REGISTER Contact): OPTIONS sip:sbc.pbx3.com:5060
+        # from a trusted drouting gateway — answer 200 so peer stays Reachable (not door-knock).
+        if (is_method("OPTIONS") && is_from_gw(-1, "n")) {
+            xlog("OPTIONS from trusted peer $si (is_from_gw) RURI=$ru — 200 OK (carrier qualify)\n");
+            sl_send_reply(200, "OK");
+            exit;
+        }
         xlog("OPTIONS/NOTIFY from $si - Request-URI doesn't look like endpoint, continuing normal routing\n");
     }
     
