@@ -11,13 +11,15 @@
 - **OpenSIPS:** Running; usrloc/registrar; Pike flood detection; failed-registration + door-knock logging; Fail2ban integration.
 - **Fail2ban:** Running; jail `opensips-brute-force`; admin panel shows status; sudoers set for www-data; sync script avoids duplicate `ignoreip`.
 - **Admin panel (pbx3sbc-admin):** Fail2ban status, whitelist, ban/unban; uses sync script with DB credentials (env or args).
-- **Peering (Phases 0–5 lab + registrant prep):** drouting live — outbound groupid **0**, inbound groupid **1**. Magrathea DID **01924918076** → golden via Number routes. **Phase 5:** `alias_db` / **Peering → DID aliases**. **Carrier REGISTER prep (2026-07-13):** `uac_auth` + `uac_registrant` + **Peering → Registrations** (`reg_reload`). IP-trusted peers need Peer only; registration carriers need **Peer + Registration**. **Address model:** outbound Peer may be **DNS FQDN**; inbound trust = **separate IP Peer rows** (`is_from_gw`) — Magrathea pattern; not one IP-only field. No ITSP provider profiles. See **`PEERING-PLAN.md`** §0.1.
+- **Peering (Phases 0–5 lab + registrant + Phase 2 failover):** drouting live — outbound groupid **0** gwlist **`20,1`** (Magrathea `sipipgw` → Brindley/ael failover), inbound groupid **1**. Magrathea DID **01924918076** → golden via Number routes. **Phase 5:** `alias_db` / **Peering → DID aliases**. **Carrier REGISTER:** `uac_auth` + `uac_registrant` + **Peering → Registrations**. **Address model:** outbound FQDN + inbound IP Peer rows — **`PEERING-PLAN.md`** §0.1.
 
 ---
 
 ## Most recent work
 
-**Carrier REGISTER prep (2026-07-13):** `uac_auth` / `uac_registrant` loaded; admin **Peering → Registrations**. No live carrier credentials yet.
+**Peering Phase 2 outbound failover (2026-07-13):** gwlist **`20,1`** — Magrathea `sip:sipipgw.magrathea.net:5060` primary, Brindley/ael gwid **1** failover. `DR_FAILOVER` / `use_next_gw` already live.
+
+**Carrier REGISTER prep (2026-07-13):** `uac_auth` / `uac_registrant` loaded; admin **Peering → Registrations**.
 
 **Peering Phase 5 (2026-07-11):** `alias_db` loaded; `FROM_CARRIER` falls through to DID aliases → domain dispatcher. Admin **Peering → DID aliases**.
 

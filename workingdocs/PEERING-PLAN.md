@@ -802,10 +802,12 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Prerequisite:** Phase 1 done.
 
+**Lab status (2026-07-13):** Live on SBC. **Primary gwid 20** `sip:sipipgw.magrathea.net:5060` (Magrathea IP-auth outbound FQDN). **Failover gwid 1** `sip:ael.vcloudpbx.com:5060` (Brindley/Aelintra). Outbound rule **gwlist `20,1`**. `failure_route[DR_FAILOVER]` + `use_next_gw()` already in config. Re-seed: `SEED_MAGRATHEA_OUTBOUND=1` (default with Magrathea) in `scripts/peering-seed-lab.sh`. Note: Brindley may hand off to Magrathea upstream — lab proves SBC failover mechanics, not independent ITSP diversity.
+
 **Scope**
 
-- Insert second row in `dr_gateways` (backup carrier).
-- Update `dr_rules` gwlist to "1,2" (or equivalent). failure_route from Phase 1 already handles `use_next_gw()`.
+- Insert Magrathea outbound row in `dr_gateways` (gwid **20**).
+- Update `dr_rules` gwlist to **`20,1`**. failure_route from Phase 1 already handles `use_next_gw()`.
 
 **Deliverables**
 
@@ -813,10 +815,10 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Test criteria**
 
-- Simulate primary failure (e.g. wrong port or 503): call should be retried to backup gateway.
+- Simulate primary failure (e.g. MI disable gwid 20, or wrong port): call should be retried to backup gateway.
 - Normal case: primary still used when it responds 2xx.
 
-**Rollback:** Set gwlist back to "1"; optionally disable or remove second gateway row.
+**Rollback:** Set gwlist back to `"1"`; optionally disable or remove gwid 20.
 
 ---
 
