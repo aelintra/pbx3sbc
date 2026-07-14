@@ -133,17 +133,21 @@
 - Simpler architecture
 - SBC focuses on signaling only
 
-### 4. MySQL for All Routing Data
+**Reaffirmed 2026-07-14 (fleet):** Signaling-only capacity is plentiful for expected traffic; **do not** put RTP through the SBC for volume. Active–passive HA assumes bypass. Media gateway (e.g. rtpengine) only for a concrete protocol-translation need (e.g. older non-WSS backends) — see **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`** §6 / §6.1.
 
-**Decision:** All routing decisions come from MySQL database (domains, dispatcher, endpoints).
+### 3a. Production HA — active–passive (settled 2026-07-14)
 
-**Why:**
-- Centralized configuration
-- Easy to update without config reloads
-- Supports multi-tenant scenarios
-- Database-driven routing is flexible
+**Decision:** Production edge uses **two identical hosts**, **VIP on active**, warm standby; **local DB per member** (directory/S3 projection). **No shared live routing DB** on the call path.
 
----
+**Local engine (direction):** Prefer **SQLite** for **single-file portability**, with **Litestream** streaming WAL to S3 for standby/rebuild assist. Lab remains MySQL until an explicit spike/soak. See **`FLEET_TRUNK_PEERING_DECISION.md`** §6 / §6.0.
+
+### 4. Database for All Routing Data
+
+**Decision (lab today):** All routing decisions come from a **MySQL** database (domains, dispatcher, endpoints) via OpenSIPS DB API.
+
+**Direction (fleet portability):** Move toward **SQLite** (`db_sqlite`) on each SBC member — same modules, **one file**, easier copy/re-project/Litestream. “Centralized” means **projected identically to each member**, not one shared RDS that both OpenSIPS processes hit live.
+
+**Gates:** REGISTER/`usrloc` + dialog/`acc` write soak; `pbx3sbc-admin` write path; package includes `db_sqlite.so`.---
 
 ## Current State
 
