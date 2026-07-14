@@ -38,7 +38,7 @@
 
 **Lab note (2026-07-13):** Brindley / Aelintra was a convenient **second Asterisk trunker** (REGISTER + DID), not the template for carrier address design. Magrathea remains the reference for inbound IP pools + DNS-style outbound thinking.
 
-**Admin UX (future polish, not a schema break):** Today operators add multiple **Peers** (gwids) and description tags (“Magrathea inbound …”). Later the UI may **group** outbound FQDN + inbound IP set as one logical carrier without inventing provider profiles — still the same `dr_gateways` rows underneath. Fail2ban whitelist must cover inbound signaling IPs.
+**Admin UX:** Operators still have one **Peer** row per `dr_gateways` gwid. SBC admin encodes logical carrier + role in opaque **`attrs`** as `carrier=<slug>;role=outbound|inbound|asterisk` (Magrathea / Brindley lab seeded that way); Peers table groups by carrier. No schema change; OpenSIPS ignores these attrs for routing. Fail2ban whitelist must cover inbound signaling IPs.
 
 **OpenSIPS note:** Hostname in `dr_gateways.address` is already valid for outbound. `is_from_gw` matches **source IP**; relying on a single FQDN for inbound trust is insufficient when the carrier’s SIP sources ≠ that name’s current A/AAAA set.
 
