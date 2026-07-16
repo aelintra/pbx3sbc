@@ -38,7 +38,16 @@
 
 **Lab note (2026-07-13):** Brindley / Aelintra was a convenient **second Asterisk trunker** (REGISTER + DID), not the template for carrier address design. Magrathea remains the reference for inbound IP pools + DNS-style outbound thinking.
 
-**Admin UX:** Operators still have one **Peer** row per `dr_gateways` gwid. SBC admin encodes logical carrier + role in opaque **`attrs`** as `carrier=<slug>;role=outbound|inbound|asterisk` (Magrathea / Brindley lab seeded that way); Peers table groups by carrier. No schema change; OpenSIPS ignores these attrs for routing. Fail2ban whitelist must cover inbound signaling IPs.
+**Admin UX:** Operators still have one **Peer** row per `dr_gateways` gwid. SBC admin encodes logical carrier + role in opaque **`attrs`** as `carrier=<slug>;role=outbound|inbound|asterisk` (Magrathea / Brindley lab seeded that way); Peers table groups by carrier. No schema change; OpenSIPS ignores these attrs for routing.
+
+**Fail2ban whitelist (product requirement):**
+
+| Source | How |
+|--------|-----|
+| **Carrier inbound Peer IPs** (`role=inbound` / literal SIP sources in `dr_gateways`) | **Automate** — sync into Fail2ban whitelist on Peer save/delete so Magrathea-style signaling pools are not banned for door-knock / failed-auth noise |
+| **Customer site IPs** (office / NAT egress) | **Manual** only — operator adds IP/CIDR in Fail2Ban whitelist (label/comment as needed). Badly configured phones behind one NAT can otherwise ban the whole site. **No** customer/site CRM or auto-discovery — do not scope-creep into customer management |
+
+Ban events should feed **ops email notify** when that track ships — see **`pbx3/pbx3-directory/docs/FLEET_OPS_NOTIFICATION_REQUIREMENTS.md`** § Fail2ban. Edge-authored (**`DESIGN_RULES.md`** Rule 13).
 
 **OpenSIPS note:** Hostname in `dr_gateways.address` is already valid for outbound. `is_from_gw` matches **source IP**; relying on a single FQDN for inbound trust is insufficient when the carrier’s SIP sources ≠ that name’s current A/AAAA set.
 
