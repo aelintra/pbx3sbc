@@ -1,0 +1,21 @@
+[Unit]
+Description=PBX3 SBC SIP-only packet capture (dumpcap ring, no RTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/pbx3sbc/log-ship.env
+Environment=SIP_PCAP_DIR=/var/log/pbx3sbc/sip-pcap
+Environment=SIP_PCAP_FILESIZE_KB=20000
+Environment=SIP_PCAP_NUM_FILES=10
+ExecStartPre=/bin/mkdir -p /var/log/pbx3sbc/sip-pcap
+# SIP signalling only (5060/5061). Ring: filesize (KB) × files. Completed segments: siplog_*.pcap
+ExecStart=/bin/bash -c 'exec /usr/bin/dumpcap -b filesize:${SIP_PCAP_FILESIZE_KB} -b files:${SIP_PCAP_NUM_FILES} -f "udp port 5060 or udp port 5061 or tcp port 5060 or tcp port 5061" -w ${SIP_PCAP_DIR}/siplog.pcap'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# PBX3 SBC — OpenSIPS text log rotation (Phase 3)
+# Spec: pbx3-directory/docs/FLEET_LOG_RETENTION_REQUIREMENTS.md
+# Install: cp to /etc/logrotate.d/pbx3sbc-opensips
+
+/var/log/opensips/opensips.log {
+	daily
+	rotate 7
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	create 640 opensips opensips
+}
