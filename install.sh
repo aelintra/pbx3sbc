@@ -323,10 +323,88 @@ create_directories() {
     
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_DIR"
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_DATA_DIR"
-    chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" "$OPENSIPS_LOG_DIR"
+    # Log dir ownership is set by configure_opensips_logging (rsyslog writes as syslog:adm)
     chown -R "${OPENSIPS_USER}:${OPENSIPS_GROUP}" /var/run/opensips
     
     log_success "Directories created"
+}
+
+# Split OpenSIPS out of shared syslog into /var/log/opensips/opensips.log
+# (Debian OpenSIPS logs via syslog by default; without this, xlog lands in /var/log/syslog.)
+configure_opensips_logging() {
+    log_info "Configuring OpenSIPS dedicated log (rsyslog split)..."
+
+    local rsyslog_src="${CONFIG_DIR}/rsyslog.d/30-pbx3sbc-opensips.conf"
+    local logrotate_src="${CONFIG_DIR}/logrotate.d/pbx3sbc-opensips"
+    local rsyslog_dst="/etc/rsyslog.d/30-pbx3sbc-opensips.conf"
+    local logrotate_dst="/etc/logrotate.d/pbx3sbc-opensips"
+
+    mkdir -p "$OPENSIPS_LOG_DIR"
+    chown syslog:adm "$OPENSIPS_LOG_DIR"
+    chmod 755 "$OPENSIPS_LOG_DIR"
+
+    if [[ ! -f "$rsyslog_src" ]]; then
+        log_warn "rsyslog config not found at ${rsyslog_src} — OpenSIPS will keep logging to shared syslog"
+        return
+    fi
+
+    if ! command -v rsyslogd &>/dev/null; then
+        log_info "Installing rsyslog..."
+        apt-get install -y rsyslog || {
+            log_warn "Failed to install rsyslog — OpenSIPS dedicated log not configured"
+            return
+        }
+    fi
+
+    install -m 644 "$rsyslog_src" "$rsyslog_dst"
+
+    if [[ -f "$logrotate_src" ]]; then
+        install -m 644 "$logrotate_src" "$logrotate_dst"
+    else
+        log_warn "logrotate config not found at ${logrotate_src}"
+    fi
+
+    if ! systemctl restart rsyslog; then
+        log_warn "rsyslog restart failed — check ${rsyslog_dst}"
+        return
+    fi
+
+    touch "${OPENSIPS_LOG_DIR}/opensips.log"
+    chown syslog:adm "${OPENSIPS_LOG_DIR}/opensips.log"
+    chmod 640 "${OPENSIPS_LOG_DIR}/opensips.log"
+
+    log_success "OpenSIPS text → ${OPENSIPS_LOG_DIR}/opensips.log (stopped from shared syslog)"
+}
+
+# Local SIP-only dumpcap ring (fleet edge archive). No S3 required.
+configure_sip_pcap() {
+    log_info "Configuring SBC SIP pcap ring (dumpcap, no RTP)..."
+
+    local unit_src="${INSTALL_DIR}/systemd/pbx3sbc-sip-pcap.service"
+    if [[ ! -f "$unit_src" ]]; then
+        log_warn "SIP pcap unit not found at ${unit_src} — skipping"
+        return
+    fi
+
+    mkdir -p /var/log/pbx3sbc/sip-pcap /etc/pbx3sbc
+
+    if ! command -v dumpcap &>/dev/null; then
+        log_info "Installing tshark/dumpcap..."
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tshark || \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireshark-common || {
+                log_warn "dumpcap not installed — SIP pcap unit will fail until tshark is available"
+            }
+    fi
+
+    install -m 644 "$unit_src" /etc/systemd/system/pbx3sbc-sip-pcap.service
+    systemctl daemon-reload
+    systemctl enable pbx3sbc-sip-pcap.service
+    systemctl restart pbx3sbc-sip-pcap.service || {
+        log_warn "pbx3sbc-sip-pcap failed to start — check dumpcap and journalctl -u pbx3sbc-sip-pcap"
+        return
+    }
+    log_success "SIP pcap ring active (pbx3sbc-sip-pcap)"
 }
 
 setup_helper_scripts() {
@@ -1204,19 +1282,20 @@ configure_fail2ban() {
             return
         }
         
-        # Update log path in jail config (try to detect OpenSIPS log location)
+        # Dedicated file after configure_opensips_logging; syslog only if split missing
         local log_path="/var/log/opensips/opensips.log"
         if [[ ! -f "$log_path" ]]; then
-            # Try syslog as fallback
             log_path="/var/log/syslog"
             log_warn "OpenSIPS log not found at /var/log/opensips/opensips.log"
-            log_warn "Using syslog as fallback - you may need to update logpath in /etc/fail2ban/jail.d/opensips-brute-force.conf"
+            log_warn "Using syslog as fallback — ensure configure_opensips_logging ran, or update jail logpath"
         fi
         
-        # Update logpath in jail config
-        sed -i "s|^logpath = .*|logpath = ${log_path}|" /etc/fail2ban/jail.d/opensips-brute-force.conf || {
-            log_warn "Failed to update logpath in Fail2ban jail configuration"
-        }
+        # Only rewrite logpath when the jail uses a file backend (systemd journal has no logpath)
+        if grep -qE '^[[:space:]]*logpath[[:space:]]*=' /etc/fail2ban/jail.d/opensips-brute-force.conf 2>/dev/null; then
+            sed -i "s|^logpath = .*|logpath = ${log_path}|" /etc/fail2ban/jail.d/opensips-brute-force.conf || {
+                log_warn "Failed to update logpath in Fail2ban jail configuration"
+            }
+        fi
         
         log_success "Fail2ban jail configuration installed"
         log_warn "IMPORTANT: Before enabling Fail2ban in production, whitelist trusted customer IPs:"
@@ -1509,6 +1588,8 @@ main() {
     install_prometheus
     create_user
     create_directories
+    configure_opensips_logging
+    configure_sip_pcap
     setup_helper_scripts
     configure_firewall
     configure_prometheus
@@ -1542,6 +1623,8 @@ main() {
     echo
     log_info "Configuration files:"
     echo "  - OpenSIPS: ${OPENSIPS_DIR}/opensips.cfg"
+    echo "  - OpenSIPS log: ${OPENSIPS_LOG_DIR}/opensips.log (rsyslog split; not shared syslog)"
+    echo "  - SIP pcap: systemctl status pbx3sbc-sip-pcap"
     echo "  - Database: MySQL database 'opensips'"
     if [[ "$SKIP_PROMETHEUS" != true ]]; then
         echo "  - Prometheus: /etc/prometheus/prometheus.yml"
@@ -1549,6 +1632,9 @@ main() {
         echo "  - Prometheus Web UI: http://localhost:9090"
         echo "  - Node Exporter: http://localhost:9100/metrics"
     fi
+    echo
+    log_info "Optional — ship logs to org S3 (when bucket/IAM ready):"
+    echo "  sudo ./scripts/install-log-retention.sh   # log-ship.env + daily ship cron"
     echo
 }
 

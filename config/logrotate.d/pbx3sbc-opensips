@@ -1,5 +1,6 @@
 # PBX3 SBC — OpenSIPS text log rotation (Phase 3)
 # Spec: pbx3-directory/docs/FLEET_LOG_RETENTION_REQUIREMENTS.md
+# File is filled by rsyslog 30-pbx3sbc-opensips.conf (not OpenSIPS writing directly).
 # Install: cp to /etc/logrotate.d/pbx3sbc-opensips
 
 /var/log/opensips/opensips.log {
@@ -10,5 +11,5 @@
 	compress
 	delaycompress
 	copytruncate
-	create 640 opensips opensips
+	create 640 syslog adm
 }
