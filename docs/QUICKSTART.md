@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+> **Parked / historical (2026-07-20):** Litestream / SQLite steps below are **not** the current product path (**OpenSIPS + MariaDB**). See **`PROJECT-CONTEXT.md`** and **`FLEET_TRUNK_PEERING_DECISION.md`** §6.0.
+
 ## Installation
 
 ```bash

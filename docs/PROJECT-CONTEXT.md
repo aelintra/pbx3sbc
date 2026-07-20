@@ -139,15 +139,15 @@
 
 **Decision:** Production edge uses **two identical hosts**, **VIP on active**, warm standby; **local DB per member** (directory/S3 projection). **No shared live routing DB** on the call path.
 
-**Local engine (direction):** Prefer **SQLite** for **single-file portability**, with **Litestream** streaming WAL to S3 for standby/rebuild assist. Lab remains MySQL until an explicit spike/soak. See **`FLEET_TRUNK_PEERING_DECISION.md`** §6 / §6.0.
+**Local engine (current):** **MariaDB** per member. **SQLite + Litestream = parked (2026-07-20)** — do not implement or spike unless reopened. See **`FLEET_TRUNK_PEERING_DECISION.md`** §6 / §6.0.
 
 ### 4. Database for All Routing Data
 
-**Decision (lab today):** All routing decisions come from a **MySQL** database (domains, dispatcher, endpoints) via OpenSIPS DB API.
+**Decision (current):** All routing decisions come from a **local MariaDB** database (domains, dispatcher, endpoints) via OpenSIPS DB API (`db_mysql`). “Centralized” means **projected identically to each member**, not one shared RDS that both OpenSIPS processes hit live.
 
-**Direction (fleet portability):** Move toward **SQLite** (`db_sqlite`) on each SBC member — same modules, **one file**, easier copy/re-project/Litestream. “Centralized” means **projected identically to each member**, not one shared RDS that both OpenSIPS processes hit live.
+**Parked:** SQLite (`db_sqlite`) + Litestream — historical portability idea only; Litestream does not apply to MariaDB.
 
-**Gates:** REGISTER/`usrloc` + dialog/`acc` write soak; `pbx3sbc-admin` write path; package includes `db_sqlite.so`.---
+---
 
 ## Current State
 

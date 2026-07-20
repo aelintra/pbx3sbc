@@ -1,5 +1,7 @@
 # Installation Guide
 
+> **Parked / historical (2026-07-20):** This guide targets an older **Kamailio + SQLite + Litestream** shape. Current product SBC is **OpenSIPS + MariaDB** — do not follow Litestream steps. See **`PROJECT-CONTEXT.md`** and **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`** §6.0.
+
 This guide will help you install and configure the Kamailio SIP Edge Router with SQLite routing database and Litestream replication.
 
 ## Prerequisites

@@ -1,5 +1,7 @@
 # Testing Guide
 
+> **Parked / historical (2026-07-20):** Litestream replication tests below are **not** current product work. SBC engine today = **MariaDB**. See **`PROJECT-CONTEXT.md`** and **`FLEET_TRUNK_PEERING_DECISION.md`** §6.0.
+
 This guide explains how to test the PBX3sbc SIP Edge Router installation and functionality.
 
 ## Prerequisites for Testing
