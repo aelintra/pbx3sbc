@@ -24,7 +24,9 @@ See [Installation Guide](INSTALLATION.md) for details.
 ## Getting Started
 
 - **[Project Context](PROJECT-CONTEXT.md)** - ⭐ **Start here!** Quick guide to understand the project architecture, key decisions, and current state
-- **[Installation Guide](INSTALLATION.md)** - Step-by-step installation instructions
+- **[Installation Guide](INSTALLATION.md)** - Step-by-step installation instructions (Litestream sections are **parked / historical** — current path is OpenSIPS + MariaDB)
+- **[SBC backup & restore](SBC_BACKUP_RESTORE.md)** - MariaDB dump → S3 → cold restore; post-restore checklist (sudoers, advertised_address)
+- **[SBC data retention](SBC_DATA_RETENTION.md)** - MySQL aging / purge (not DR)
 - **[Quick Start Guide](QUICKSTART.md)** - Quick reference for common tasks
 - **[User Guide](USER-GUIDE.md)** - Control Panel User Guide (Domain Management, Dispatcher, etc.)
 - **[Master Project Plan](MASTER-PROJECT-PLAN.md)** - Complete project plan and roadmap

@@ -227,9 +227,10 @@ See `docs/MASTER-PROJECT-PLAN.md` for complete project plan. Key areas:
    - 📋 Certificate management
    - 📋 Enhanced statistics dashboard (can leverage Prometheus data)
 
-4. **Backup & Recovery** (Medium Priority)
-   - Automated backups
-   - Recovery procedures
+4. **Backup & Recovery** (Medium Priority) — **v1 shipped (2026-07-20)**
+   - MariaDB dump → local zip → org S3 (`scripts/backup-sbc.sh`, `upload-sbc-backup.sh`, `restore-sbc-backup.sh`)
+   - See **`docs/SBC_BACKUP_RESTORE.md`** (post-restore: password, `advertised_address`, sudoers)
+   - Litestream / SQLite path remains **parked**
 
 5. **Containerization** (Medium Priority)
    - Docker deployment

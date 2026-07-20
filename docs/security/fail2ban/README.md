@@ -28,10 +28,13 @@ Fail2ban configuration files are located in `config/fail2ban/`:
 
 Management scripts are in `scripts/`:
 
-- `sync-fail2ban-whitelist.sh` - Sync whitelist from database to Fail2ban config
-- `manage-fail2ban-whitelist.sh` - Manage whitelist entries
-- `setup-admin-panel-sudoers.sh` - Configure sudoers for admin panel
-- `fix-duplicate-ignoreip.sh` - Fix duplicate ignoreip entries
+- `setup-admin-panel-sudoers.sh` — Configure sudoers for admin panel (**required** for Fail2ban Log/Status; re-run after cold restore — not in the backup zip)
+- `sync-fail2ban-whitelist.sh` — Sync whitelist from database to Fail2ban config
+- `manage-fail2ban-whitelist.sh` — Manage whitelist entries
+- `tail-fail2ban-log.sh` — Capped tail of `/var/log/fail2ban.log` (invoked via sudo from www-data)
+- `fix-duplicate-ignoreip.sh` — Fix duplicate ignoreip entries
+
+See also **[SBC backup & restore](../SBC_BACKUP_RESTORE.md)** for DR + post-restore checklist.
 
 ## Related Documentation
 

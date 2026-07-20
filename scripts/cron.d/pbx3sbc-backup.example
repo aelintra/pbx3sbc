@@ -1,0 +1,20 @@
+# SBC MariaDB backup → local zip + org S3 (v1).
+# Spec: pbx3/pbx3-directory/docs/SBC_BACKUP_RESTORE_REQUIREMENTS.md
+#
+# Install (lab/prod):
+#   sudo cp scripts/cron.d/pbx3sbc-backup.example /etc/cron.d/pbx3sbc-backup
+#   sudo chmod 644 /etc/cron.d/pbx3sbc-backup
+#   # Ensure scripts are executable on the host (git clone or copy path below).
+#
+# Requires: /etc/pbx3sbc/log-ship.env with PBX3_ORG_BUCKET + PBX3_SBC_ID (same as log ship).
+# Lab script path today — edit SCRIPTDIR if different:
+#   /home/ubuntu/pbx3sbc/scripts
+#
+# Runs after retention purge window (06:15/06:20) — backup at 02:00 like instance nodes.
+# Manual:
+#   sudo /home/ubuntu/pbx3sbc/scripts/backup-sbc.sh --trigger=manual --upload
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+0 2 * * * root /home/ubuntu/pbx3sbc/scripts/backup-sbc.sh --trigger scheduled --upload >> /var/log/pbx3sbc-backup.log 2>&1
