@@ -23,7 +23,7 @@ fi
 
 SUDOERS_FILE="/etc/sudoers.d/pbx3sbc-admin"
 
-# Detect sync script path
+# Detect sync / helper script paths
 SYNC_SCRIPT_PATH=""
 if [[ -f "/home/ubuntu/pbx3sbc/scripts/sync-fail2ban-whitelist.sh" ]]; then
     SYNC_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/sync-fail2ban-whitelist.sh"
@@ -38,6 +38,21 @@ else
         echo -e "${YELLOW}Warning: Could not find sync-fail2ban-whitelist.sh${NC}"
         echo -e "${YELLOW}You may need to update the sudoers file manually with the correct path${NC}"
         SYNC_SCRIPT_PATH="/home/*/pbx3sbc/scripts/sync-fail2ban-whitelist.sh"
+    fi
+fi
+
+TAIL_LOG_SCRIPT_PATH=""
+if [[ -f "/home/ubuntu/pbx3sbc/scripts/tail-fail2ban-log.sh" ]]; then
+    TAIL_LOG_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/tail-fail2ban-log.sh"
+elif [[ -f "/opt/pbx3sbc/scripts/tail-fail2ban-log.sh" ]]; then
+    TAIL_LOG_SCRIPT_PATH="/opt/pbx3sbc/scripts/tail-fail2ban-log.sh"
+elif [[ -f "/usr/local/pbx3sbc/scripts/tail-fail2ban-log.sh" ]]; then
+    TAIL_LOG_SCRIPT_PATH="/usr/local/pbx3sbc/scripts/tail-fail2ban-log.sh"
+else
+    TAIL_LOG_SCRIPT_PATH=$(find /home /opt /usr/local -name "tail-fail2ban-log.sh" 2>/dev/null | head -1)
+    if [[ -z "$TAIL_LOG_SCRIPT_PATH" ]]; then
+        echo -e "${YELLOW}Warning: Could not find tail-fail2ban-log.sh${NC}"
+        TAIL_LOG_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/tail-fail2ban-log.sh"
     fi
 fi
 
@@ -65,6 +80,9 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client set opensips-brute-force u
 
 # Whitelist sync script (with environment variable preservation)
 www-data ALL=(ALL) NOPASSWD: $SYNC_SCRIPT_PATH
+
+# Fail2ban log viewer (capped tail)
+www-data ALL=(ALL) NOPASSWD: $TAIL_LOG_SCRIPT_PATH
 EOF
 
 # Set correct permissions (sudoers files must be 0440)
