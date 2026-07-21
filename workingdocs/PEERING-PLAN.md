@@ -12,7 +12,7 @@
 - **Future — Egress qualify / SBC failover:** **`pbx3/pbx3-directory/docs/FLEET_EGRESS_AVAILABILITY_REQUIREMENTS.md`** (OPTIONS from fleet nodes, **EgressFailover**, trunk health; Phase A uses **`qualify_frequency=0`** workaround only).
 - **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is for carriers that require OpenSIPS→carrier REGISTER. **Implemented (2026-07-13):** modules + admin **Peering → Registrations**; Magrathea remains IP-only. Registration carriers need **Peer + Registration**.
 - **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
-- **SBC HA:** **DNS SRV pool** of identical instances (preferred); phones provisioned with multiple proxy/path targets.
+- **SBC HA:** **VIP/EIP + warm standby** (active–passive); phones/carriers use stable edge FQDN — **`pbx3/pbx3-directory/docs/SBC_HA_FAILOVER_REQUIREMENTS.md`**. DNS SRV is **not** primary phone HA.
 - **Carrier address model (DNS vs IP) — locked 2026-07-13:** see **§0.1** below. Magrathea pattern is the product shape; do not collapse outbound destination and inbound trust into one IP-only Peer.
 - **No provider “profiles” — locked 2026-07-13:** hundreds of ITSPs each want different console fields; profiles rot. Keep **generic SIP objects** (Peer / inbound allow gwids / optional Registration / Number routes / DID aliases). Operators map every carrier onto that surface.
 
