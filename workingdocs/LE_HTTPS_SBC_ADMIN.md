@@ -2,6 +2,14 @@
 
 **Settled lab (2026-07-14):** Filament admin at **`https://sbc.pbx3.com/admin`**. SIP TLS is **out of scope** here (RTP bypass / UDP SIP unchanged).
 
+**Preferred paths (2026-07-21):**
+
+1. **Installer:** `pbx3sbc-admin/install.sh --server-name <FQDN> --letsencrypt --email <addr> …`
+2. **Filament:** **Certificates** panel (SPA layout kinship) — Get certificate / Renew / purchased upload
+3. **CLI helper:** `pbx3sbc-admin/scripts/le-admin-cert.sh` (also used by the panel via sudoers)
+
+This runbook remains the detailed ACME / SG checklist.
+
 ## What this is / is not
 
 | In | Out |

@@ -56,6 +56,15 @@ else
     fi
 fi
 
+LE_CERT_SCRIPT_PATH=""
+if [[ -f "/home/ubuntu/pbx3sbc-admin/scripts/le-admin-cert.sh" ]]; then
+    LE_CERT_SCRIPT_PATH="/home/ubuntu/pbx3sbc-admin/scripts/le-admin-cert.sh"
+elif [[ -f "/opt/pbx3sbc-admin/scripts/le-admin-cert.sh" ]]; then
+    LE_CERT_SCRIPT_PATH="/opt/pbx3sbc-admin/scripts/le-admin-cert.sh"
+else
+    LE_CERT_SCRIPT_PATH=$(find /home /opt /usr/local -name "le-admin-cert.sh" 2>/dev/null | head -1 || true)
+fi
+
 echo -e "${GREEN}Setting up sudoers configuration for pbx3sbc-admin...${NC}"
 echo ""
 
@@ -84,6 +93,14 @@ www-data ALL=(ALL) NOPASSWD: $SYNC_SCRIPT_PATH
 # Fail2ban log viewer (capped tail)
 www-data ALL=(ALL) NOPASSWD: $TAIL_LOG_SCRIPT_PATH
 EOF
+
+if [[ -n "$LE_CERT_SCRIPT_PATH" ]]; then
+    cat >> "$SUDOERS_FILE" <<EOF
+
+# Let's Encrypt helper (Certificates panel)
+www-data ALL=(ALL) NOPASSWD: $LE_CERT_SCRIPT_PATH
+EOF
+fi
 
 # Set correct permissions (sudoers files must be 0440)
 chmod 0440 "$SUDOERS_FILE"
