@@ -98,7 +98,7 @@ if [[ -n "$LE_CERT_SCRIPT_PATH" ]]; then
     cat >> "$SUDOERS_FILE" <<EOF
 
 # Let's Encrypt helper (Certificates panel)
-www-data ALL=(ALL) NOPASSWD: $LE_CERT_SCRIPT_PATH
+www-data ALL=(ALL) NOPASSWD: $LE_CERT_SCRIPT_PATH *
 EOF
 fi
 
