@@ -736,7 +736,7 @@ route {
     if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $(rU{s.len}) > 7) {
         # Fleet wire is +E.164; drouting prefixes are digit E.164 — strip leading +.
         route(DIALECT_STRIP_PLUS_RURI);
-        if (!do_routing("0", , , , "$var(out_gw_attrs)")) {
+        if (!do_routing(0, , , , $var(out_gw_attrs))) {
             sl_send_reply(404, "No Route");
             exit;
         }
@@ -761,7 +761,7 @@ route {
     # would steal Asterisk→phone INVITEs (shortuid RURI) into FROM_CARRIER → 404.
     # CHECK_IS_FROM_ASTERISK already ran above; skip carrier path for those sources.
     # Capture inbound Peer attrs (dialect=) for number normalize.
-    if (is_method("INVITE") && is_from_gw(-1, "n", "$var(carrier_gw_attrs)") && $var(is_from_asterisk) != 1) {
+    if (is_method("INVITE") && is_from_gw(-1, "n", $var(carrier_gw_attrs)) && $var(is_from_asterisk) != 1) {
         route(FROM_CARRIER);
         exit;
     }
@@ -2366,7 +2366,7 @@ route[FROM_CARRIER] {
     xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru attrs=$var(carrier_gw_attrs)\n");
     # Normalize carrier dialled DID → digit E.164 for drouting/alias; stash +E.164 for Asterisk wire.
     route(DIALECT_INBOUND_NORMALIZE);
-    if (do_routing("1", , , , "$var(ast_gw_attrs)")) {
+    if (do_routing(1, , , , $var(ast_gw_attrs))) {
         # Phase 4: prefix group → Asterisk gateway from dr_gateways
         # Fleet wire to Asterisk: +E.164 userpart.
         route(DIALECT_APPLY_PLUS_WIRE);
@@ -2511,7 +2511,7 @@ route[DIALECT_INBOUND_CLI_NORMALIZE] {
         return;
     }
     $var(furi) = "sip:" + $var(fplus) + "@" + $fd;
-    uac_replace_from("", "$var(furi)");
+    uac_replace_from("", $var(furi));
     xlog("DIALECT inbound CLI: From user → $var(fplus)\n");
 }
 
@@ -2545,7 +2545,7 @@ route[DIALECT_OUTBOUND_RENDER] {
             }
             if ($var(cplus) != "") {
                 $var(curi) = "sip:" + $var(cplus) + "@" + $fd;
-                uac_replace_from("", "$var(curi)");
+                uac_replace_from("", $var(curi));
                 remove_hf("P-Asserted-Identity");
                 append_hf("P-Asserted-Identity: <sip:$var(cplus)@$fd>\r\n");
                 if ($var(dialect) == "uk-magrathea") {
@@ -2564,7 +2564,7 @@ failure_route[DR_FAILOVER] {
         exit;
     }
     if (t_check_status("(408)|([456][0-9][0-9])")) {
-        if (use_next_gw( , "$var(out_gw_attrs)")) {
+        if (use_next_gw(, $var(out_gw_attrs))) {
             route(DIALECT_OUTBOUND_RENDER);
             t_on_failure("DR_FAILOVER");
             if (!t_relay()) {
