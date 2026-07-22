@@ -93,7 +93,7 @@ case "$cmd" in
     if echo "$OUT" | grep -q 'upload-sbc-backup: complete'; then
       uploaded=true
     fi
-    jq -n \
+    jq -cn \
       --arg zip "$ZIP_PATH" \
       --arg stamp "$stamp" \
       --argjson epoch "$epoch" \
@@ -176,9 +176,9 @@ PY
     RESTORE_ARGS=(--db-only --yes)
     [[ "$RESTART" -eq 1 ]] && RESTORE_ARGS+=(--restart)
     echo "sbc-backup-panel: restore --db-only ${ZIP_PATH}" >&2
-    "${SCRIPT_DIR}/restore-sbc-backup.sh" "${RESTORE_ARGS[@]}" "$ZIP_PATH"
+    "${SCRIPT_DIR}/restore-sbc-backup.sh" "${RESTORE_ARGS[@]}" "$ZIP_PATH" >&2
 
-    jq -n \
+    jq -cn \
       --arg stamp "$STAMP" \
       --arg zip "$ZIP_PATH" \
       --argjson epoch "$EPOCH" \
@@ -232,7 +232,7 @@ PY
         HOLDER=true
       fi
     fi
-    jq -n \
+    jq -cn \
       --argjson vip_holder "$HOLDER" \
       --arg advertised_address "$ADV" \
       --argjson local_ips "$LOCAL_JSON" \
