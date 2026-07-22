@@ -2510,7 +2510,8 @@ route[DIALECT_INBOUND_CLI_NORMALIZE] {
     } else {
         return;
     }
-    uac_replace_from(, "sip:" + $var(fplus) + "@" + $fd);
+    $var(furi) = "sip:" + $var(fplus) + "@" + $fd;
+    uac_replace_from("", "$var(furi)");
     xlog("DIALECT inbound CLI: From user → $var(fplus)\n");
 }
 
@@ -2543,7 +2544,8 @@ route[DIALECT_OUTBOUND_RENDER] {
                 $var(cplus) = "";
             }
             if ($var(cplus) != "") {
-                uac_replace_from(, "sip:" + $var(cplus) + "@" + $fd);
+                $var(curi) = "sip:" + $var(cplus) + "@" + $fd;
+                uac_replace_from("", "$var(curi)");
                 remove_hf("P-Asserted-Identity");
                 append_hf("P-Asserted-Identity: <sip:$var(cplus)@$fd>\r\n");
                 if ($var(dialect) == "uk-magrathea") {
