@@ -627,6 +627,17 @@ route {
             sl_send_reply(200, "OK");
             exit;
         }
+        # Fleet Egress qualify (R1): OPTIONS sip:<sbc-vip> from dispatcher-known Asterisk.
+        # Without this, qualify falls through to DOMAIN_CHECK door-knock (silent drop) and
+        # Asterisk marks Egress Unavailable. Spec: FLEET_EGRESS_AVAILABILITY_REQUIREMENTS.md
+        if (is_method("OPTIONS")) {
+            route(CHECK_IS_FROM_ASTERISK);
+            if ($var(is_from_asterisk) == 1) {
+                xlog("OPTIONS from fleet Asterisk $si (dispatcher) RURI=$ru — 200 OK (Egress qualify)\n");
+                sl_send_reply(200, "OK");
+                exit;
+            }
+        }
         xlog("OPTIONS/NOTIFY from $si - Request-URI doesn't look like endpoint, continuing normal routing\n");
     }
     
