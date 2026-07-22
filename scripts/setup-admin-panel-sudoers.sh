@@ -65,6 +65,17 @@ else
     LE_CERT_SCRIPT_PATH=$(find /home /opt /usr/local -name "le-admin-cert.sh" 2>/dev/null | head -1 || true)
 fi
 
+BACKUP_PANEL_SCRIPT_PATH=""
+if [[ -f "/home/ubuntu/pbx3sbc/scripts/sbc-backup-panel.sh" ]]; then
+    BACKUP_PANEL_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/sbc-backup-panel.sh"
+elif [[ -f "/opt/pbx3sbc/scripts/sbc-backup-panel.sh" ]]; then
+    BACKUP_PANEL_SCRIPT_PATH="/opt/pbx3sbc/scripts/sbc-backup-panel.sh"
+elif [[ -f "$(dirname "$0")/sbc-backup-panel.sh" ]]; then
+    BACKUP_PANEL_SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/sbc-backup-panel.sh"
+else
+    BACKUP_PANEL_SCRIPT_PATH=$(find /home /opt /usr/local -name "sbc-backup-panel.sh" 2>/dev/null | head -1 || true)
+fi
+
 echo -e "${GREEN}Setting up sudoers configuration for pbx3sbc-admin...${NC}"
 echo ""
 
@@ -99,6 +110,14 @@ if [[ -n "$LE_CERT_SCRIPT_PATH" ]]; then
 
 # Let's Encrypt helper (Certificates panel)
 www-data ALL=(ALL) NOPASSWD: $LE_CERT_SCRIPT_PATH *
+EOF
+fi
+
+if [[ -n "$BACKUP_PANEL_SCRIPT_PATH" ]]; then
+    cat >> "$SUDOERS_FILE" <<EOF
+
+# SBC backup panel (list / create / vip-role)
+www-data ALL=(ALL) NOPASSWD: $BACKUP_PANEL_SCRIPT_PATH *
 EOF
 fi
 

@@ -18,6 +18,10 @@ These must be re-established on a new host (installers / ops), not restored from
 
 ## Create local backup
 
+**Filament:** System → **Backup** → Backup now (VIP / in-service member only). Re-run `sudo ./scripts/setup-admin-panel-sudoers.sh` after deploying `sbc-backup-panel.sh`.
+
+**CLI:**
+
 ```bash
 sudo /home/ubuntu/pbx3sbc/scripts/backup-sbc.sh --trigger manual
 # → /var/lib/pbx3sbc/bkup/sbcbak.{epoch}.zip
@@ -25,6 +29,8 @@ sudo /home/ubuntu/pbx3sbc/scripts/backup-sbc.sh --dry-run
 ```
 
 Zip includes `opensips.sql` (soft-state tables ignored), `/etc/opensips/opensips.cfg`, credentials if present, and pbx3sbc-admin `.env`. Local FIFO keeps **9** zips.
+
+**Warm HA sync** is Fleet → Edge HA → Sync now (not this cold path).
 
 ## Upload to org S3
 
