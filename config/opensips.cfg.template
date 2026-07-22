@@ -732,10 +732,14 @@ route {
     # Must run before is_from_gw: fleet node IPs also appear in dr_gateways as inbound destinations.
     route(CHECK_IS_FROM_ASTERISK);
     if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $(rU{s.len}) > 7) {
-        if (!do_routing(0)) {
+        # Fleet wire is +E.164; drouting prefixes are digit E.164 — strip leading +.
+        route(DIALECT_STRIP_PLUS_RURI);
+        if (!do_routing("0", , , , "$var(out_gw_attrs)")) {
             sl_send_reply(404, "No Route");
             exit;
         }
+        # Render dialled + CLI for selected carrier Peer dialect= in attrs.
+        route(DIALECT_OUTBOUND_RENDER);
         # Record-Route so Asterisk ACKs the SBC; SBC must t_relay() ACK to carrier (not forward to self).
         record_route();
         # Track in dialog module so Active Calls / dlg_list see the PSTN leg
@@ -754,7 +758,8 @@ route {
     # Fleet Asterisk IPs are also in dr_gateways (DID destinations). is_from_gw
     # would steal Asterisk→phone INVITEs (shortuid RURI) into FROM_CARRIER → 404.
     # CHECK_IS_FROM_ASTERISK already ran above; skip carrier path for those sources.
-    if (is_method("INVITE") && is_from_gw(-1, "n") && $var(is_from_asterisk) != 1) {
+    # Capture inbound Peer attrs (dialect=) for number normalize.
+    if (is_method("INVITE") && is_from_gw(-1, "n", "$var(carrier_gw_attrs)") && $var(is_from_asterisk) != 1) {
         route(FROM_CARRIER);
         exit;
     }
@@ -2356,9 +2361,14 @@ onreply_route[handle_reply_reg] {
 
 # Inbound carrier path — DID via drouting group 1 (Phase 4) or alias_db (Phase 5)
 route[FROM_CARRIER] {
-    xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru\n");
-    if (do_routing(1)) {
+    xlog("FROM_CARRIER: INVITE from carrier $si RURI=$ru attrs=$var(carrier_gw_attrs)\n");
+    # Normalize carrier dialled DID → digit E.164 for drouting/alias; stash +E.164 for Asterisk wire.
+    route(DIALECT_INBOUND_NORMALIZE);
+    if (do_routing("1", , , , "$var(ast_gw_attrs)")) {
         # Phase 4: prefix group → Asterisk gateway from dr_gateways
+        # Fleet wire to Asterisk: +E.164 userpart.
+        route(DIALECT_APPLY_PLUS_WIRE);
+        route(DIALECT_INBOUND_CLI_NORMALIZE);
         # Record-Route so Magrathea ACK/BYE and Asterisk BYE stay on the SBC path.
         # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
         # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
@@ -2376,8 +2386,11 @@ route[FROM_CARRIER] {
 
     # Phase 5: one-off DID not in dr_rules — alias_username → username@domain
     # Flag "d" = match DID on username only (carrier RURI domain is usually the SBC/carrier).
+    # $rU is already digit E.164 from DIALECT_INBOUND_NORMALIZE.
     if (alias_db_lookup("dbaliases", "d")) {
         xlog("FROM_CARRIER: alias resolved RURI=$ru\n");
+        route(DIALECT_APPLY_PLUS_WIRE);
+        route(DIALECT_INBOUND_CLI_NORMALIZE);
         record_route();
         if (!create_dialog()) {
             xlog("L_WARN", "FROM_CARRIER alias: create_dialog() failed Call-ID=$hdr(Call-ID)\n");
@@ -2410,12 +2423,145 @@ route[FROM_CARRIER] {
     exit;
 }
 
+#
+# Number dialect helpers — NUMBER_DIALECT_REQUIREMENTS.md
+# Presets: dialect=uk-magrathea | uk-gamma | strict-plus-e164 in Peer attrs.
+#
+
+# Strip leading + from $rU (fleet wire → digit key for drouting).
+route[DIALECT_STRIP_PLUS_RURI] {
+    if ($(rU{s.substr,0,1}) == "+") {
+        $rU = $(rU{s.substr,1,0});
+        xlog("DIALECT: stripped + from RURI user → $rU\n");
+    }
+}
+
+# After DID match: set $rU to +E.164 for Asterisk (uses $var(plus_e164) if set).
+route[DIALECT_APPLY_PLUS_WIRE] {
+    if ($var(plus_e164) != "" && $var(plus_e164) != "<null>") {
+        $rU = $var(plus_e164);
+    } else if ($(rU{s.substr,0,1}) != "+") {
+        $rU = "+" + $rU;
+    }
+    xlog("DIALECT: fleet wire RURI user=$rU\n");
+}
+
+# Inbound: carrier R-URI → digit E.164 in $rU; +E.164 in $var(plus_e164).
+# Best-effort UK parsers when dialect unset/none; strict-plus-e164 rejects non-+.
+route[DIALECT_INBOUND_NORMALIZE] {
+    $var(dialect) = $(var(carrier_gw_attrs){param.value,dialect});
+    if ($var(dialect) == "<null>") {
+        $var(dialect) = "";
+    }
+    $var(num) = $rU;
+    xlog("DIALECT inbound: dialect=$var(dialect) raw=$var(num)\n");
+
+    if ($var(dialect) == "strict-plus-e164") {
+        if ($(var(num){s.substr,0,1}) != "+") {
+            xlog("L_WARN", "DIALECT: strict-plus-e164 rejected non-+ RURI=$var(num)\n");
+            sl_send_reply(404, "Number format");
+            exit;
+        }
+        $var(plus_e164) = $var(num);
+        $rU = $(var(num){s.substr,1,0});
+        return;
+    }
+
+    # plus_e164
+    if ($(var(num){s.substr,0,1}) == "+") {
+        $var(plus_e164) = $var(num);
+        $rU = $(var(num){s.substr,1,0});
+        return;
+    }
+    # uk_idd 00…
+    if ($(var(num){s.substr,0,2}) == "00") {
+        $rU = $(var(num){s.substr,2,0});
+        $var(plus_e164) = "+" + $rU;
+        return;
+    }
+    # uk_national 0…
+    if ($(var(num){s.substr,0,1}) == "0") {
+        $rU = "44" + $(var(num){s.substr,1,0});
+        $var(plus_e164) = "+" + $rU;
+        return;
+    }
+    # e164_digits (already)
+    $var(plus_e164) = "+" + $var(num);
+    $rU = $var(num);
+}
+
+# Normalize From userpart toward +E.164 for Asterisk (best-effort UK).
+route[DIALECT_INBOUND_CLI_NORMALIZE] {
+    $var(fraw) = $fU;
+    if ($var(fraw) == "" || $var(fraw) == "<null>") {
+        return;
+    }
+    if ($(var(fraw){s.substr,0,1}) == "+") {
+        return;
+    }
+    if ($(var(fraw){s.substr,0,2}) == "00") {
+        $var(fplus) = "+" + $(var(fraw){s.substr,2,0});
+    } else if ($(var(fraw){s.substr,0,1}) == "0") {
+        $var(fplus) = "+44" + $(var(fraw){s.substr,1,0});
+    } else if ($(var(fraw){s.substr,0,1}) =~ "[1-9]") {
+        $var(fplus) = "+" + $var(fraw);
+    } else {
+        return;
+    }
+    $fU = $var(fplus);
+    xlog("DIALECT inbound CLI: From user → $var(fplus)\n");
+}
+
+# Outbound after do_routing: render $rU (+ CLI) for Peer dialect.
+# do_routing may already have applied strip/pri_prefix; $rU is typically digit E.164.
+route[DIALECT_OUTBOUND_RENDER] {
+    $var(dialect) = $(var(out_gw_attrs){param.value,dialect});
+    if ($var(dialect) == "<null>") {
+        $var(dialect) = "";
+    }
+    xlog("DIALECT outbound: dialect=$var(dialect) RURI=$rU From=$fU attrs=$var(out_gw_attrs)\n");
+
+    # Default / none: leave strip/pri_prefix result (optional + for magrathea/gamma/strict).
+    if ($var(dialect) == "uk-magrathea" || $var(dialect) == "uk-gamma" || $var(dialect) == "strict-plus-e164") {
+        if ($(rU{s.substr,0,1}) != "+") {
+            $rU = "+" + $rU;
+        }
+        # CLI → +E.164; Magrathea: PAID network; Gamma: PAID + From aligned.
+        $var(craw) = $fU;
+        if ($var(craw) != "" && $var(craw) != "<null>") {
+            if ($(var(craw){s.substr,0,1}) == "+") {
+                $var(cplus) = $var(craw);
+            } else if ($(var(craw){s.substr,0,2}) == "00") {
+                $var(cplus) = "+" + $(var(craw){s.substr,2,0});
+            } else if ($(var(craw){s.substr,0,1}) == "0") {
+                $var(cplus) = "+44" + $(var(craw){s.substr,1,0});
+            } else if ($(var(craw){s.substr,0,1}) =~ "[1-9]") {
+                $var(cplus) = "+" + $var(craw);
+            } else {
+                $var(cplus) = "";
+            }
+            if ($var(cplus) != "") {
+                $fU = $var(cplus);
+                remove_hf("P-Asserted-Identity");
+                append_hf("P-Asserted-Identity: <sip:$var(cplus)@$fd>\r\n");
+                if ($var(dialect) == "uk-magrathea") {
+                    # Presentation = network when node sent a single CLI (RPID same as PAID).
+                    remove_hf("Remote-Party-ID");
+                    append_hf("Remote-Party-ID: <sip:$var(cplus)@$fd>;party=calling;screen=yes\r\n");
+                }
+                xlog("DIALECT outbound CLI: +E.164=$var(cplus) dialect=$var(dialect)\n");
+            }
+        }
+    }
+}
+
 failure_route[DR_FAILOVER] {
     if (t_was_cancelled()) {
         exit;
     }
     if (t_check_status("(408)|([456][0-9][0-9])")) {
-        if (use_next_gw()) {
+        if (use_next_gw( , "$var(out_gw_attrs)")) {
+            route(DIALECT_OUTBOUND_RENDER);
             t_on_failure("DR_FAILOVER");
             if (!t_relay()) {
                 send_reply(503, "No gateways");

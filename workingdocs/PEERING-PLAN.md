@@ -14,7 +14,8 @@
 - **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
 - **SBC HA:** **VIP/EIP + warm standby** (active–passive); phones/carriers use stable edge FQDN — **`pbx3/pbx3-directory/docs/SBC_HA_FAILOVER_REQUIREMENTS.md`**. DNS SRV is **not** primary phone HA.
 - **Carrier address model (DNS vs IP) — locked 2026-07-13:** see **§0.1** below. Magrathea pattern is the product shape; do not collapse outbound destination and inbound trust into one IP-only Peer.
-- **No provider “profiles” — locked 2026-07-13:** hundreds of ITSPs each want different console fields; profiles rot. Keep **generic SIP objects** (Peer / inbound allow gwids / optional Registration / Number routes / DID aliases). Operators map every carrier onto that surface.
+- **No provider “console profiles” — locked 2026-07-13:** hundreds of ITSPs each want different console fields; UI profiles rot. Keep **generic SIP objects** (Peer / inbound allow gwids / optional Registration / Number routes / DID aliases). Operators map every carrier onto that surface.
+- **Number dialect (2026-07-22):** Per-Peer `dialect=` preset (Magrathea / Gamma / strict +E.164) for normalize/render of dialled + CLI — **not** a full provider console profile. Spec: **`pbx3/pbx3-directory/docs/NUMBER_DIALECT_REQUIREMENTS.md`**.
 
 ---
 
