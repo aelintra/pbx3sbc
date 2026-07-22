@@ -29,6 +29,26 @@ case "$cmd" in
       exit 1
     fi
     mkdir -p "$BKUP_DIR"
+    # Optional S3 presence map (stamp → true) for Filament “On S3?” column
+    S3_STAMPS='{}'
+    ENV_FILE="${PBX3_LOG_SHIP_ENV:-/etc/pbx3sbc/log-ship.env}"
+    # shellcheck disable=SC1090
+    [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" || true
+    BUCKET="${PBX3_ORG_BUCKET:-}"
+    SBC_ID="${PBX3_SBC_ID:-sbc}"
+    REGION="${AWS_DEFAULT_REGION:-us-east-1}"
+    export AWS_DEFAULT_REGION="$REGION"
+    if [[ -n "$BUCKET" ]] && command -v aws >/dev/null 2>&1; then
+      PREFIX="sbc/${SBC_ID}/backups"
+      S3_STAMPS="$(
+        aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "${PREFIX}/" --delimiter / \
+          --query 'CommonPrefixes[].Prefix' --output text 2>/dev/null \
+          | tr '\t' '\n' | sed -n "s|^${PREFIX}/\\([^/]*\\)/|\\1|p" \
+          | jq -Rnc '[inputs | select(length>0)] | map({(.): true}) | add // {}' \
+          || echo '{}'
+      )"
+      [[ -n "$S3_STAMPS" && "$S3_STAMPS" != "null" ]] || S3_STAMPS='{}'
+    fi
     # shellcheck disable=SC2012
     mapfile -t FILES < <(ls -1t "${BKUP_DIR}"/sbcbak.*.zip 2>/dev/null || true)
     JSON='[]'
@@ -42,9 +62,12 @@ case "$cmd" in
       stamp="$(date -u -d "@${epoch}" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$epoch" +%Y%m%dT%H%M%SZ)"
       created="$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ)"
       bytes="$(wc -c <"$f" | tr -d ' ')"
+      on_s3="$(jq -r --arg s "$stamp" '.[$s] // false' <<<"$S3_STAMPS")"
+      [[ "$on_s3" == "true" ]] && on_s3=true || on_s3=false
       JSON="$(jq -c --arg name "$base" --arg path "$f" --arg stamp "$stamp" \
         --arg created "$created" --argjson epoch "$epoch" --argjson bytes "$bytes" \
-        '. + [{name:$name, path:$path, backup_stamp:$stamp, created_at:$created, epoch:$epoch, bytes:$bytes}]' <<<"$JSON")"
+        --argjson on_s3 "$on_s3" \
+        '. + [{name:$name, path:$path, backup_stamp:$stamp, created_at:$created, epoch:$epoch, bytes:$bytes, on_s3:$on_s3}]' <<<"$JSON")"
     done
     jq -n --argjson backups "$JSON" '{backups:$backups}'
     ;;
