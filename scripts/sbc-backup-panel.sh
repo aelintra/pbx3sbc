@@ -189,6 +189,7 @@ PY
   vip-role)
     # Does this host hold the OpenSIPS advertised_address (EIP/VIP)?
     # HA standby keeps advertised_address=EIP in cfg but EIP is on active only.
+    # On AWS the EIP is often NOT on a local iface (1:1 NAT) — also check IMDS public-ipv4.
     ADV=""
     if [[ -f "$OPENSIPS_CFG" ]]; then
       ADV="$(grep -E '^\s*advertised_address=' "$OPENSIPS_CFG" 2>/dev/null \
@@ -205,6 +206,22 @@ PY
       for ipaddr in $(hostname -I 2>/dev/null || true); do
         LOCAL_JSON="$(jq -c --arg ip "$ipaddr" '. + [$ip]' <<<"$LOCAL_JSON")"
       done
+    fi
+    # EC2 public IPv4 (EIP when associated)
+    PUBLIC_IP=""
+    if command -v curl >/dev/null 2>&1; then
+      IMDST="$(curl -sS -m 2 -X PUT 'http://169.254.169.254/latest/api/token' \
+        -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null || true)"
+      if [[ -n "$IMDST" ]]; then
+        PUBLIC_IP="$(curl -sS -m 2 -H "X-aws-ec2-metadata-token: $IMDST" \
+          http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
+      else
+        PUBLIC_IP="$(curl -sS -m 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
+      fi
+      PUBLIC_IP="$(echo "$PUBLIC_IP" | tr -d '[:space:]')"
+      if [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != *"404"* ]]; then
+        LOCAL_JSON="$(jq -c --arg ip "$PUBLIC_IP" 'if index($ip) == null then . + [$ip] else . end' <<<"$LOCAL_JSON")"
+      fi
     fi
     HOLDER=false
     if [[ -z "$ADV" || "$ADV" == "CHANGE_ME" ]]; then
