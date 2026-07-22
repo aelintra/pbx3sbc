@@ -52,6 +52,8 @@ loadmodule "alias_db.so"
 # Upstream carrier REGISTER (OpenSIPS → carrier); uac_auth must load before uac_registrant
 loadmodule "uac_auth.so"
 loadmodule "uac_registrant.so"
+# From/To rewrite for number dialect CLI (uac_replace_from)
+loadmodule "uac.so"
 loadmodule "sipmsgops.so"
 # NAT traversal module for fixing Contact headers and SDP
 loadmodule "nathelper.so"
@@ -2508,7 +2510,7 @@ route[DIALECT_INBOUND_CLI_NORMALIZE] {
     } else {
         return;
     }
-    $fU = $var(fplus);
+    uac_replace_from(, "sip:" + $var(fplus) + "@" + $fd);
     xlog("DIALECT inbound CLI: From user → $var(fplus)\n");
 }
 
@@ -2541,7 +2543,7 @@ route[DIALECT_OUTBOUND_RENDER] {
                 $var(cplus) = "";
             }
             if ($var(cplus) != "") {
-                $fU = $var(cplus);
+                uac_replace_from(, "sip:" + $var(cplus) + "@" + $fd);
                 remove_hf("P-Asserted-Identity");
                 append_hf("P-Asserted-Identity: <sip:$var(cplus)@$fd>\r\n");
                 if ($var(dialect) == "uk-magrathea") {
