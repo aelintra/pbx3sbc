@@ -780,21 +780,28 @@ route[DOMAIN_CHECK] {
         exit;
     }
 
-    # Check if Request-URI looks like an endpoint (has username and IP address, not domain)
-    # This handles INVITE from Asterisk to endpoints (e.g., sip:402@192.168.1.232:5060)
-    # Note: $rd might include port (e.g., 192.168.1.138:56931), so we check just the IP part
-    # Extract just the IP address part (before any colon)
+    # Asterisk→phone endpoint lookup:
+    #  (a) RURI host is IP (legacy Dial via AOR contact @VIP) — AoR domain via GET_DOMAIN_FROM_SOURCE_IP
+    #  (b) RURI is shortuid@tenant.fqdn (PrepDial) — use $rd as AoR domain
+    # Without (b), FQDN RURIs skip usrloc and TO_DISPATCHER hairpins back to Asterisk Ingress.
     $var(request_domain) = $rd;
+    $var(do_endpoint_lookup) = 0;
     if ($var(request_domain) =~ "^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
         $var(request_ip) = $re;
-        xlog("INVITE Request-URI looks like endpoint: $rU@$var(request_domain), attempting endpoint lookup\n");
-        
-        # Extract username from Request-URI
         $var(endpoint_user) = $rU;
-        
-        # Determine domain from Asterisk source IP (CRITICAL for multi-tenant support)
-        # This ensures we route to the correct customer when same extension numbers exist across domains
+        $var(do_endpoint_lookup) = 1;
+        xlog("INVITE Request-URI looks like endpoint IP: $rU@$var(request_domain), attempting endpoint lookup\n");
+        # Domain from Asterisk source IP (LIMIT 1 per setid — fragile when multi-tenant on one node)
         route(GET_DOMAIN_FROM_SOURCE_IP);
+    } else if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $rU != "") {
+        $var(endpoint_user) = $rU;
+        $var(domain_from_source) = $rd;
+        $var(domain_detection_success) = 1;
+        $var(do_endpoint_lookup) = 1;
+        xlog("INVITE Asterisk→phone tenant AoR: $rU@$rd, usrloc lookup (skip dispatcher)\n");
+    }
+
+    if ($var(do_endpoint_lookup) == 1) {
         $var(original_ru) = $ru;
         
         if ($var(domain_detection_success) == 1) {
