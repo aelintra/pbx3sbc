@@ -122,6 +122,11 @@ modparam("dialog", "db_mode", 2)
 # db_update_period: How often to flush cached dialogs to DB (seconds, default 60)
 # Set to lower value for more frequent writes (useful for monitoring)
 modparam("dialog", "db_update_period", 10)
+# Absolute dialog lifetime (seconds). Kinship: pbx3 Globals / tenant abstimeout
+# default is 14400 (4h). Keep SBC ≤ node call ceiling so Active Calls cannot
+# outlive Asterisk after a force-restart (no BYE). OpenSIPS default is 43200 (12h).
+# Product control: cfg + deploy/restart (not Filament). Admin shows this read-only.
+modparam("dialog", "default_timeout", 14400)
 
 # --- Accounting (CDR) ---
 modparam("acc", "db_url", "mysql://opensips:your-password@localhost/opensips")
