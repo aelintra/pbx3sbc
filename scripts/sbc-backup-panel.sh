@@ -4,7 +4,7 @@
 # Spec: SBC_BACKUP_RESTORE_REQUIREMENTS.md — DR only; warm sync is Fleet.
 #
 # Subcommands:
-#   list                 JSON { backups: [...] }
+#   list                 JSON { backups: [...] } — local + S3-only merge (SPA kinship)
 #   create [--upload]    run backup-sbc.sh; JSON { zip, epoch, stamp, uploaded }
 #   warm-pull [--stamp]  S3 fetch + restore --db-only (standby warmth)
 #   vip-role             JSON { vip_holder, advertised_address, local_ips }
@@ -29,8 +29,9 @@ case "$cmd" in
       exit 1
     fi
     mkdir -p "$BKUP_DIR"
-    # Optional S3 presence map (stamp → true) for Filament “On S3?” column
+    # Merge local FIFO zips + S3 stamps (SPA Backup kinship: local / S3 / local+S3).
     S3_STAMPS='{}'
+    S3_SIZES='{}'
     ENV_FILE="${PBX3_LOG_SHIP_ENV:-/etc/pbx3sbc/log-ship.env}"
     # shellcheck disable=SC1090
     [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" || true
@@ -38,8 +39,8 @@ case "$cmd" in
     SBC_ID="${PBX3_SBC_ID:-sbc}"
     REGION="${AWS_DEFAULT_REGION:-us-east-1}"
     export AWS_DEFAULT_REGION="$REGION"
+    PREFIX="sbc/${SBC_ID}/backups"
     if [[ -n "$BUCKET" ]] && command -v aws >/dev/null 2>&1; then
-      PREFIX="sbc/${SBC_ID}/backups"
       S3_STAMPS="$(
         aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "${PREFIX}/" --delimiter / \
           --query 'CommonPrefixes[].Prefix' --output text 2>/dev/null \
@@ -48,10 +49,24 @@ case "$cmd" in
           || echo '{}'
       )"
       [[ -n "$S3_STAMPS" && "$S3_STAMPS" != "null" ]] || S3_STAMPS='{}'
+      # Optional sizes for S3-only rows (backup.zip under each stamp)
+      S3_SIZES="$(
+        aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "${PREFIX}/" \
+          --query 'Contents[].[Key,Size]' --output text 2>/dev/null \
+          | awk -v p="${PREFIX}/" '
+              $1 ~ /\/backup\.zip$/ {
+                key=$1; sub("^" p, "", key); split(key, a, "/");
+                if (a[1] != "" && a[2] == "backup.zip") print a[1], $2
+              }' \
+          | jq -Rnc '[inputs | select(length>0) | split(" ") | select(length==2) | {(.[0]): (.[1]|tonumber)}] | add // {}' \
+          || echo '{}'
+      )"
+      [[ -n "$S3_SIZES" && "$S3_SIZES" != "null" ]] || S3_SIZES='{}'
     fi
     # shellcheck disable=SC2012
     mapfile -t FILES < <(ls -1t "${BKUP_DIR}"/sbcbak.*.zip 2>/dev/null || true)
     JSON='[]'
+    LOCAL_STAMPS='{}'
     for f in "${FILES[@]:-}"; do
       [[ -n "$f" && -f "$f" ]] || continue
       base="$(basename "$f")"
@@ -64,11 +79,42 @@ case "$cmd" in
       bytes="$(wc -c <"$f" | tr -d ' ')"
       on_s3="$(jq -r --arg s "$stamp" '.[$s] // false' <<<"$S3_STAMPS")"
       [[ "$on_s3" == "true" ]] && on_s3=true || on_s3=false
+      LOCAL_STAMPS="$(jq -c --arg s "$stamp" '.[$s]=true' <<<"$LOCAL_STAMPS")"
       JSON="$(jq -c --arg name "$base" --arg path "$f" --arg stamp "$stamp" \
         --arg created "$created" --argjson epoch "$epoch" --argjson bytes "$bytes" \
         --argjson on_s3 "$on_s3" \
-        '. + [{name:$name, path:$path, backup_stamp:$stamp, created_at:$created, epoch:$epoch, bytes:$bytes, on_s3:$on_s3}]' <<<"$JSON")"
+        '. + [{name:$name, path:$path, backup_stamp:$stamp, created_at:$created, epoch:$epoch, bytes:$bytes, on_s3:$on_s3, has_local:true, has_s3:$on_s3}]' <<<"$JSON")"
     done
+    # S3-only stamps (aged out of local FIFO keep 9, still on S3 ~30d)
+    while IFS= read -r stamp; do
+      [[ -n "$stamp" ]] || continue
+      if jq -e --arg s "$stamp" '.[$s] == true' <<<"$LOCAL_STAMPS" >/dev/null 2>&1; then
+        continue
+      fi
+      EPOCH="$(python3 - "$stamp" <<'PY' 2>/dev/null || true
+import sys
+from datetime import datetime, timezone
+s = sys.argv[1]
+dt = datetime.strptime(s, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+print(int(dt.timestamp()))
+PY
+)"
+      if [[ -z "$EPOCH" ]]; then
+        y=${stamp:0:4}; mo=${stamp:4:2}; d=${stamp:6:2}
+        h=${stamp:9:2}; mi=${stamp:11:2}; se=${stamp:13:2}
+        EPOCH="$(date -u -d "${y}-${mo}-${d} ${h}:${mi}:${se}" +%s 2>/dev/null \
+          || date -u -j -f "%Y-%m-%d %H:%M:%S" "${y}-${mo}-${d} ${h}:${mi}:${se}" +%s 2>/dev/null || echo 0)"
+      fi
+      [[ -n "$EPOCH" && "$EPOCH" != "0" ]] || continue
+      created="$(date -u -d "@${EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
+      bytes="$(jq -r --arg s "$stamp" '.[$s] // 0' <<<"$S3_SIZES")"
+      [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+      name="sbcbak.${EPOCH}.zip"
+      JSON="$(jq -c --arg name "$name" --arg stamp "$stamp" --arg created "$created" \
+        --argjson epoch "$EPOCH" --argjson bytes "$bytes" \
+        '. + [{name:$name, path:"", backup_stamp:$stamp, created_at:$created, epoch:$epoch, bytes:$bytes, on_s3:true, has_local:false, has_s3:true}]' <<<"$JSON")"
+    done < <(jq -r 'keys[]' <<<"$S3_STAMPS" 2>/dev/null || true)
+    JSON="$(jq -c 'sort_by(-.epoch)' <<<"$JSON")"
     jq -n --argjson backups "$JSON" '{backups:$backups}'
     ;;
 
