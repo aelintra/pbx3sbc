@@ -36,10 +36,10 @@ Update this section when you complete a phase.
 | **1** Git branch + recovery discipline | **[x]** branch; **[x]** Magrathea backup |
 | **2** Repo config / scripts ready | **[x]** |
 | **3** Packages + cert on Magrathea | **[x]** modules installed; certs copied to `/etc/opensips/tls/` |
-| **4** Firewall / SG | **[~]** UFW **8089** open; **SG still needs operator** (`sg-0c79ea76cd5631398` tcp 8089) — instance role cannot change SG |
+| **4** Firewall / SG | **[x]** UFW **8089**; SG open (operator 2026-08-03) |
 | **5** Enable WSS in live `opensips.cfg` | **[x]** live enabled; `-C` OK; service **active**; UDP **5060** + WSS **8089** listening |
-| **6** Smoke: REGISTER + dialog over WSS | **[ ]** blocked until SG 8089 open (or test on-box only) |
-| **7** Smoke: audio (RTP not on SBC) | **[ ]** |
+| **6** Smoke: REGISTER + dialog over WSS | **[x]** WSS upgrade **101**; REGISTER **401→200** via Magrathea (`8af9ee` / `dhbm8x`, server Asterisk) — smoke 2026-08-03 from golden |
+| **7** Smoke: audio (RTP not on SBC) | **[ ]** browser/webphone still |
 | **8** Document + merge `main` | **[ ]** |
 
 **Live enable snapshot (2026-08-03 ~16:42 UTC):**
