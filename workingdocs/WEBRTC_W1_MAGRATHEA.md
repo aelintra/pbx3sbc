@@ -1,10 +1,21 @@
 # WebRTC WSS on Magrathea (W1) — operator checklist
 
-**Goal:** SIP over **WSS terminates on Magrathea** (VIP / `sbc.pbx3.com`); **RTP bypass** — browser ICE/DTLS-SRTP ↔ home Asterisk. Desk UDP **:5060** unchanged.  
-**Not in scope:** rtpengine, multi-AZ proof, SPA line-test product, Magrathea desk SIP TLS (`5061`).  
-**Spec:** **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`** §6.1 · lab notes **`pbx3/workingdocs/WEBRTC_WSS_LAB.md`** · older scaffold branch **`webrtc-wss`** (superseded by this track for Magrathea).
+**Goal:** SIP over **WSS terminates on Magrathea** (VIP / `sbc.pbx3.com`); OpenSIPS relays **ordinary SIP UDP** to the home fleet instance; **RTP bypass** — browser ICE/DTLS-SRTP ↔ home Asterisk. Desk UDP **:5060** unchanged.  
+**Home TCP 8089:** **not required** for Magrathea clients — golden lab closed instance **8089** entirely and edge WSS calls still work (2026-08-03).
 
-**Git branch (this work):** **`w1-magrathea-wss`** (from pbx3sbc **`main`**).  
+**Architecture (why this is the product shape):**
+
+```text
+Browser ──WSS :8089──► Magrathea ──SIP UDP :5060──► Home Asterisk (dispatcher)
+                                                              │
+Browser ◄════════ media (bypass SBC) ═════════════════════════╝
+```
+
+Home “WebRTC” PJSIP = **UDP + outbound_proxy + webrtc=yes** (not instance `transport-wss` for edge users). See **`WEBRTC_WSS_LAB.md`** § Fleet edge W1 architecture.
+
+**Not in scope:** rtpengine, multi-AZ proof, SPA line-test product, Magrathea desk SIP TLS (`5061`).  
+**Spec:** **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`** §6.1 · lab notes **`pbx3/workingdocs/WEBRTC_WSS_LAB.md`** · branch work landed on pbx3sbc **`main`**.
+
 **Lab host:** Magrathea VIP **`3.93.26.82`** · admin HTTPS **`sbc.pbx3.com`**.
 
 **Product surface (client):**
@@ -54,7 +65,7 @@ OpenSIPS path is **`/ws`** (`wss_resource`) so clients match golden mental model
 | **PrepDial** fleet: always `PJSIP/shortuid/sip:shortuid@tenant.fqdn` (**including WebRTC**) | SIP.js Contact `@192.0.2.x;transport=wss` is unroutable from Asterisk; Magrathea **usrloc** has the real WSS connection. |
 | OpenSIPS Asterisk→phone INVITE **usrloc** path | Already used for desks; WSS contacts use `socket=wss:…:8089`. |
 
-Singleton / instance-direct WSS (`wss://instance:8089`) remains valid for lab without fleet edge (overlay `transport-wss` if needed).
+Singleton / instance-direct WSS (`wss://instance:8089`) remains valid for lab without fleet edge (overlay `transport-wss` if needed). **Fleet Magrathea clients: close instance TCP 8089.**
 
 ---
 
