@@ -33,7 +33,7 @@ Update this section when you complete a phase.
 | Phase | Status |
 |-------|--------|
 | **0** Goal + constraints locked | **[x]** |
-| **1** Git branch + recovery discipline | **[x]** branch; **[ ]** Magrathea backup |
+| **1** Git branch + recovery discipline | **[x]** branch; **[x]** Magrathea backup 2026-08-03 |
 | **2** Repo config / scripts ready | **[~]** (this branch) |
 | **3** Packages + cert on Magrathea | **[ ]** |
 | **4** Firewall / SG | **[ ]** |
@@ -86,9 +86,9 @@ sudo cp -a /etc/opensips/opensips.cfg "/root/opensips.cfg.pre-w1.$(date +%Y%m%d%
 #   Snom REGISTER + short call via VIP
 ```
 
-- [ ] `backup-sbc.sh` produced zip under `/var/lib/pbx3sbc/bkup/`  
-- [ ] Live **`opensips.cfg`** copy under `/root/` (or ops home) with pre-w1 timestamp  
-- [ ] Spot-check: desk phone still registered via Magrathea after backup  
+- [x] `backup-sbc.sh` produced zip under `/var/lib/pbx3sbc/bkup/` — **`sbcbak.1785775027.zip`** (2026-08-03); S3 `s3://08jzwn-pbx3/sbc/sbc/backups/20260803T163707Z/backup.zip`  
+- [x] Live **`opensips.cfg`** copy: **`/root/opensips.cfg.pre-w1.20260803163707`** (+ `/home/ubuntu/opensips.cfg.pre-w1.20260803163707`)  
+- [ ] Spot-check: desk phone still registered via Magrathea after backup (operator optional; OpenSIPS stayed **active**, :5060 up)  
 
 **Recovery if WSS enable goes wrong:** restore pre-w1 `opensips.cfg`, restart OpenSIPS, reopen SG if needed (UDP 5060 path is independent of WSS listener if only WSS block is rolled back).
 
