@@ -58,9 +58,12 @@ loadmodule "proto_udp.so"
 # modparam("proto_wss", "wss_resource", "/ws")
 # modparam("tls_mgm", "server_domain", "wss")
 # modparam("tls_mgm", "match_ip_address", "[wss]*")
-# # LE FQDN for VIP admin host (same name OK if OpenSIPS can read privkey)
+# LE FQDN for VIP — on Magrathea live: copy into /etc/opensips/tls/ (readable by opensips)
+# template / first-deploy may also use live LE paths if ACLs allow:
 # modparam("tls_mgm", "certificate", "[wss]/etc/letsencrypt/live/sbc.pbx3.com/fullchain.pem")
 # modparam("tls_mgm", "private_key", "[wss]/etc/letsencrypt/live/sbc.pbx3.com/privkey.pem")
+# modparam("tls_mgm", "certificate", "[wss]/etc/opensips/tls/sbc.pbx3.com-fullchain.pem")
+# modparam("tls_mgm", "private_key", "[wss]/etc/opensips/tls/sbc.pbx3.com-privkey.pem")
 # modparam("tls_mgm", "verify_cert", "[wss]0")
 # modparam("tls_mgm", "require_cert", "[wss]0")
 # # Helper: scripts/setup-opensips-wss.sh --cert-domain sbc.pbx3.com

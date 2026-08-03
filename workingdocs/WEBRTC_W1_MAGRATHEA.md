@@ -33,14 +33,22 @@ Update this section when you complete a phase.
 | Phase | Status |
 |-------|--------|
 | **0** Goal + constraints locked | **[x]** |
-| **1** Git branch + recovery discipline | **[x]** branch; **[x]** Magrathea backup 2026-08-03 |
-| **2** Repo config / scripts ready | **[~]** (this branch) |
-| **3** Packages + cert on Magrathea | **[ ]** |
-| **4** Firewall / SG | **[ ]** |
-| **5** Enable WSS in live `opensips.cfg` | **[ ]** (UDP stays up; WSS sockets add) |
-| **6** Smoke: REGISTER + dialog over WSS | **[ ]** |
+| **1** Git branch + recovery discipline | **[x]** branch; **[x]** Magrathea backup |
+| **2** Repo config / scripts ready | **[x]** |
+| **3** Packages + cert on Magrathea | **[x]** modules installed; certs copied to `/etc/opensips/tls/` |
+| **4** Firewall / SG | **[~]** UFW **8089** open; **SG still needs operator** (`sg-0c79ea76cd5631398` tcp 8089) — instance role cannot change SG |
+| **5** Enable WSS in live `opensips.cfg` | **[x]** live enabled; `-C` OK; service **active**; UDP **5060** + WSS **8089** listening |
+| **6** Smoke: REGISTER + dialog over WSS | **[ ]** blocked until SG 8089 open (or test on-box only) |
 | **7** Smoke: audio (RTP not on SBC) | **[ ]** |
 | **8** Document + merge `main` | **[ ]** |
+
+**Live enable snapshot (2026-08-03 ~16:42 UTC):**
+- Modules: `opensips-wss-module`, `opensips-tls-openssl-module`, `opensips-tlsmgm-module`
+- Cert: `/etc/opensips/tls/sbc.pbx3.com-{fullchain,privkey}.pem` (from LE; renew hook re-copies)
+- Config backups: `/root/opensips.cfg.pre-w1.20260803163707`, `/root/opensips.cfg.pre-w1-enable.20260803164214`
+- Local TLS: `openssl s_client` → **CN=sbc.pbx3.com**
+- Desk UDP activity after restart: OPTIONS still answering (log OK)
+
 
 ---
 
@@ -137,7 +145,7 @@ sudo -u opensips test -r /etc/letsencrypt/live/sbc.pbx3.com/privkey.pem && echo 
 
 | Control | Action |
 |---------|--------|
-| **Security group** (EIP/VIP ENI) | Allow **TCP 8089** from operator / test webphone CIDRs (world only if deliberate) |
+| **Security group** (EIP/VIP ENI) | Allow **TCP 8089** from operator / test webphone CIDRs (world only if deliberate). **Magrathea lab SG:** `sg-0c79ea76cd5631398` (instance **`i-078cca73d4a4106bb`**). SBC instance role **cannot** edit SG — open from your AWS console / IAM user. |
 | **UFW / Shorewall** on box | **TCP 8089** ACCEPT in (same posture as SIP allow) |
 | **UDP 5060** | Unchanged |
 | **UDP 10000–20000 on Magrathea** | **Not required for this path** (RTP bypass — do **not** force media SG on SBC for W1) |
