@@ -38,7 +38,7 @@ OpenSIPS path is **`/ws`** (`wss_resource`) so clients match golden mental model
 | **5** Enable WSS in live `opensips.cfg` | **[x]** UDP **5060** + WSS **8089** |
 | **6** Smoke: REGISTER + dialog over WSS | **[x]** |
 | **7** Smoke: audio (RTP not on SBC) | **[x]** desk↔webphone both ways, audio OK (2026-08-03 lab) |
-| **8** Document + merge `main` | **[~]** checklist closed; merge PR when ready |
+| **8** Document + merge `main` | **[x]** merged to main 2026-08-03 |
 
 **Live enable snapshot (2026-08-03):**
 - Modules: `opensips-wss-module`, `opensips-tls-openssl-module`, `opensips-tlsmgm-module`
@@ -95,7 +95,7 @@ Singleton / instance-direct WSS (`wss://instance:8089`) remains valid for lab wi
 - [x] Script: **`scripts/setup-opensips-wss.sh`**  
 - [x] Cert renew notes for OpenSIPS after LE renew  
 - [x] `opensips -C` + service up on Magrathea  
-- [ ] Merge **`w1-magrathea-wss` → `main`** when operator merges  
+- [x] Merged **`w1-magrathea-wss` → `main`** 2026-08-03  
 
 ---
 
@@ -156,7 +156,7 @@ Pass:     golden webrtc-1500.env
 
 - [x] Snapshot table updated (lab green)  
 - [x] Home-node fixes noted (tmpl + PrepDial)  
-- [ ] Merge PR **`w1-magrathea-wss` → main`** when stable  
+- [x] Merged **`w1-magrathea-wss` → main`** 2026-08-03  
 - [x] Optional sunset note: **`webrtc-wss`** remains historical scaffold  
 - Residual: clamp instance SG **8089**; package rolls (pbx3 webrtc tmpl, pbx3cagi **1.0.0-10**); multi-AZ; SPA line test  
 
