@@ -1048,6 +1048,31 @@ route[DOMAIN_CHECK] {
         $ru = $var(original_ru);
         if ($var(is_from_asterisk) == 1 && $var(ruri_host_is_ip) == 0) {
             xlog("INVITE: usrloc miss for $var(endpoint_user)@$rd from Asterisk — fall through to domain dispatcher (ext@fqdn delivery)\n");
+            #
+            # Home Asterisk: username identify would 401 bare shortuid From on hairpin.
+            # Presentation (extension digits) → X-PBX3-Pres-Num; return AoR in PAI;
+            # From user → sitedial → IP→Egress. Prefer outbound PAI if already set
+            # (PrefixDial b() gosub: sip:suid@tenant.fqdn).
+            #
+            $var(pres_num) = $fU;
+            if ($var(pres_num) != "" && $var(pres_num) != "<null>") {
+                remove_hf("X-PBX3-Pres-Num");
+                append_hf("X-PBX3-Pres-Num: $var(pres_num)\r\n");
+            }
+            if (!is_present_hf("P-Asserted-Identity")) {
+                if ($fu != "" && $fu != "<null>") {
+                    $var(site_orig_from) = $fu;
+                    append_hf("P-Asserted-Identity: <$var(site_orig_from)>\r\n");
+                    xlog("INVITE: site-dial hairpin — PAI from From=$var(site_orig_from)\n");
+                }
+            } else {
+                xlog("INVITE: site-dial hairpin — keep existing PAI\n");
+            }
+            if ($fd != "" && $fd != "<null>") {
+                $var(site_from) = "sip:sitedial@" + $fd;
+                uac_replace_from("", $var(site_from));
+                xlog("INVITE: site-dial hairpin — From user→sitedial domain=$fd\n");
+            }
             # continue into is_domain_local + TO_DISPATCHER below with original Request-URI
         } else {
             xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in location table\n");
