@@ -810,13 +810,17 @@ route[DOMAIN_CHECK] {
         exit;
     }
 
-    # Asterisk→phone endpoint lookup:
+    # Asterisk→phone / Asterisk→tenant delivery:
     #  (a) RURI host is IP (legacy Dial via AOR contact @VIP) — AoR domain via GET_DOMAIN_FROM_SOURCE_IP
-    #  (b) RURI is shortuid@tenant.fqdn (PrepDial) — use $rd as AoR domain
-    # Without (b), FQDN RURIs skip usrloc and TO_DISPATCHER hairpins back to Asterisk Ingress.
+    #  (b) RURI is user@tenant.fqdn from Asterisk — usrloc first (station: shortuid hit → phone).
+    #      Usrloc miss (e.g. extension pkey from PrefixDial) → fall through to domain dispatcher
+    #      so hosting Asterisk can LepDial(ext). Same-node hairpin via dispatcher is intentional.
+    # Without (b), FQDN RURIs used to skip usrloc and TO_DISPATCHER hairpin station shortuid incorrectly.
     $var(request_domain) = $rd;
     $var(do_endpoint_lookup) = 0;
+    $var(ruri_host_is_ip) = 0;
     if ($var(request_domain) =~ "^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})") {
+        $var(ruri_host_is_ip) = 1;
         $var(request_ip) = $re;
         $var(endpoint_user) = $rU;
         $var(do_endpoint_lookup) = 1;
@@ -828,7 +832,7 @@ route[DOMAIN_CHECK] {
         $var(domain_from_source) = $rd;
         $var(domain_detection_success) = 1;
         $var(do_endpoint_lookup) = 1;
-        xlog("INVITE Asterisk→phone tenant AoR: $rU@$rd, usrloc lookup (skip dispatcher)\n");
+        xlog("INVITE Asterisk→tenant FQDN: $rU@$rd, usrloc first (hit→phone; miss→dispatcher)\n");
     }
 
     if ($var(do_endpoint_lookup) == 1) {
@@ -1036,11 +1040,20 @@ route[DOMAIN_CHECK] {
             }
         }
         
-        # If endpoint lookup failed, log and send 404
+        # Endpoint contact not in usrloc.
+        # Slice B (tenant short dial / PrefixDial): Asterisk → sip:{ext}@{tenant.fqdn}
+        # with no phone registration for that user → domain→dispatcher → home Asterisk.
+        # Station dial (shortuid@fqdn) still hits usrloc above and RELAYs to the phone.
+        # Legacy IP R-URI endpoint path: keep 404 (real handset missing, not a home context).
         $ru = $var(original_ru);
-        xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in location table\n");
-        sl_send_reply(404, "Endpoint Not Found");
-        exit;
+        if ($var(is_from_asterisk) == 1 && $var(ruri_host_is_ip) == 0) {
+            xlog("INVITE: usrloc miss for $var(endpoint_user)@$rd from Asterisk — fall through to domain dispatcher (ext@fqdn delivery)\n");
+            # continue into is_domain_local + TO_DISPATCHER below with original Request-URI
+        } else {
+            xlog("L_WARN", "Endpoint lookup failed for $var(endpoint_user)@$rd - no matching endpoint found in location table\n");
+            sl_send_reply(404, "Endpoint Not Found");
+            exit;
+        }
     }
 
     # Optional extra hardening: domain consistency
