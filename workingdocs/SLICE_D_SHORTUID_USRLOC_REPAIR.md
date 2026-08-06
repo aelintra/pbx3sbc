@@ -37,7 +37,7 @@ Fleet phone AoR user = **shortuid** (globally unique). That is the opposite of d
 
 All-digit shortuids (charset-legal but rare) would miss repair until the gate is refined; prefer letter-required over false positives on PrefixDial digits.
 
-- **Parked:** Mod suid generator to discard all-digit returns and regen — logical easy fix; **no all-digit phone suids in fleet now**, so letter gate is enough for v1.
+- **Done (2026-08-05):** Mod suid generator to discard all-digit returns and regen — `idpwgen` + `HelperClass::generate` + `generate_shortuid` (+ convert script). Existing all-digit rows (if any) unchanged; new ones always have a letter.
 
 ---
 
