@@ -178,9 +178,9 @@ WHERE username = 'hb64kj' AND expires > UNIX_TIMESTAMP();
 
 SIPp Domain / dual-host site-dial recipe: sipplab **`docs/examples/site-dial-lab.md`** (forward path). Desk D still needs real handset or a UAC that rewrites domain like Snom.
 
-### Separate residual (do not conflate with D)
+### Separate residual (hairpin BYE)
 
-Earlier same-box site dial: **callee BYE does not always clear caller** (hairpin asymmetry) — observed before Path 1. **2026-08-05 desk matrix after Path 1:** BYE cleared correctly both ways (Snom↔Yealink). Re-check if hairpin (same-box Asterisk) path still shows the old asymmetry; Path 1 desk return is not that path.
+Earlier same-box site dial: **callee BYE did not always clear caller** (hairpin asymmetry). **Not caused by Path 1** (forward `81` never hits Slice D). Same Snom/Yealink pair, multiple tenant accounts. **2026-08-05:** hangups look OK now — **cause unknown**; watch / capture if it returns.
 
 ---
 
