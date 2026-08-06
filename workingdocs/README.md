@@ -27,6 +27,8 @@
 | **INSTALLATION/** | Manual install steps, install review. |
 | **LE_HTTPS_SBC_ADMIN.md** | Let’s Encrypt + nginx HTTPS for Filament admin (`sbc.pbx3.com`). |
 | **WEBRTC_W1_MAGRATHEA.md** | **W1 Magrathea checklist** — WSS on VIP, RTP bypass; status snapshot. |
+| **SLICE_B_USRLOC_MISS_DISPATCHER.md** | Asterisk → `ext@fqdn` usrloc miss → dispatcher (site dial). |
+| **SLICE_D_SHORTUID_USRLOC_REPAIR.md** | Phone history redial: shortuid@wrong-domain → username-only usrloc RELAY (lean A). |
 | **SBC_SOAK_ENDPOINT_REFERENCE.md** | Desk phone + softphone brands for fleet SBC soak (UK list + Grandstream). |
 
 ---

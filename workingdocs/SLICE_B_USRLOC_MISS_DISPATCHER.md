@@ -29,3 +29,5 @@ Does **not** open miss→dispatcher for:
 4. Regression: INVITE `sip:{shortuid}@dhbm8x.pbx3.com` still rings the phone (usrloc hit).
 
 See **`pbx3/workingdocs/TENANT_SHORT_DIAL_REQUIREMENTS.md`** §3.6, slice B.
+
+**Not this slice:** desk history redial with shortuid@wrong-domain (phone-sourced) → **`SLICE_D_SHORTUID_USRLOC_REPAIR.md`**.
