@@ -1,6 +1,8 @@
 # Slice D — Phone history redial: shortuid usrloc repair
 
-**Status:** Spec lean / **not coded**. Product-lock option A before Magrathea change.  
+**Status:** **Lab green** (2026-08-05). Product-locked A. Template + Magrathea live on branch **`slice-d-shortuid-usrloc-repair`**. Path 1 only (not Path 2).  
+**Magrathea:** patched + restarted; backup `/root/opensips.cfg.pre-slice-d.20260805210656`. Desk redial hit: `rU=hb64kj rd=9wvvnb…` → username-only → `RELAY` to `74.83.26.203:5060`.  
+**Desk matrix (affcot 1101 Snom ↔ duns 1002 Yealink):** forward site dial + **BYE both ways** clear correctly; **missed-call / history dialback both ways** (Yealink→Snom and Snom→Yealink).  
 **Parent:** `pbx3/workingdocs/TENANT_SHORT_DIAL_REQUIREMENTS.md` §3.9.1  
 **Sibling:** `SLICE_B_USRLOC_MISS_DISPATCHER.md` (Asterisk → `ext@fqdn` miss→dispatcher — **do not confuse**)
 
@@ -29,11 +31,13 @@ Fleet phone AoR user = **shortuid** (globally unique). That is the opposite of d
 
 **Gate:** only attempt username-only repair when `$rU` matches **fleet shortuid shape** and is **not digit-only**:
 
-- Length **6** (see `IDPWGEN_ROLLOUT_PLAN.md` / HelperClass shortuid).
-- Charset `0-9` + `bcdfghjkmnpqrstvwxyz` (no vowels / similar).
+- Charset `0-9` + `bcdfghjkmnpqrstvwxyz` (no vowels / similar) — full-string match.
 - **Must contain at least one letter** — so `1000`, `811002` (site-dial digits), E.164, etc. never take this path.
+- **No fixed length** in OpenSIPS — generator length may change; hardcoding `== 6` would silently break history return.
 
 All-digit shortuids (charset-legal but rare) would miss repair until the gate is refined; prefer letter-required over false positives on PrefixDial digits.
+
+- **Parked:** Mod suid generator to discard all-digit returns and regen — logical easy fix; **no all-digit phone suids in fleet now**, so letter gate is enough for v1.
 
 ---
 
@@ -53,49 +57,28 @@ Today (simplified):
 
 ---
 
-## Recommended pattern (Path 1 — direct RELAY)
+## Recommended pattern (Path 1 — direct RELAY) — **v1 coded**
+
+v1 is **username-only only** (no domain-specific `lookup()` first). Shortuids are globally unique; skipping the big Asterisk usrloc clone keeps blast radius small. Same-tenant phone→`shortuid@$rd` still hits via username-only.
 
 ```text
 INVITE from phone (is_from_asterisk != 1)
   && method INVITE && $rU != ""
   && $rd is tenant FQDN (not IP)
-  && is_domain_local($rd)          # caller’s registrar domain is ours
-  && $rU matches shortuid shape    # has letter; not digit-only ext
+  && is_domain_local($rd)          # already true — call site is after that
+  && $rU matches shortuid shape    # charset + has letter; no fixed length; not digit-only ext
 →
-  1. Domain-specific lookup: $ru = sip:$rU@$rd ; lookup("location")
-     Hit → RELAY (same-tenant shortuid dial via SBC — rare but OK)
-  2. Miss → username-only SQL (reuse existing location query style ~line 1013):
-       SELECT domain, COALESCE(received, contact) FROM location
-       WHERE username='$rU' AND expires > UNIX_TIMESTAMP()
-       ORDER BY expires DESC LIMIT 1
-     Hit → set $ru/$du to Contact (NAT: prefer received; same as Asterisk→phone path)
-           route(RELAY); exit
-     Miss → fall through TO_DISPATCHER (unchanged — local digits / 404)
+  Auth: From registered on $fd; $si == COALESCE(received,contact) host
+    miss From reg → return (TO_DISPATCHER)
+    IP mismatch → 403 exit
+  Username-only SQL (ORDER BY expires DESC LIMIT 1):
+    Hit → set $ru/$du (NAT: prefer received) → route(RELAY); exit
+    Miss → return (TO_DISPATCHER unchanged)
 ```
 
-Pseudo-OpenSIPS placement (illustrative — match live template idioms for `$du` / SQL fallback / NAT):
+OpenSIPS: `route[SLICE_D_SHORTUID_REPAIR]` + one gated call in `route[DOMAIN_CHECK]` immediately before `route(TO_DISPATCHER)`.
 
-```opensips
-# After Asterisk endpoint-lookup block; before R-URI/To domain mismatch + TO_DISPATCHER
-if (is_method("INVITE") && $var(is_from_asterisk) != 1
-    && $rU != "" && $var(ruri_host_is_ip) == 0
-    && $(rU{s.len}) == 6 && $rU =~ "[a-z]") {
-    # Prefer full shortuid charset check; letter required so 811002 never matches
-
-    $var(original_ru) = $ru;
-    $var(lookup_uri) = "sip:" + $rU + "@" + $rd;
-    $ru = $var(lookup_uri);
-    if (lookup("location")) {
-        # … same hit handling as Asterisk→FQDN path → route(RELAY); exit
-    }
-    $ru = $var(original_ru);
-    # username-only: SELECT … WHERE username='$rU' …
-    # on contact hit → route(RELAY); exit
-    # else continue (restore $ru) into existing TO_DISPATCHER
-}
-```
-
-**Reuse:** Asterisk→phone hit path already has `lookup("location")` + SQL fallback + `route(RELAY)` (~830–1040). Prefer factoring a shared `route[ENDPOINT_RELAY_FROM_LOCATION]` over copy-paste; acceptable to clone-then-factor in lab.
+**Reuse:** `GET_ENDPOINT_URI_PARAMS` + same Contact/`received` URI extract as wildcard path ~1013. Does **not** factor Asterisk→phone `lookup()` block.
 
 ### Auth / CDR caveats (Path 1)
 
@@ -197,13 +180,13 @@ SIPp Domain / dual-host site-dial recipe: sipplab **`docs/examples/site-dial-lab
 
 ### Separate residual (do not conflate with D)
 
-Same-box site dial: **callee BYE does not always clear caller** (hairpin asymmetry). Track elsewhere; Path 1 may change BYE path — re-check after RELAY.
+Earlier same-box site dial: **callee BYE does not always clear caller** (hairpin asymmetry) — observed before Path 1. **2026-08-05 desk matrix after Path 1:** BYE cleared correctly both ways (Snom↔Yealink). Re-check if hairpin (same-box Asterisk) path still shows the old asymmetry; Path 1 desk return is not that path.
 
 ---
 
 ## Resume checklist for implementer
 
-1. Product-lock **A** (this doc) vs **B** (no guarantee) in §3.9.1.  
-2. Implement Path 1 in `DOMAIN_CHECK` + auth gate; update **template + Magrathea live**.  
-3. Smoke list above on Magrathea + affcot↔duns Snom pair (`81`).  
-4. Update this file **Status → lab green** + note Magrathea reload / any pbx3sbc commit.
+1. ~~Product-lock **A**~~ **done** (2026-08-05).  
+2. ~~Implement Path 1 in `DOMAIN_CHECK` + auth gate~~ **done** (template + Magrathea).  
+3. ~~Diff template → Magrathea live → reload → smoke~~ **lab green** (desk redial `hb64kj@9wvvnb` → RELAY).  
+4. Commit/push branch `slice-d-shortuid-usrloc-repair` (pbx3sbc + pbx3 docs) when operator asks.

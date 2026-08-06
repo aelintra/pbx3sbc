@@ -1132,6 +1132,19 @@ route[DOMAIN_CHECK] {
         $var(setid) = $(var(setid_str){s.int});
         
         xlog("Domain=$var(domain) setid=$var(setid) extracted from attrs=$var(attrs) (str=$var(setid_str))\n");
+
+        # Slice D (tenant short dial desk return): phone history redial keeps shortuid
+        # but rewrites host to caller's registrar → would TO_DISPATCHER → 404.
+        # Path 1: username-only usrloc → RELAY (shortuids globally unique).
+        # Gate: phone-sourced, FQDN R-URI, shortuid charset + letter (never digit exts / 81xxxx).
+        # No fixed length — generator length may change; do not hardcode here.
+        # Does NOT open Slice B for phone INVITEs. See SLICE_D_SHORTUID_USRLOC_REPAIR.md.
+        if (is_method("INVITE") && $var(is_from_asterisk) != 1
+            && $rU != "" && $var(ruri_host_is_ip) == 0
+            && $rU =~ "^[0-9bcdfghjkmnpqrstvwxyz]+$" && $rU =~ "[a-z]") {
+            route(SLICE_D_SHORTUID_REPAIR);
+            # returns on miss / soft auth fail → fall through TO_DISPATCHER unchanged
+        }
     } else {
         # Domain not found
         xlog("L_NOTICE",
@@ -1150,6 +1163,74 @@ route[DOMAIN_CHECK] {
     }
 
     route(TO_DISPATCHER);
+}
+
+# Slice D Path 1 — phone INVITE sip:{shortuid}@{caller_tenant_fqdn} → username-only location → RELAY
+# Called only from DOMAIN_CHECK after is_domain_local (caller registrar is ours).
+# On hit: route(RELAY); exit. On miss / From not registered: return (caller continues to TO_DISPATCHER).
+# On From registered but $si ≠ Contact/received host: 403 (Path 1 bypasses Asterisk auth).
+route[SLICE_D_SHORTUID_REPAIR] {
+    xlog("INVITE: Slice D shortuid repair candidate rU=$rU rd=$rd From=$fU@$fd si=$si\n");
+
+    if ($fU == "" || $fU == "<null>" || $fd == "" || $fd == "<null>") {
+        xlog("L_WARN", "INVITE: Slice D — missing From user/domain — fall through\n");
+        return;
+    }
+
+    # Auth: From must be a live registration on this registrar domain; $si must match Contact/received
+    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $fU + "' AND domain='" + $fd + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
+    if (!sql_query($var(query), "$avp(slice_d_from_loc)")
+        || $(avp(slice_d_from_loc)[0]) == "" || $(avp(slice_d_from_loc)[0]) == "<null>") {
+        xlog("L_WARN", "INVITE: Slice D — From not registered $fU@$fd from $si — fall through\n");
+        return;
+    }
+
+    $var(slice_d_saved_ru) = $ru;
+    $ru = $(avp(slice_d_from_loc)[0]);
+    $var(slice_d_from_host) = $(ru{uri.host});
+    $ru = $var(slice_d_saved_ru);
+    if ($var(slice_d_from_host) == "" || $var(slice_d_from_host) == "<null>" || $var(slice_d_from_host) != $si) {
+        xlog("L_WARN", "INVITE: Slice D — From source IP mismatch si=$si loc_host=$var(slice_d_from_host) — 403\n");
+        sl_send_reply(403, "Forbidden");
+        exit;
+    }
+
+    # Username-only Contact (shortuid globally unique — never use this for digit exts)
+    $var(endpoint_user) = $rU;
+    $var(original_ru) = $ru;
+    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $rU + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
+    if (!sql_query($var(query), "$avp(slice_d_callee_loc)")
+        || $(avp(slice_d_callee_loc)[0]) == "" || $(avp(slice_d_callee_loc)[0]) == "<null>") {
+        $ru = $var(original_ru);
+        xlog("INVITE: Slice D — no location for shortuid $rU — fall through TO_DISPATCHER\n");
+        return;
+    }
+
+    $var(contact_value) = $(avp(slice_d_callee_loc)[0]);
+    $var(extracted_ip) = "";
+    $var(extracted_port) = "";
+    if ($var(contact_value) =~ "^sip:") {
+        $ru = $var(contact_value);
+        $var(extracted_ip) = $(ru{uri.host});
+        $var(extracted_port) = $(ru{uri.port});
+        if ($var(extracted_port) == "" || $var(extracted_port) == "<null>") {
+            $var(extracted_port) = "5060";
+        }
+    }
+    if ($var(extracted_ip) == "" || $var(extracted_ip) == "<null>"
+        || !($var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}")) {
+        $ru = $var(original_ru);
+        xlog("L_WARN", "INVITE: Slice D — Contact IP extract failed for $rU value=[$var(contact_value)] — fall through\n");
+        return;
+    }
+
+    $var(params_source_uri) = $var(original_ru);
+    route(GET_ENDPOINT_URI_PARAMS);
+    $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port) + $var(endpoint_uri_params);
+    $ru = $du;
+    xlog("INVITE: Slice D username-only hit $var(endpoint_user) → $du (was $var(original_ru)) — RELAY\n");
+    route(RELAY);
+    exit;
 }
 
 ####### Health-aware routing ########
