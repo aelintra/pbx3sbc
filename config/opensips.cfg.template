@@ -224,10 +224,13 @@ modparam("domain", "attrs_col", "attrs")
 
 # --- HTTP Server (Prometheus metrics + MI HTTP for admin panel) ---
 # Shared HTTP listener: /metrics (Prometheus), /mi (Management Interface)
-# Listen on all interfaces, port 8888
-modparam("httpd", "ip", "0.0.0.0")
+# SECURITY (safety-debt #10): localhost-only. MI has no auth of its own, so it
+# must never be reachable off-box. pbx3sbc-admin (OpenSIPSMIService) runs on
+# the same host and talks to it via 127.0.0.1 — do not change this to 0.0.0.0.
+# If remote Prometheus scraping is needed, use an SSH tunnel or a reverse
+# proxy with auth on the scraping side instead of widening this bind.
+modparam("httpd", "ip", "127.0.0.1")
 modparam("httpd", "port", 8888)
-# Note: For localhost-only access, use: modparam("httpd", "ip", "127.0.0.1")
 
 # --- MI HTTP (Management Interface for admin panel reloads) ---
 # JSON-RPC endpoint: POST http://127.0.0.1:8888/mi
@@ -326,12 +329,23 @@ route {
     }
 
     # ---- Basic hygiene ----
+    # SECURITY (safety-debt #11): SIP -> SQL string concat below.
+    # OpenSIPS's sql_query() has no bind/prepared-statement support for
+    # free-form values, so every attacker-controlled field (User-Agent,
+    # Request-URI, method token, domain) that gets single-quoted into a
+    # query MUST go through the core {s.escape.common} transformation
+    # first (escapes ', ", and NUL — see docs.opensips.org core variables /
+    # transformations). $si (source IP) and numeric fields ($sp/$rs/etc.)
+    # come from the transport layer, not attacker-suppliable strings, so
+    # they're safe to concatenate unescaped. Shortuid-style fields (usrloc
+    # username lookups) are additionally gated by a strict charset regex
+    # at the call site before ever reaching SQL — see SLICE_D_SHORTUID_REPAIR.
     if (!mf_process_maxfwd_header(10)) {
         # Phase 1.1: Log max-forwards exceeded to database for security tracking
         $var(query) = "INSERT INTO door_knock_attempts " +
             "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $rd + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'max_forwards_exceeded', NOW())";
+            "VALUES ('" + $(rd{s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+            "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'max_forwards_exceeded', NOW())";
         if (sql_query($var(query))) {
             xlog("Max-Forwards exceeded logged to database - from $si:$sp\n");
         }
@@ -345,10 +359,11 @@ route {
     # ---- Drop known scanners ----
     if ($ua =~ "sipvicious|friendly-scanner|sipcli|nmap") {
         # Phase 1.1: Log scanner detection to database for security tracking
+        # (see SQL-escaping note near mf_process_maxfwd_header above)
         $var(query) = "INSERT INTO door_knock_attempts " +
             "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $rd + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'scanner_detected', NOW())";
+            "VALUES ('" + $(rd{s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+            "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'scanner_detected', NOW())";
         if (sql_query($var(query))) {
             xlog("Scanner detected and logged to database - user_agent=$ua from $si:$sp\n");
         }
@@ -366,10 +381,11 @@ route {
     # ---- Allowed methods only ----
     if (!is_method("REGISTER|INVITE|ACK|BYE|CANCEL|OPTIONS|NOTIFY|SUBSCRIBE|PRACK")) {
         # Phase 1.1: Log method not allowed to database for security tracking
+        # (see SQL-escaping note near mf_process_maxfwd_header above)
         $var(query) = "INSERT INTO door_knock_attempts " +
             "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $rd + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'method_not_allowed', NOW())";
+            "VALUES ('" + $(rd{s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+            "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'method_not_allowed', NOW())";
         if (sql_query($var(query))) {
             xlog("Method not allowed logged to database - method=$rm from $si:$sp\n");
         }
@@ -569,7 +585,10 @@ route {
                                 xlog("OPTIONS/NOTIFY: Trying SQL fallback for domain-specific lookup (race condition handling)\n");
                                 xlog("OPTIONS/NOTIFY: SQL fallback query for user=$var(endpoint_user), domain=$var(fallback_domain)\n");
                                 # Use received field if available (NAT traversal), otherwise use contact field
-                                $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(fallback_domain) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+                                # SECURITY (safety-debt #11): endpoint_user/fallback_domain trace back to
+                                # $tU/$rU/$rd (free-form SIP headers) — escape before SQL concat (see note
+                                # near mf_process_maxfwd_header at top of route{}).
+                                $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(var(endpoint_user){s.escape.common}) + "' AND domain='" + $(var(fallback_domain){s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
                                 if (sql_query($var(query), "$avp(fallback_contact)")) {
                                     xlog("OPTIONS/NOTIFY: SQL fallback query executed, checking result\n");
                                     if ($(avp(fallback_contact)[0]) != "" && $(avp(fallback_contact)[0]) != "<null>") {
@@ -954,7 +973,9 @@ route[DOMAIN_CHECK] {
             xlog("INVITE: Trying SQL fallback for domain-specific lookup (race condition handling)\n");
             xlog("INVITE: SQL fallback query for user=$var(endpoint_user), domain=$var(domain_from_source)\n");
             # Use received field if available (NAT traversal), otherwise use contact field
-            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $var(endpoint_user) + "' AND domain='" + $var(domain_from_source) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            # SECURITY (safety-debt #11): escape free-form endpoint_user/domain_from_source
+            # before SQL concat (see note near mf_process_maxfwd_header at top of route{}).
+            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(var(endpoint_user){s.escape.common}) + "' AND domain='" + $(var(domain_from_source){s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
             if (sql_query($var(query), "$avp(invite_contact)")) {
                 xlog("INVITE: SQL fallback query executed, result count check\n");
                 if ($(avp(invite_contact)[0]) != "" && $(avp(invite_contact)[0]) != "<null>") {
@@ -1010,7 +1031,9 @@ route[DOMAIN_CHECK] {
             # Domain not found - use SQL wildcard lookup as fallback (with warning)
             xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
             # Use received field if available (NAT traversal), otherwise use contact field
-            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+            # SECURITY (safety-debt #11): escape free-form endpoint_user before SQL concat
+            # (see note near mf_process_maxfwd_header at top of route{}).
+            $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(var(endpoint_user){s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
             if (sql_query($var(query), "$avp(contact_uri)")) {
                 if ($(avp(contact_uri)[0]) != "" && $(avp(contact_uri)[0]) != "<null>") {
                     $var(contact_value) = $(avp(contact_uri)[0]);
@@ -1087,10 +1110,11 @@ route[DOMAIN_CHECK] {
         xlog("L_WARN", "R-URI / To mismatch domain=$rd src=$si\n");
         
         # Phase 1.1: Log door-knock attempt to database for security tracking
+        # (see SQL-escaping note near mf_process_maxfwd_header above)
         $var(query) = "INSERT INTO door_knock_attempts " +
             "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $rd + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'domain_mismatch', NOW())";
+            "VALUES ('" + $(rd{s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+            "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'domain_mismatch', NOW())";
         if (sql_query($var(query))) {
             xlog("Door-knock attempt logged to database - domain mismatch $rd vs $(tu{uri.domain}) from $si:$sp\n");
         }
@@ -1117,10 +1141,11 @@ route[DOMAIN_CHECK] {
             xlog("L_ERR", "No setid found in domain attributes for domain=$var(domain) attrs=$var(attrs)\n");
             
             # Phase 1.1: Log door-knock attempt to database for security tracking
+            # (see SQL-escaping note near mf_process_maxfwd_header above)
             $var(query) = "INSERT INTO door_knock_attempts " +
                 "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-                "VALUES ('" + $var(domain) + "', '" + $si + "', " + $sp + ", " +
-                "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'setid_not_found', NOW())";
+                "VALUES ('" + $(var(domain){s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+                "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'setid_not_found', NOW())";
             if (sql_query($var(query))) {
                 xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp (setid_not_found)\n");
             }
@@ -1151,10 +1176,11 @@ route[DOMAIN_CHECK] {
              "Door-knock blocked: domain=$var(domain) src=$si (not found)\n");
         
         # Phase 1.1: Log door-knock attempt to database for security tracking
+        # (see SQL-escaping note near mf_process_maxfwd_header above)
         $var(query) = "INSERT INTO door_knock_attempts " +
             "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
-            "VALUES ('" + $var(domain) + "', '" + $si + "', " + $sp + ", " +
-            "'" + $ua + "', '" + $rm + "', '" + $ru + "', 'domain_not_found', NOW())";
+            "VALUES ('" + $(var(domain){s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+            "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'domain_not_found', NOW())";
         if (sql_query($var(query))) {
             xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp\n");
         }
@@ -1178,7 +1204,10 @@ route[SLICE_D_SHORTUID_REPAIR] {
     }
 
     # Auth: From must be a live registration on this registrar domain; $si must match Contact/received
-    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $fU + "' AND domain='" + $fd + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
+    # SECURITY (safety-debt #11): $fU/$fd come from the From header of a phone-originated
+    # INVITE (not authenticated at INVITE-time), so they are free-form and must be escaped
+    # before use in SQL — see SQL-escaping note near mf_process_maxfwd_header (top of route{}).
+    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(fU{s.escape.common}) + "' AND domain='" + $(fd{s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
     if (!sql_query($var(query), "$avp(slice_d_from_loc)")
         || $(avp(slice_d_from_loc)[0]) == "" || $(avp(slice_d_from_loc)[0]) == "<null>") {
         xlog("L_WARN", "INVITE: Slice D — From not registered $fU@$fd from $si — fall through\n");
@@ -1196,9 +1225,13 @@ route[SLICE_D_SHORTUID_REPAIR] {
     }
 
     # Username-only Contact (shortuid globally unique — never use this for digit exts)
+    # SECURITY (safety-debt #11): $rU is already gated to a strict shortuid charset
+    # (^[0-9bcdfghjkmnpqrstvwxyz]+$ plus a letter, see the caller in DOMAIN_CHECK) before
+    # this route is ever entered, so quote injection isn't reachable here — {s.escape.common}
+    # is added anyway as belt-and-braces defense in depth in case the gate above is ever loosened.
     $var(endpoint_user) = $rU;
     $var(original_ru) = $ru;
-    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $rU + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
+    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(rU{s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
     if (!sql_query($var(query), "$avp(slice_d_callee_loc)")
         || $(avp(slice_d_callee_loc)[0]) == "" || $(avp(slice_d_callee_loc)[0]) == "<null>") {
         $ru = $var(original_ru);
@@ -2388,7 +2421,9 @@ onreply_route[handle_reply_reg] {
                     xlog("REGISTER: Note: With working_mode_preset='single-instance-sql-write-through', save() deletes from DB immediately\n");
                     
                     # VERIFICATION: Verify the record was deleted by save()
-                    $var(verify_delete_query) = "SELECT contact_id FROM location WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' ORDER BY expires DESC LIMIT 1";
+                    # SECURITY (safety-debt #11): escape free-form $tU/domain before SQL concat
+                    # (see note near mf_process_maxfwd_header at top of route{}).
+                    $var(verify_delete_query) = "SELECT contact_id FROM location WHERE username='" + $(tU{s.escape.common}) + "' AND domain='" + $(tu{uri.domain}{s.escape.common}) + "' ORDER BY expires DESC LIMIT 1";
                     if (sql_query($var(verify_delete_query), "$avp(verify_delete)")) {
                         if ($(avp(verify_delete)[0]) == "" || $(avp(verify_delete)[0]) == "<null>") {
                             xlog("REGISTER: VERIFICATION SUCCESS - Record deleted from database (deregistration successful)\n");
@@ -2411,7 +2446,9 @@ onreply_route[handle_reply_reg] {
                 # Note: save() handles INSERT/UPDATE internally based on whether contact exists
                 # With received_avp parameter configured, save() should automatically populate 'received' field from $avp(reg_received)
                 # Use last_modified DESC to get the most recently created/updated record (more reliable than expires)
-                $var(verify_query) = "SELECT contact_id, contact, received, expires, domain, username FROM location WHERE username='" + $tU + "' AND domain='" + $(tu{uri.domain}) + "' ORDER BY last_modified DESC, expires DESC LIMIT 1";
+                # SECURITY (safety-debt #11): escape free-form $tU/domain before SQL concat
+                # (see note near mf_process_maxfwd_header at top of route{}).
+                $var(verify_query) = "SELECT contact_id, contact, received, expires, domain, username FROM location WHERE username='" + $(tU{s.escape.common}) + "' AND domain='" + $(tu{uri.domain}{s.escape.common}) + "' ORDER BY last_modified DESC, expires DESC LIMIT 1";
                 if (sql_query($var(verify_query), "$avp(verify_result)")) {
                     if ($(avp(verify_result)[0]) != "" && $(avp(verify_result)[0]) != "<null>") {
                         xlog("REGISTER: VERIFICATION - Record saved by save():\n");
@@ -2517,12 +2554,12 @@ onreply_route[handle_reply_reg] {
             
             # Build SQL query to log failed registration
             # Note: Using string concatenation for SQL (OpenSIPS doesn't support parameterized queries)
-            # Security Note: Values come from SIP protocol headers and network layer, which are protocol-controlled.
-            # Risk of SQL injection is low, but not zero. In production, consider:
-            # 1. Validating username/domain format before logging
-            # 2. Using MySQL's QUOTE() function via additional SQL query (performance overhead)
-            # 3. Implementing application-level escaping (complex in OpenSIPS)
-            # For now, we rely on protocol validation and low risk profile.
+            # SECURITY (safety-debt #11): username ($tU), domain, user-agent, and response_reason
+            # are free-form values pulled from SIP headers / an upstream reply, so every one of
+            # them is escaped with the core {s.escape.common} transformation before it is
+            # single-quoted into the query (escapes ', ", and NUL — see SQL-escaping note near
+            # mf_process_maxfwd_header at top of route{}). source_ip/source_port/response_code
+            # are transport-layer/numeric values and are safe unescaped.
             $var(expires_sql) = "NULL";
             if ($var(expires_value) != "" && $var(expires_value) =~ "^[0-9]+$") {
                 $var(expires_sql) = $var(expires_value);
@@ -2530,10 +2567,10 @@ onreply_route[handle_reply_reg] {
             $var(query) = "INSERT INTO failed_registrations " +
                 "(username, domain, source_ip, source_port, user_agent, " +
                 "response_code, response_reason, attempt_time, expires_header) " +
-                "VALUES ('" + $tU + "', '" + $(tu{uri.domain}) + "', " +
+                "VALUES ('" + $(tU{s.escape.common}) + "', '" + $(tu{uri.domain}{s.escape.common}) + "', " +
                 "'" + $var(log_source_ip) + "', " + $var(log_source_port) + ", " +
-                "'" + $var(log_user_agent) + "', " + $rs + ", " +
-                "'" + $rr + "', NOW(), " + $var(expires_sql) + ")";
+                "'" + $(var(log_user_agent){s.escape.common}) + "', " + $rs + ", " +
+                "'" + $(rr{s.escape.common}) + "', NOW(), " + $var(expires_sql) + ")";
             
             # Execute query (non-blocking - don't fail if query fails)
             if (sql_query($var(query))) {

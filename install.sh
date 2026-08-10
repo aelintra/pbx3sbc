@@ -469,8 +469,12 @@ configure_firewall() {
         add_ufw_rule_if_missing "9090/tcp" "Prometheus web UI"
         # Node Exporter metrics (restrict to localhost in production)
         add_ufw_rule_if_missing "9100/tcp" "Node Exporter metrics"
-        # OpenSIPS Prometheus module endpoint (if exposed externally)
-        add_ufw_rule_if_missing "8888/tcp" "OpenSIPS Prometheus metrics"
+        # SECURITY (safety-debt #10): OpenSIPS httpd (MI + Prometheus /metrics)
+        # is bound to 127.0.0.1 in opensips.cfg.template and has no auth of its
+        # own, so port 8888 must NOT be opened on the public firewall. The
+        # local Prometheus job scrapes it over localhost; do not add a UFW
+        # allow rule for 8888 unless httpd is deliberately rebound off-box
+        # behind its own auth/reverse proxy.
     fi
     
     log_success "Firewall configured"
