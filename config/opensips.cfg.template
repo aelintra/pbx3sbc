@@ -29,6 +29,8 @@ socket=udp:0.0.0.0:5060
 # Use --advertised-ip parameter during installation, or manually edit after installation
 # The install.sh script will replace CHANGE_ME with the provided IP address
 advertised_address="CHANGE_ME"
+# Script-visible copy for dialect From/PAI/RPID (install replaces CHANGE_ME with same IP).
+#!define SBC_PUBLIC_HOST "CHANGE_ME"
 
 ####### Modules ########
 
@@ -2770,16 +2772,20 @@ route[DIALECT_OUTBOUND_RENDER] {
                 $var(cplus) = "";
             }
             if ($var(cplus) != "") {
-                $var(curi) = "sip:" + $var(cplus) + "@" + $fd;
+                # Use SBC advertised public host — not $fd (often Asterisk private IP).
+                $var(idhost) = SBC_PUBLIC_HOST;
+                $var(curi) = "sip:" + $var(cplus) + "@" + $var(idhost);
                 uac_replace_from("", $var(curi));
                 remove_hf("P-Asserted-Identity");
-                append_hf("P-Asserted-Identity: <sip:$var(cplus)@$fd>\r\n");
+                $var(pai) = "P-Asserted-Identity: <sip:" + $var(cplus) + "@" + $var(idhost) + ">\r\n";
+                append_hf("$var(pai)");
                 if ($var(dialect) == "uk-magrathea") {
                     # Presentation = network when node sent a single CLI (RPID same as PAID).
                     remove_hf("Remote-Party-ID");
-                    append_hf("Remote-Party-ID: <sip:$var(cplus)@$fd>;party=calling;screen=yes\r\n");
+                    $var(rpid) = "Remote-Party-ID: <sip:" + $var(cplus) + "@" + $var(idhost) + ">;party=calling;screen=yes\r\n";
+                    append_hf("$var(rpid)");
                 }
-                xlog("DIALECT outbound CLI: +E.164=$var(cplus) dialect=$var(dialect)\n");
+                xlog("DIALECT outbound CLI: +E.164=$var(cplus) dialect=$var(dialect) host=$var(idhost)\n");
             }
         }
     }
