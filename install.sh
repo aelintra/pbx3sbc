@@ -764,8 +764,9 @@ create_opensips_config() {
         # Trim any whitespace/newlines from the IP address
         final_ip=$(echo "$final_ip" | tr -d '\n\r' | xargs)
         sed -i "s|advertised_address=\"CHANGE_ME\"|advertised_address=\"${final_ip}\"|g" "$OPENSIPS_CFG"
-        sed -i "s|#!define SBC_PUBLIC_HOST \"CHANGE_ME\"|#!define SBC_PUBLIC_HOST \"${final_ip}\"|g" "$OPENSIPS_CFG"
-        log_success "Set advertised_address / SBC_PUBLIC_HOST to ${final_ip}"
+        # Dialect From/PAI host (must match advertised_address).
+        sed -i "s|\$var(idhost) = \"CHANGE_ME\";|\$var(idhost) = \"${final_ip}\";|g" "$OPENSIPS_CFG"
+        log_success "Set advertised_address / dialect idhost to ${final_ip}"
     fi
     
     log_success "OpenSIPS configuration created at ${OPENSIPS_CFG}"

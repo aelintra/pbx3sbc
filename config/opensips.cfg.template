@@ -29,8 +29,8 @@ socket=udp:0.0.0.0:5060
 # Use --advertised-ip parameter during installation, or manually edit after installation
 # The install.sh script will replace CHANGE_ME with the provided IP address
 advertised_address="CHANGE_ME"
-# Script-visible copy for dialect From/PAI/RPID (install replaces CHANGE_ME with same IP).
-#!define SBC_PUBLIC_HOST "CHANGE_ME"
+# Script-visible copy of advertised_address for dialect From/PAI/RPID (install replaces both CHANGE_ME).
+# Do not use #!define here — OpenSIPS 3.6 treats bare tokens as command names.
 
 ####### Modules ########
 
@@ -2773,7 +2773,8 @@ route[DIALECT_OUTBOUND_RENDER] {
             }
             if ($var(cplus) != "") {
                 # Use SBC advertised public host — not $fd (often Asterisk private IP).
-                $var(idhost) = SBC_PUBLIC_HOST;
+                # Keep in sync with advertised_address= above (install replaces CHANGE_ME).
+                $var(idhost) = "CHANGE_ME";
                 $var(curi) = "sip:" + $var(cplus) + "@" + $var(idhost);
                 uac_replace_from("", $var(curi));
                 remove_hf("P-Asserted-Identity");
