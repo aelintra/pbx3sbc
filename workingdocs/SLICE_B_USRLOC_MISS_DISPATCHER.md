@@ -16,6 +16,8 @@ For **INVITE from a fleet Asterisk** (`is_from_asterisk`) with **R-URI host = te
 
 Same-node “hairpin” via dispatcher is **correct** for `sip:1000@tenant.fqdn` (PrefixDial). Cross-node uses the same path to the other home.
 
+**Home (pbx3cagi PrepDial, 1.0.0-18+):** `SbcDomainRoute` sets `__PBX3_SITE_DIAL=YES` on digit R-URI arrivals. PrepDial must **not** Dial `sip:user@tenant.fqdn` again on that flag (unregistered dest → infinite loop). Local `Dial(PJSIP/shortuid)` → `CHANUNAVAIL` → PostDial → **voicemail**. Carrier DID Ingress does not set the flag; first FQDN Dial still runs.
+
 Does **not** open miss→dispatcher for:
 
 - Phone/non-Asterisk callers (no path B endpoint lookup).
