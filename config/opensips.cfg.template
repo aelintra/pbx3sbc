@@ -1669,27 +1669,23 @@ route[CHECK_PRIVATE_IP] {
 }
 
 # Extract SIP URI parameters after the host (e.g. Snom ;line=2q8koga4) needed for INVITE routing
-# Input:  $var(params_source_uri) - SIP URI to parse (Request-URI or contact from location)
-#         $var(endpoint_user) - username for contact DB fallback if params_source_uri has none
+# Input:  $var(params_source_uri) - SIP URI (often FQDN Dial R-URI — no line=)
+#         $var(endpoint_user) - username; usrloc Contact is the authority for line=
 # Output: $var(endpoint_uri_params) - parameter string including leading ';', or empty
+#
+# OpenSIPS empty $var is 0. {uri.params} on a URI with no params yields 0/empty;
+# concatenating ";" + that produced Request-URI sip:user@ip:port; (bare semicolon).
+# Snom 404s that; Yealink does not use line= so the same rewrite still rings.
 route[GET_ENDPOINT_URI_PARAMS] {
     $var(endpoint_uri_params) = "";
-    if ($var(params_source_uri) != "" && $var(params_source_uri) != "<null>") {
-        $var(all_params) = $(var(params_source_uri){uri.params});
-        if ($var(all_params) != "" && $var(all_params) != "<null>") {
-            if ($var(all_params) =~ "^;") {
-                $var(endpoint_uri_params) = $var(all_params);
-            } else {
-                $var(endpoint_uri_params) = ";" + $var(all_params);
-            }
-        }
-    }
-    if ($var(endpoint_uri_params) == "" && $var(endpoint_user) != "") {
-        $var(query) = "SELECT contact FROM location WHERE username='" + $var(endpoint_user) + "' AND expires > UNIX_TIMESTAMP() LIMIT 1";
+
+    # 1) usrloc Contact first — Snom ;line= lives here, not on sip:shortuid@tenant.fqdn
+    if ($var(endpoint_user) != "" && $var(endpoint_user) != "0" && $var(endpoint_user) != "<null>") {
+        $var(query) = "SELECT contact FROM location WHERE username='" + $(var(endpoint_user){s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() ORDER BY last_modified DESC LIMIT 1";
         if (sql_query($var(query), "$avp(param_contact)") && $(avp(param_contact)[0]) != "" && $(avp(param_contact)[0]) != "<null>") {
             $var(params_source_uri) = $(avp(param_contact)[0]);
             $var(all_params) = $(var(params_source_uri){uri.params});
-            if ($var(all_params) != "" && $var(all_params) != "<null>") {
+            if ($var(all_params) != "" && $var(all_params) != "<null>" && $var(all_params) != "0" && $var(all_params) =~ "[A-Za-z]") {
                 if ($var(all_params) =~ "^;") {
                     $var(endpoint_uri_params) = $var(all_params);
                 } else {
@@ -1698,10 +1694,23 @@ route[GET_ENDPOINT_URI_PARAMS] {
             }
         }
     }
-    # Fallback: To header from Asterisk often carries line= for Snom
+
+    # 2) caller-supplied URI (lookup Contact if caller saved it; FQDN Dial usually has none)
+    if ($var(endpoint_uri_params) == "" && $var(params_source_uri) != "" && $var(params_source_uri) != "<null>" && $var(params_source_uri) != "0") {
+        $var(all_params) = $(var(params_source_uri){uri.params});
+        if ($var(all_params) != "" && $var(all_params) != "<null>" && $var(all_params) != "0" && $var(all_params) =~ "[A-Za-z]") {
+            if ($var(all_params) =~ "^;") {
+                $var(endpoint_uri_params) = $var(all_params);
+            } else {
+                $var(endpoint_uri_params) = ";" + $var(all_params);
+            }
+        }
+    }
+
+    # 3) To header from Asterisk sometimes carries line= for Snom
     if ($var(endpoint_uri_params) == "" && $tu != "" && $tu != "<null>") {
         $var(all_params) = $(tu{uri.params});
-        if ($var(all_params) != "" && $var(all_params) != "<null>") {
+        if ($var(all_params) != "" && $var(all_params) != "<null>" && $var(all_params) != "0" && $var(all_params) =~ "[A-Za-z]") {
             if ($var(all_params) =~ "^;") {
                 $var(endpoint_uri_params) = $var(all_params);
             } else {

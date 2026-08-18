@@ -1325,6 +1325,9 @@ configure_fail2ban() {
         
         # Don't restart Fail2ban yet - let user configure whitelist first
         # They can restart it manually or we can add a flag to enable it immediately
+        if systemctl is-active --quiet fail2ban 2>/dev/null; then
+            fail2ban-client reload >/dev/null 2>&1 || log_warn "Fail2ban reload failed after jail install"
+        fi
     else
         log_warn "Fail2ban jail configuration not found at ${CONFIG_DIR}/fail2ban/opensips-brute-force.conf"
         return
@@ -1384,12 +1387,23 @@ start_services() {
         log_error "OpenSIPS failed to start. Check logs: journalctl -u opensips"
     fi
     
-    # Start Fail2ban if installed and not skipped
+    # Start Fail2ban when jail config is present (whitelist sync handles fleet homes)
     if [[ "$SKIP_FAIL2BAN" != true ]] && command -v fail2ban-server &> /dev/null; then
-        # Don't start Fail2ban automatically - user should configure whitelist first
-        log_info "Fail2ban installed but not started - configure whitelist first, then:"
-        log_info "  sudo systemctl start fail2ban"
-        log_info "  sudo systemctl status fail2ban"
+        if [[ -f /etc/fail2ban/jail.d/opensips-brute-force.conf ]] \
+            && [[ -f /etc/fail2ban/filter.d/opensips-combined.conf ]]; then
+            if systemctl start fail2ban 2>/dev/null; then
+                sleep 1
+                if fail2ban-client status opensips-brute-force >/dev/null 2>&1; then
+                    log_success "Fail2ban started (opensips-brute-force jail active)"
+                else
+                    log_warn "Fail2ban started but opensips-brute-force jail not loaded — check filters"
+                fi
+            else
+                log_warn "Failed to start Fail2ban — configure whitelist then: sudo systemctl start fail2ban"
+            fi
+        else
+            log_info "Fail2ban installed but jail not configured — run configure_fail2ban or re-run install"
+        fi
     fi
     
     # Start Prometheus and Node Exporter if installed
@@ -1595,6 +1609,7 @@ main() {
     create_user
     create_directories
     configure_opensips_logging
+    configure_fail2ban
     configure_sip_pcap
     setup_helper_scripts
     configure_firewall
