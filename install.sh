@@ -1617,13 +1617,28 @@ main() {
     
     # Get database password early so it can be used in config creation
     if [[ "$SKIP_DB" != true ]] && [[ -z "$DB_PASSWORD" ]]; then
+        local db_confirm attempts=0
         echo
-        read -sp "Enter MySQL database password for user 'opensips': " DB_PASSWORD
-        echo
-        if [[ -z "$DB_PASSWORD" ]]; then
-            log_error "Database password cannot be empty"
-            exit 1
-        fi
+        while (( attempts < 3 )); do
+            read -sp "Enter MySQL database password for user 'opensips': " DB_PASSWORD
+            echo
+            if [[ -z "$DB_PASSWORD" ]]; then
+                log_error "Database password cannot be empty"
+                exit 1
+            fi
+            read -sp "Confirm password: " db_confirm
+            echo
+            if [[ "$DB_PASSWORD" == "$db_confirm" ]]; then
+                break
+            fi
+            attempts=$((attempts + 1))
+            DB_PASSWORD=""
+            log_error "Passwords do not match. Try again."
+            if (( attempts >= 3 )); then
+                log_error "Password confirmation failed"
+                exit 1
+            fi
+        done
     elif [[ "$SKIP_DB" != true ]]; then
         DB_PASSWORD="$DB_PASSWORD"
     else
