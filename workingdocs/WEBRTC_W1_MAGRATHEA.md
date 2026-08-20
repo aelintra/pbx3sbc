@@ -181,6 +181,7 @@ Pass:     golden webrtc-1500.env
 4. **Relay to Asterisk** — same domain/dispatcher as UDP phones.  
 5. **WebRTC endpoint transport** — fleet: **UDP + outbound_proxy to SBC**, not transport-wss-only (that is for direct instance WSS).  
 6. **Tenant FQDN in public DNS** — optional for SIP identity; may point at home (as lab) or edge; Dial always goes via **outbound_proxy** first on fleet.  
+7. **One cert pair only** — template shows LE-live and `/etc/opensips/tls/` examples; enabling **both** active `certificate`/`private_key` modparams makes OpenSIPS fail to start. Lab: **`scripts/enable-lab-wss.sh`**. Apt of WSS modules: use **force-confold** so an opensips bump does not prompt on `opensips.cfg`.  
 
 ---
 

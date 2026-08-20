@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepare / document OpenSIPS WSS (W1) on an SBC host (Magrathea VIP path).
+# Prepare / document OpenSIPS WSS (W1) on an SBC host (Magrathea VIP / LE path).
 # Spec checklist: workingdocs/WEBRTC_W1_MAGRATHEA.md
 #
 # Usage (on Magrathea, as root preferred):
@@ -8,6 +8,11 @@
 #   sudo ./scripts/setup-opensips-wss.sh --print-cfg-snippet
 #
 # Does NOT auto-uncomment opensips.cfg — operator enables after backup (Phase 1.2).
+# When enabling: ONE certificate/private_key pair only (never both template examples).
+# Lab LAN self-signed (auto-enable): scripts/enable-lab-wss.sh
+#
+# Apt: installing WSS modules may upgrade opensips and prompt on opensips.cfg —
+# --install-packages uses force-confold so the live cfg is kept.
 
 set -euo pipefail
 
@@ -45,7 +50,7 @@ done
 if [[ "$PRINT_SNIPPET" -eq 1 ]]; then
   cat <<'EOF'
 # Paste into /etc/opensips/opensips.cfg after proto_udp (or match template).
-# Paths assume --cert-domain sbc.pbx3.com
+# Enable EXACTLY ONE certificate/private_key pair (this snippet uses the tls/ copy).
 
 loadmodule "tls_openssl.so"
 loadmodule "tls_mgm.so"
@@ -82,9 +87,14 @@ if [[ "$INSTALL_PACKAGES" -eq 1 ]]; then
   echo "Install the packages that match your OpenSIPS major, for example:"
   echo "  apt-get install -y opensips-tls-openssl-module opensips-wss-module"
   echo "Names vary; use search output above. Re-run without --install-packages after install."
-  # Best-effort common names; ignore failures
-  apt-get install -y opensips-tls-openssl-module opensips-wss-module 2>/dev/null \
-    || apt-get install -y opensips-module-tls opensips-module-wss 2>/dev/null \
+  apt-get install -y \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    opensips-tls-openssl-module opensips-wss-module 2>/dev/null \
+    || apt-get install -y \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      opensips-module-tls opensips-module-wss 2>/dev/null \
     || echo "WARN: auto package install incomplete — install modules manually."
 fi
 
@@ -150,8 +160,10 @@ fi
 echo
 echo "Next (do not skip Magrathea backup — WEBRTC_W1_MAGRATHEA.md Phase 1.2):"
 echo "  1. SG + host firewall: allow TCP 8089"
-echo "  2. Uncomment W1 block in opensips.cfg using cert paths under $TLS_DIR"
+echo "  2. Enable W1 in opensips.cfg: modules/socket + EXACTLY ONE cert pair under $TLS_DIR"
+echo "     (do not also leave LE live paths active — dual pairs → OpenSIPS will not start)"
 echo "  3. opensips -C -f /etc/opensips/opensips.cfg && systemctl restart opensips"
-echo "  4. ss -lntp | grep 8089"
+echo "  4. ss -lntp | grep 8089   and confirm UDP 5060 still listening"
 echo "  5. Smoke wss://$CERT_DOMAIN:8089/ws  (domain=tenant, user=shortuid)"
 echo "Done prep for $CERT_DOMAIN."
+echo "Lab LAN (no LE): use scripts/enable-lab-wss.sh instead."

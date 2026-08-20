@@ -51,7 +51,13 @@ loadmodule "proto_udp.so"
 # Packages: opensips TLS backend + proto_wss modules (apt-cache search opensips | grep -Ei 'wss|tls').
 # RTP stays bypass (browser ↔ home Asterisk). Do not enable rtpengine for W1.
 # Clients: wss://sbc.pbx3.com:8089/ws  · SIP domain = tenant · user = shortuid
-# Uncomment this whole block on the VIP host after Phase 1 backup + Phase 3–4 checks.
+#
+# Enable carefully — NOT a blanket uncomment of this whole section:
+#   1) Uncomment loadmodule / socket / wss_resource / server_domain / match_ip / verify / require
+#   2) Enable EXACTLY ONE certificate + private_key pair (LE live OR /etc/opensips/tls/ copy)
+#      Enabling both pairs makes OpenSIPS fail to start (missing second path).
+# Lab LAN (self-signed): scripts/enable-lab-wss.sh
+# Cloud LE prep (no auto-uncomment): scripts/setup-opensips-wss.sh --cert-domain …
 #
 # loadmodule "tls_openssl.so"
 # loadmodule "tls_mgm.so"
