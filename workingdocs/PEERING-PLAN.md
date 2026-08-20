@@ -45,13 +45,13 @@
 
 | Source | How |
 |--------|-----|
-| **Fleet Asterisk / home IPs** (dispatcher destinations; Peer `role=asterisk`; public IP/EIP of each instance) | **Automate** — on node register / setid membership / Peer save for asterisk rows, upsert Fail2ban whitelist + sync `ignoreip`. Homes **must not** be banned for SIP retries / dial storms toward the edge. **Lab 2026-08-12:** Toliman `3.93.253.1` banned on Magrathea; golden EIP also missing from `ignoreip` until manual. |
+| **Fleet Asterisk / home IPs** (dispatcher destinations; Peer `role=asterisk`; public IP/EIP of each instance) | **Automate** — on node register / setid membership / Peer save for asterisk rows, upsert Fail2ban whitelist + sync `ignoreip`. Retire on Decom + drop stale IP on re-provision (#5e). Homes **must not** be banned for SIP retries / dial storms toward the edge. |
 | **Carrier inbound Peer IPs** (`role=inbound` / literal SIP sources in `dr_gateways`) | **Automate** — sync into Fail2ban whitelist on Peer save/delete so Magrathea-style signaling pools are not banned for door-knock / failed-auth noise |
 | **Customer site IPs** (office / NAT egress) | **Manual** only — operator adds IP/CIDR in Fail2Ban whitelist (label/comment as needed). Badly configured phones behind one NAT can otherwise ban the whole site. **No** customer/site CRM or auto-discovery — do not scope-creep into customer management |
 
 Ban events should feed **ops email notify** when that track ships — see **`pbx3/pbx3-directory/docs/FLEET_OPS_NOTIFICATION_REQUIREMENTS.md`** § Fail2ban. Edge-authored (**`DESIGN_RULES.md`** Rule 13).
 
-**Open product gap (TODO #5e):** Fleet home auto-whitelist is **required** and **not shipped** — only manual Magrathea whitelist UI + `sync-fail2ban-whitelist.sh` today. Carrier inbound auto-WL remains deferred until next carrier onboard.
+**Fleet home auto-whitelist (#5e):** Shipped on Provision edge + Decom retire (`retire-node-whitelist`). Carrier inbound auto-WL remains deferred until next carrier onboard.
 
 **OpenSIPS note:** Hostname in `dr_gateways.address` is already valid for outbound. `is_from_gw` matches **source IP**; relying on a single FQDN for inbound trust is insufficient when the carrier’s SIP sources ≠ that name’s current A/AAAA set.
 
