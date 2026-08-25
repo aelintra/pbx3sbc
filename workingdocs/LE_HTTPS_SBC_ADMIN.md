@@ -1,6 +1,6 @@
 # Let’s Encrypt HTTPS — SBC admin (`sbc.pbx3.com`)
 
-**Settled lab (2026-07-14):** Filament admin at **`https://sbc.pbx3.com/admin`**. SIP TLS is **out of scope** here (RTP bypass / UDP SIP unchanged).
+**Settled lab (2026-07-14):** Filament admin at **`https://sbc.pbx3.com/admin`**. **OpenSIPS SIP TLS (`5061`)** is **not** part of this runbook — mid-term posture in **`SBC_PRODUCT_TRACKS.md`** gap **#1** / **`FLEET_TRUNK_PEERING_DECISION.md`** §6.2 (reuse this LE material when built; RTP bypass / UDP SIP unchanged until then).
 
 **Preferred paths (2026-07-21):**
 
@@ -14,7 +14,7 @@ This runbook remains the detailed ACME / SG checklist.
 
 | In | Out |
 |----|-----|
-| nginx :443 + LE cert for `sbc.pbx3.com` | OpenSIPS SIP TLS (`5061`) |
+| nginx :443 + LE cert for `sbc.pbx3.com` | OpenSIPS SIP TLS (`5061`) — mid-term; same LE files when scheduled |
 | HTTP → HTTPS redirect (except ACME) | Control-plane EC2 LE (separate tip) |
 | `APP_URL=https://sbc.pbx3.com` | SSO / IP allowlist / Filament redesign |
 

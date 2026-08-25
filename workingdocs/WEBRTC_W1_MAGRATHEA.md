@@ -13,7 +13,7 @@ Browser ◄════════ media (bypass SBC) ════════�
 
 Home “WebRTC” PJSIP = **UDP + outbound_proxy + webrtc=yes** (not instance `transport-wss` for edge users). See **`WEBRTC_WSS_LAB.md`** § Fleet edge W1 architecture.
 
-**Not in scope:** rtpengine, multi-AZ proof, SPA line-test product, Magrathea desk SIP TLS (`5061`).  
+**Not in scope (this checklist):** rtpengine, multi-AZ proof, SPA line-test product. **Desk SIP TLS (`5061`):** mid-term — see **`SBC_PRODUCT_TRACKS.md`** gap **#1** / **`FLEET_TRUNK_PEERING_DECISION.md`** §6.2 (not this W1 enable).  
 **Spec:** **`pbx3/pbx3-directory/docs/FLEET_TRUNK_PEERING_DECISION.md`** §6.1 · lab notes **`pbx3/workingdocs/WEBRTC_WSS_LAB.md`** · branch work landed on pbx3sbc **`main`**.
 
 **Lab host:** Magrathea VIP **`3.93.26.82`** · admin HTTPS **`sbc.pbx3.com`**.
