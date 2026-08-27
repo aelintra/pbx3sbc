@@ -28,7 +28,7 @@ Operator experience is **UK-centric**; **Grandstream** is included for North Ame
 
 | Priority | App | Notes |
 |:--------:|-----|--------|
-| **P1** | **Bria** (CounterPath) | Professional cross-platform; NAT and auth behaviour |
+| **P1** | **Bria** (CounterPath) | Professional cross-platform; NAT and auth behaviour. **Qualify RTT outlier** — see quirks table + softphone-doc note below. |
 | **P1** | **Zoiper** | Very common; good generic softphone soak |
 | **P2** | **Linphone** | Open source; optional extra coverage |
 | **P2** | Vendor apps | 3CX / other bundled clients — only when that deployment model is sold |
@@ -98,8 +98,13 @@ Update this table as soak continues; mirror major milestones in **`pbx3-director
 | Snom | `line=` param must survive NAT URI rewrite | `GET_ENDPOINT_URI_PARAMS`; `SNOM-TROUBLESHOOTING.md` |
 | Snom / Yealink | NAT `received` vs `contact` on INVITE | `COALESCE(received, contact)` routing |
 | All | Dispatcher hostname vs IP for `GET_DOMAIN_FROM_SOURCE_IP` | Store Asterisk **source IP** in dispatcher `attrs` — gate for peering Phase 1 |
+| **Bria** | Contact user is `shortuid-<instance>` (hyphen); Asterisk OPTIONS that URI. Shortuid OPTIONS gate does not match → miss → local 200 → ~2–3 ms fake RTT. Even if relayed, `received` is CounterPath cloud (e.g. GCP), not the handset — RTT stays “short” by design. | `docs/guides/troubleshooting/OPTIONS-FAKE-RTT-MULTI-TENANT.md` (softphone outlier); lab: AoR `0fw2kw` |
 
 Add rows here when new brands expose edge cases; link to session summary or commit.
+
+### Softphone docs (when written)
+
+Per-app operator / customer softphone guides should call out **Bria qualify latency** as an expected outlier: not a desk-phone RTT, and not the multi-tenant `LIMIT 1` bug (desk phones fixed via `OPTIONS_SHORTUID_USRLOC`). Do not chase “fix Bria RTT to match Yealink.”
 
 ---
 

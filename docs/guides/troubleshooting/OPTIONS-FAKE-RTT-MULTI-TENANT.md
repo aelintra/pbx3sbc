@@ -9,3 +9,14 @@
 **Verify:** `tcpdump` on the SBC — OPTIONS for a non-winning-tenant shortuid must leave toward the phone’s public IP; contact RTT should rise to desk-like values.
 
 **Template:** `route[OPTIONS_SHORTUID_USRLOC]` in `config/opensips.cfg.template`.
+
+---
+
+## Softphone outlier — Bria (CounterPath)
+
+**Not the same bug.** Desk shortuids are fixed. **Bria** still often shows ~2–3 ms Avail RTT:
+
+1. Registered Contact user is `shortuid-<hex-instance>` (hyphen). Qualify OPTIONS use that user; the shortuid charset gate does not match → legacy miss → local 200.
+2. Even with a relay, usrloc `received` is typically **Bria’s cloud SBC** (not the handset). Path is Asterisk → our SBC → CounterPath edge; downstream is hidden.
+
+**Product/docs:** When writing per-softphone documentation, surface Bria qualify latency as an **expected outlier** (see `workingdocs/SBC_SOAK_ENDPOINT_REFERENCE.md` — Softphone docs note). No plan to strip `-instance` for OPTIONS unless ops later wants “honest cloud-edge RTT.”
