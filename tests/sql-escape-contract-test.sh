@@ -88,6 +88,14 @@ check_min_count '\$\(fU\{s\.escape\.common\}\)' 1 "Slice D From-user SELECT esca
 check_min_count '\$\(fd\{s\.escape\.common\}\)' 1 "Slice D From-domain SELECT escapes \$fd via {s.escape.common}"
 check_min_count '\$\(rU\{s\.escape\.common\}\)' 1 "Slice D shortuid SELECT escapes \$rU via {s.escape.common}"
 
+# OPTIONS/NOTIFY shortuid username-only SELECT escapes endpoint_user
+check_min_count '\$\(var\(endpoint_user\)\{s\.escape\.common\}\)' 1 "OPTIONS shortuid SELECT escapes endpoint_user via {s.escape.common}"
+if grep -Eq 'route\[OPTIONS_SHORTUID_USRLOC\]' "$TEMPLATE"; then
+    ok "OPTIONS_SHORTUID_USRLOC route is present"
+else
+    fail "OPTIONS_SHORTUID_USRLOC route is missing (multi-tenant OPTIONS fake-RTT fix)"
+fi
+
 # failed_registrations INSERT: username, domain, user-agent, response_reason escaped
 check_min_count '\$\(tU\{s\.escape\.common\}\)' 1 "failed_registrations INSERT escapes \$tU (username) via {s.escape.common}"
 check_min_count '\$\(tu\{uri\.domain\}\{s\.escape\.common\}\)' 1 "failed_registrations INSERT escapes To-domain via {s.escape.common}"

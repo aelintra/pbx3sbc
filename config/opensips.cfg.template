@@ -4,7 +4,7 @@
 # This configuration provides SIP edge routing functionality for Asterisk PBX backends
 #
 # Based on requirements in REQUIREMENTS-FOR-OPENSIPS.md
-# Troubleshooting notes in TROUBLESHOOTING-OPTIONS-ROUTING.md
+# Troubleshooting: docs/guides/troubleshooting/OPTIONS-FAKE-RTT-MULTI-TENANT.md
 #
 
 ####### Global Parameters #########
@@ -459,11 +459,27 @@ route {
                     # Try to get domain from To header
                     $var(to_domain) = $(tu{uri.domain});
                     $var(lookup_uri) = "";
+
+                    # Fleet shortuid OPTIONS/NOTIFY to VIP/IP (Asterisk qualify Contact):
+                    # GET_DOMAIN_FROM_SOURCE_IP does SELECT domain … LIMIT 1 per setid.
+                    # On multi-tenant homes that picks the wrong tenant → usrloc miss →
+                    # local 200 OK (~2ms fake RTT) and OPTIONS never reach the desk (NAT).
+                    # Shortuids are globally unique — username-only location → RELAY.
+                    # Same charset gate as Slice D (never digit exts / 81xxxx).
+                    # See docs/guides/troubleshooting/OPTIONS-FAKE-RTT-MULTI-TENANT.md
+                    if (($var(to_domain) == ""
+                            || $var(to_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}")
+                        && $var(endpoint_user) =~ "^[0-9bcdfghjkmnpqrstvwxyz]+$"
+                        && $var(endpoint_user) =~ "[a-z]") {
+                        route(OPTIONS_SHORTUID_USRLOC);
+                        # exits on hit; returns on miss → legacy LIMIT-1 path below
+                    }
                     
                     # Check if To header domain is an IP address (not a domain name)
                     if ($var(to_domain) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}") {
                         # To header has IP, not domain - determine domain from Asterisk source IP
                         # This is CRITICAL for multi-tenant deployments (same extension numbers across customers)
+                        # Digit exts only in practice — shortuids already tried username-only above.
                         route(GET_DOMAIN_FROM_SOURCE_IP);
                         if ($var(domain_detection_success) == 1) {
                             # Domain found from source IP - use domain-specific lookup (CORRECT for multi-tenant)
@@ -1201,6 +1217,50 @@ route[DOMAIN_CHECK] {
     }
 
     route(TO_DISPATCHER);
+}
+
+# Asterisk→phone OPTIONS/NOTIFY when To/RURI is shortuid@VIP (or bare user).
+# Username-only usrloc (shortuids globally unique). Called only after shortuid charset gate.
+# On hit: route(RELAY); exit. On miss: return (caller falls through to LIMIT-1 domain path / local 200).
+route[OPTIONS_SHORTUID_USRLOC] {
+    xlog("OPTIONS/NOTIFY: shortuid username-only candidate user=$var(endpoint_user) To-domain=$var(to_domain) si=$si\n");
+
+    $var(original_ru) = $ru;
+    # SECURITY (safety-debt #11): endpoint_user is gated to shortuid charset at the call site;
+    # escape anyway before SQL concat.
+    $var(query) = "SELECT COALESCE(received, contact) FROM location WHERE username='" + $(var(endpoint_user){s.escape.common}) + "' AND expires > UNIX_TIMESTAMP() ORDER BY expires DESC LIMIT 1";
+    if (!sql_query($var(query), "$avp(opt_suid_loc)")
+        || $(avp(opt_suid_loc)[0]) == "" || $(avp(opt_suid_loc)[0]) == "<null>") {
+        $ru = $var(original_ru);
+        xlog("OPTIONS/NOTIFY: shortuid username-only miss for $var(endpoint_user) — fall through\n");
+        return;
+    }
+
+    $var(contact_value) = $(avp(opt_suid_loc)[0]);
+    $var(extracted_ip) = "";
+    $var(extracted_port) = "";
+    if ($var(contact_value) =~ "^sip:") {
+        $ru = $var(contact_value);
+        $var(extracted_ip) = $(ru{uri.host});
+        $var(extracted_port) = $(ru{uri.port});
+        if ($var(extracted_port) == "" || $var(extracted_port) == "<null>") {
+            $var(extracted_port) = "5060";
+        }
+    }
+    if ($var(extracted_ip) == "" || $var(extracted_ip) == "<null>"
+        || !($var(extracted_ip) =~ "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}")) {
+        $ru = $var(original_ru);
+        xlog("L_WARN", "OPTIONS/NOTIFY: shortuid Contact IP extract failed for $var(endpoint_user) value=[$var(contact_value)] — fall through\n");
+        return;
+    }
+
+    $var(params_source_uri) = $var(original_ru);
+    route(GET_ENDPOINT_URI_PARAMS);
+    $du = "sip:" + $var(endpoint_user) + "@" + $var(extracted_ip) + ":" + $var(extracted_port) + $var(endpoint_uri_params);
+    $ru = $du;
+    xlog("OPTIONS/NOTIFY: shortuid username-only hit $var(endpoint_user) → $du — RELAY\n");
+    route(RELAY);
+    exit;
 }
 
 # Slice D Path 1 — phone INVITE sip:{shortuid}@{caller_tenant_fqdn} → username-only location → RELAY
