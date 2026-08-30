@@ -807,6 +807,10 @@ route {
     # Must run before is_from_gw: fleet node IPs also appear in dr_gateways as inbound destinations.
     route(CHECK_IS_FROM_ASTERISK);
     if (is_method("INVITE") && $var(is_from_asterisk) == 1 && $(rU{s.len}) > 7) {
+        # Phase 1 fleet wire: home must send +E.164 (or digit E.164). Habit 0…/00…
+        # rejected here — do not let Peer strip mangle national into junk (lab: 01924…→09249…).
+        # Phase 2 habit-accept will relax this; until then fail loud (400, not Congestion).
+        route(FLEET_WIRE_REQUIRE_E164);
         # Fleet wire is +E.164; drouting prefixes are digit E.164 — strip leading +.
         route(DIALECT_STRIP_PLUS_RURI);
         if (!do_routing(0, , , , $var(out_gw_attrs))) {
@@ -2739,6 +2743,22 @@ route[DIALECT_STRIP_PLUS_RURI] {
         $rU = $(rU{s.substr,1,0});
         xlog("DIALECT: stripped + from RURI user → $rU\n");
     }
+}
+
+# Phase 1: Asterisk→SBC PSTN path — require fleet wire (+E.164 or digit E.164).
+# Rejects national 0… / IDD 00… (and other non-E.164) with 400 before Peer strip/prefix.
+# PrefixDial (ext@tenant.fqdn) does not hit this branch (userpart usually ≤7).
+# Flip when Phase 2 advertises habit-accept — NUMBER_WIRE_POLICY.md / STANDARD_DRAFT §8.
+route[FLEET_WIRE_REQUIRE_E164] {
+    if ($rU =~ "^\\+[1-9][0-9]+$") {
+        return;
+    }
+    if ($rU =~ "^[1-9][0-9]+$") {
+        return;
+    }
+    xlog("L_WARN", "FLEET_WIRE: reject non-E.164 RURI=$rU from $si (Phase-1; fix Egress transform)\n");
+    sl_send_reply(400, "E.164 required");
+    exit;
 }
 
 # After DID match: set $rU to +E.164 for Asterisk (uses $var(plus_e164) if set).
