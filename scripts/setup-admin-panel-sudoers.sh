@@ -76,6 +76,17 @@ else
     BACKUP_PANEL_SCRIPT_PATH=$(find /home /opt /usr/local -name "sbc-backup-panel.sh" 2>/dev/null | head -1 || true)
 fi
 
+MGMT_ACCESS_SCRIPT_PATH=""
+if [[ -f "/home/ubuntu/pbx3sbc/scripts/apply-management-access-ufw.sh" ]]; then
+    MGMT_ACCESS_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/apply-management-access-ufw.sh"
+elif [[ -f "/opt/pbx3sbc/scripts/apply-management-access-ufw.sh" ]]; then
+    MGMT_ACCESS_SCRIPT_PATH="/opt/pbx3sbc/scripts/apply-management-access-ufw.sh"
+elif [[ -f "$(dirname "$0")/apply-management-access-ufw.sh" ]]; then
+    MGMT_ACCESS_SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/apply-management-access-ufw.sh"
+else
+    MGMT_ACCESS_SCRIPT_PATH=$(find /home /opt /usr/local -name "apply-management-access-ufw.sh" 2>/dev/null | head -1 || true)
+fi
+
 echo -e "${GREEN}Setting up sudoers configuration for pbx3sbc-admin...${NC}"
 echo ""
 
@@ -119,6 +130,22 @@ if [[ -n "$BACKUP_PANEL_SCRIPT_PATH" ]]; then
 # SBC backup panel (list / create / vip-role)
 www-data ALL=(ALL) NOPASSWD: $BACKUP_PANEL_SCRIPT_PATH *
 EOF
+fi
+
+if [[ -n "$MGMT_ACCESS_SCRIPT_PATH" ]]; then
+    cat >> "$SUDOERS_FILE" <<EOF
+
+# Management access (Filament HTTPS :443 UFW lockdown)
+www-data ALL=(ALL) NOPASSWD: $MGMT_ACCESS_SCRIPT_PATH *
+EOF
+fi
+
+# php-fpm ProtectSystem=full blocks writing /etc/ufw even after sudo —
+# install ReadWritePaths drop-in when available.
+if [[ -f "$(dirname "$0")/setup-php-fpm-ufw-write.sh" ]]; then
+    echo ""
+    echo -e "${YELLOW}Note: Management access Apply needs php-fpm ReadWritePaths=/etc/ufw${NC}"
+    echo -e "  ${GREEN}sudo $(cd "$(dirname "$0")" && pwd)/setup-php-fpm-ufw-write.sh${NC}"
 fi
 
 # Set correct permissions (sudoers files must be 0440)
