@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prepare / document OpenSIPS WSS (W1) on an SBC host (Magrathea VIP / LE path).
-# Spec checklist: workingdocs/WEBRTC_W1_MAGRATHEA.md
+# Prepare / document OpenSIPS WSS (W1) on an SBC host  (SBC VIP / LE path).
+# Spec checklist: workingdocs/~/GiT/pbx3-ops/devdocs/oss-move/WEBRTC_W1_SBC_LAB.md
 #
-# Usage (on Magrathea, as root preferred):
+# Usage (on the SBC, as root preferred):
 #   sudo ./scripts/setup-opensips-wss.sh --cert-domain sbc.pbx3.com
 #   sudo ./scripts/setup-opensips-wss.sh --cert-domain sbc.pbx3.com --install-packages
 #   sudo ./scripts/setup-opensips-wss.sh --print-cfg-snippet
@@ -158,7 +158,7 @@ else
 fi
 
 echo
-echo "Next (do not skip Magrathea backup — WEBRTC_W1_MAGRATHEA.md Phase 1.2):"
+echo "Next (do not skip SBC backup — ~/GiT/pbx3-ops/devdocs/oss-move/WEBRTC_W1_SBC_LAB.md Phase 1.2):"
 echo "  1. SG + host firewall: allow TCP 8089"
 echo "  2. Enable W1 in opensips.cfg: modules/socket + EXACTLY ONE cert pair under $TLS_DIR"
 echo "     (do not also leave LE live paths active — dual pairs → OpenSIPS will not start)"

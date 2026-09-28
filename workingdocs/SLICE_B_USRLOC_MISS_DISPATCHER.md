@@ -23,7 +23,7 @@ Does **not** open miss→dispatcher for:
 - Phone/non-Asterisk callers (no path B endpoint lookup).
 - Legacy **IP R-URI** Asterisk→Contact dials (still 404 if contact missing).
 
-## Operator deploy (lab Magrathea)
+## Operator deploy (lab SBC)
 
 1. Diff / copy template merge into live `/etc/opensips/opensips.cfg` (or your render path).
 2. `opensips-cli -x mi config_reload` or full restart per site SOP.

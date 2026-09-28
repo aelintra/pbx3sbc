@@ -75,7 +75,7 @@ BACKUP="${CFG}.pre-lab-wss.$(date +%Y%m%d%H%M%S)"
 cp -a "$CFG" "$BACKUP"
 log "backup $BACKUP"
 
-# Enable transport/modules; force a single lab cert pair; leave LE / Magrathea example paths commented.
+# Enable transport/modules; force a single lab cert pair; leave LE / SBC example paths commented.
 python3 - "$CFG" "$FULLCHAIN" "$PRIVKEY" <<'PY'
 import re
 import sys
@@ -123,7 +123,7 @@ modparam("tls_mgm", "require_cert", "[wss]0")
 '''
 
 text2 = text[:start] + block + text[end:]
-# Safety: if any active Magrathea/LE cert modparams remain elsewhere, comment them.
+# Safety: if any active SBC/LE cert modparams remain elsewhere, comment them.
 def comment_bad(m):
     line = m.group(0)
     if line.lstrip().startswith("#"):

@@ -31,7 +31,7 @@ Operator experience is **UK-centric**; **Grandstream** is included for North Ame
 | **P1** | **Bria** (CounterPath) | Professional cross-platform; NAT and auth behaviour. **Qualify RTT outlier** — see quirks table + softphone-doc note below. |
 | **P1** | **Zoiper** | Very common; good generic softphone soak |
 | **P2** | **Linphone** | Open source; optional extra coverage |
-| **P2** | Vendor apps | 3CX / other bundled clients — only when that deployment model is sold |
+| **P2** | Vendor apps | Commercial bundled softphone clients — only when that deployment model is sold |
 
 ---
 

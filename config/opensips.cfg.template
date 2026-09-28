@@ -47,7 +47,7 @@ loadmodule "textops.so"
 loadmodule "proto_udp.so"
 #
 # --- WebRTC / WSS (W1 / S8.11) — DEFAULT OFF ---
-# Magrathea / VIP: see workingdocs/WEBRTC_W1_MAGRATHEA.md (backup before enable).
+# SBC VIP: see workingdocs/~/GiT/pbx3-ops/devdocs/oss-move/WEBRTC_W1_SBC_LAB.md (backup before enable).
 # Packages: opensips TLS backend + proto_wss modules (apt-cache search opensips | grep -Ei 'wss|tls').
 # RTP stays bypass (browser ↔ home Asterisk). Do not enable rtpengine for W1.
 # Clients: wss://sbc.pbx3.com:8089/ws  · SIP domain = tenant · user = shortuid
@@ -66,7 +66,7 @@ loadmodule "proto_udp.so"
 # modparam("proto_wss", "wss_resource", "/ws")
 # modparam("tls_mgm", "server_domain", "wss")
 # modparam("tls_mgm", "match_ip_address", "[wss]*")
-# LE FQDN for VIP — on Magrathea live: copy into /etc/opensips/tls/ (readable by opensips)
+# LE FQDN for VIP — on the SBC live host: copy into /etc/opensips/tls/ (readable by opensips)
 # template / first-deploy may also use live LE paths if ACLs allow:
 # modparam("tls_mgm", "certificate", "[wss]/etc/letsencrypt/live/sbc.pbx3.com/fullchain.pem")
 # modparam("tls_mgm", "private_key", "[wss]/etc/letsencrypt/live/sbc.pbx3.com/privkey.pem")
@@ -144,7 +144,7 @@ modparam("alias_db", "db_url", "mysql://opensips:your-password@localhost/opensip
 
 # --- uac_registrant (OpenSIPS → carrier REGISTER; timer-driven from registrant table) ---
 # Credentials live in registrant rows (admin Peering → Registrations). MI: reg_list / reg_reload.
-# Magrathea-style IP-trusted peers do not need a registrant row.
+# Carrier-style IP-trusted peers do not need a registrant row.
 modparam("uac_registrant", "db_url", "mysql://opensips:your-password@localhost/opensips")
 modparam("uac_registrant", "table_name", "registrant")
 
@@ -2678,7 +2678,7 @@ route[FROM_CARRIER] {
         # Fleet wire to Asterisk: +E.164 userpart.
         route(DIALECT_APPLY_PLUS_WIRE);
         route(DIALECT_INBOUND_CLI_NORMALIZE);
-        # Record-Route so Magrathea ACK/BYE and Asterisk BYE stay on the SBC path.
+        # Record-Route so SBC ACK/BYE and Asterisk BYE stay on the SBC path.
         # Without this, Asterisk (rewrite_contact) BYEs to sip:caller@sbc and the
         # SBC loops to itself → 483 Too Many Hops; phones never see far-end hangup.
         record_route();
@@ -2847,12 +2847,12 @@ route[DIALECT_OUTBOUND_RENDER] {
     }
     xlog("DIALECT outbound: dialect=$var(dialect) RURI=$rU From=$fU attrs=$var(out_gw_attrs)\n");
 
-    # Default / none: leave strip/pri_prefix result (optional + for magrathea/gamma/strict).
+    # Default / none: leave strip/pri_prefix result (optional + for uk-magrathea/uk-gamma/strict).
     if ($var(dialect) == "uk-magrathea" || $var(dialect) == "uk-gamma" || $var(dialect) == "strict-plus-e164") {
         if ($(rU{s.substr,0,1}) != "+") {
             $rU = "+" + $rU;
         }
-        # CLI → +E.164; Magrathea: PAID network; Gamma: PAID + From aligned.
+        # CLI → +E.164; upstream carrier: PAID network; Gamma: PAID + From aligned.
         $var(craw) = $fU;
         if ($var(craw) != "" && $var(craw) != "<null>") {
             if ($(var(craw){s.substr,0,1}) == "+") {

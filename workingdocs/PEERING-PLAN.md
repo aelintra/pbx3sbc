@@ -10,12 +10,12 @@
 
 - **Lab rollback (2026-07-09):** If fleet egress/peering regressions appear after push to **`main`**, see **`pbx3/workingdocs/FLEET_EGRESS_LAB_ROLLBACK.md`** — tags `rollback/pre-fleet-peering-egress-20260709` / `fleet-peering-lab-validated-20260709`.
 - **Future — Egress qualify / SBC failover:** **`pbx3/pbx3-directory/docs/FLEET_EGRESS_AVAILABILITY_REQUIREMENTS.md`** (OPTIONS from fleet nodes, **EgressFailover**, trunk health; Phase A uses **`qualify_frequency=0`** workaround only).
-- **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is for carriers that require OpenSIPS→carrier REGISTER. **Implemented (2026-07-13):** modules + admin **Peering → Registrations**; Magrathea remains IP-only. Registration carriers need **Peer + Registration**.
+- **Carrier auth:** Tier 2+ carriers are usually **IP-trusted peers** (`dr_gateways` + `is_from_gw`). **`uac_registrant`** is for carriers that require OpenSIPS→carrier REGISTER. **Implemented (2026-07-13):** modules + admin **Peering → Registrations**; SBC remains IP-only. Registration carriers need **Peer + Registration**.
 - **Inbound DIDs:** **Delivery** on SBC (`dr_rules` → node/setid, compiled from catalog + `inroutes`). **Behaviour** on node — `inroutes.pkey` is Asterisk **regex** (block, singleton, or split range). Per-DID SBC rows by default; prefix collapse optional. See **`FLEET_TRUNK_PEERING_DECISION.md`** §5.1 and **`TENANT_MOBILITY_FLEET_CONSOLE_DESIGN.md`** §11.9.
 - **SBC HA:** **VIP/EIP + warm standby** (active–passive); phones/carriers use stable edge FQDN — **`pbx3/pbx3-directory/docs/SBC_HA_FAILOVER_REQUIREMENTS.md`**. DNS SRV is **not** primary phone HA.
-- **Carrier address model (DNS vs IP) — locked 2026-07-13:** see **§0.1** below. Magrathea pattern is the product shape; do not collapse outbound destination and inbound trust into one IP-only Peer.
+- **Carrier address model (DNS vs IP) — locked 2026-07-13:** see **§0.1** below. SBC pattern is the product shape; do not collapse outbound destination and inbound trust into one IP-only Peer.
 - **No provider “console profiles” — locked 2026-07-13:** hundreds of ITSPs each want different console fields; UI profiles rot. Keep **generic SIP objects** (Peer / inbound allow gwids / optional Registration / Number routes / DID aliases). Operators map every carrier onto that surface.
-- **Number dialect (2026-07-22):** Per-Peer `dialect=` preset (Magrathea / Gamma / strict +E.164) for normalize/render of dialled + CLI — **not** a full provider console profile. Spec: **`pbx3/pbx3-directory/docs/NUMBER_DIALECT_REQUIREMENTS.md`**.
+- **Number dialect (2026-07-22):** Per-Peer `dialect=` preset (SBC / Gamma / strict +E.164) for normalize/render of dialled + CLI — **not** a full provider console profile. Spec: **`pbx3/pbx3-directory/docs/NUMBER_DIALECT_REQUIREMENTS.md`**.
 
 ---
 
@@ -23,30 +23,30 @@
 
 **Problem:** Many carriers publish a **DNS name** for termination (often Route53 / frequent A-record moves). They will not accept “pin our Peer to one IP.” Inbound signaling, however, arrives from **source IPs** that may be a published allow list, a pool larger than the outbound A record, or a different host entirely (lab: Brindley REGISTER host ≠ INVITE source).
 
-**Decision — split the two roles (already how Magrathea is seeded):**
+**Decision — split the two roles (already how SBC is seeded):**
 
 | Role | What to store | `dr_gateways` usage |
 |------|----------------|---------------------|
 | **Outbound destination** | Prefer **`sip:fqdn:5060`** (DNS/Route53-friendly). Resolve at send/probe time — **do not** bake a one-time A lookup into the Peer row. | One (or few) gateway row(s) in outbound **`dr_rules` gwlist** (groupid **0**). |
-| **Inbound trust** | **Literal IPs** (or known fixed URIs that resolve to the IPs that actually send INVITEs). | Separate gateway row(s) so **`is_from_gw(-1,"n")`** matches `$si`. **Not** required in outbound gwlist. Magrathea lab: gwid **3–9, 11**. |
+| **Inbound trust** | **Literal IPs** (or known fixed URIs that resolve to the IPs that actually send INVITEs). | Separate gateway row(s) so **`is_from_gw(-1,"n")`** matches `$si`. **Not** required in outbound gwlist. SBC lab: gwid **3–9, 11**. |
 | **REGISTER** (if needed) | Registrar / AOR hostnames as DNS. | **`registrant`** table — independent of inbound IP list. |
 
 **Anti-patterns:**
 
 - Forcing a single Peer address to be both “where we dial” and “every IP they might call from.”
-- Replacing Magrathea’s multi-IP inbound rows with “one hostname and hope `is_from_gw` tracks Route53 forever.”
+- Replacing SBC’s multi-IP inbound rows with “one hostname and hope `is_from_gw` tracks Route53 forever.”
 - Per-ITSP UI packs (Twilio wizard, etc.) — see operational default above.
 
-**Lab note (2026-07-13):** Brindley / Aelintra was a convenient **second Asterisk trunker** (REGISTER + DID), not the template for carrier address design. Magrathea remains the reference for inbound IP pools + DNS-style outbound thinking.
+**Lab note (2026-07-13):** Brindley / Aelintra was a convenient **second Asterisk trunker** (REGISTER + DID), not the template for carrier address design. SBC remains the reference for inbound IP pools + DNS-style outbound thinking.
 
-**Admin UX:** Operators still have one **Peer** row per `dr_gateways` gwid. SBC admin encodes logical carrier + role in opaque **`attrs`** as `carrier=<slug>;role=outbound|inbound|asterisk` (Magrathea / Brindley lab seeded that way); Peers table groups by carrier. No schema change; OpenSIPS ignores these attrs for routing.
+**Admin UX:** Operators still have one **Peer** row per `dr_gateways` gwid. SBC admin encodes logical carrier + role in opaque **`attrs`** as `carrier=<slug>;role=outbound|inbound|asterisk` (SBC / Brindley lab seeded that way); Peers table groups by carrier. No schema change; OpenSIPS ignores these attrs for routing.
 
 **Fail2ban whitelist (product requirement):**
 
 | Source | How |
 |--------|-----|
 | **Fleet Asterisk / home IPs** (dispatcher destinations; Peer `role=asterisk`; public IP/EIP of each instance) | **Automate** — on node register / setid membership / Peer save for asterisk rows, upsert Fail2ban whitelist + sync `ignoreip`. Retire on Decom + drop stale IP on re-provision (#5e). Homes **must not** be banned for SIP retries / dial storms toward the edge. |
-| **Carrier inbound Peer IPs** (`role=inbound` / literal SIP sources in `dr_gateways`) | **Automate** — sync into Fail2ban whitelist on Peer save/delete so Magrathea-style signaling pools are not banned for door-knock / failed-auth noise |
+| **Carrier inbound Peer IPs** (`role=inbound` / literal SIP sources in `dr_gateways`) | **Automate** — sync into Fail2ban whitelist on Peer save/delete so SBC-style signaling pools are not banned for door-knock / failed-auth noise |
 | **Customer site IPs** (office / NAT egress) | **Manual** only — operator adds IP/CIDR in Fail2Ban whitelist (label/comment as needed). Badly configured phones behind one NAT can otherwise ban the whole site. **No** customer/site CRM or auto-discovery — do not scope-creep into customer management |
 
 Ban events should feed **ops email notify** when that track ships — see **`pbx3/pbx3-directory/docs/FLEET_OPS_NOTIFICATION_REQUIREMENTS.md`** § Fail2ban. Edge-authored (**`DESIGN_RULES.md`** Rule 13).
@@ -759,7 +759,7 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
      - Run this script from `scripts/init-database.sh` (which is invoked by `install.sh` during `initialize_database`). Use idempotent checks (e.g. create only if `dr_gateways` does not exist) so re-runs do not fail.
    - **Deliverable:** New file `scripts/peering-create.sql`; `scripts/init-database.sh` updated to run it when the DB is initialized. No seed data required; tables may be empty.
 2. **Config: drouting module (no route logic).** Add `loadmodule "drouting.so"` and `modparam("drouting", "db_url", ...)` to `opensips.cfg.template`. Do **not** call `do_routing()` or add any peering branches in `route {}`.
-3. **Carrier registration (uac_registrant) — done 2026-07-13:** Load **uac_auth** (first), then **uac_registrant**; `registrant` table + modparam `db_url`/`table_name`. No route logic change; registration runs from timer. Admin **Peering → Registrations** CRUD calls MI `reg_reload`. Package **`opensips-auth-modules`** required for `uac_auth.so`. MI `reg_list` to verify state. Magrathea stays IP-trusted Peer only; registration carriers need Peer + Registration when credentials arrive.
+3. **Carrier registration (uac_registrant) — done 2026-07-13:** Load **uac_auth** (first), then **uac_registrant**; `registrant` table + modparam `db_url`/`table_name`. No route logic change; registration runs from timer. Admin **Peering → Registrations** CRUD calls MI `reg_reload`. Package **`opensips-auth-modules`** required for `uac_auth.so`. MI `reg_list` to verify state. SBC stays IP-trusted Peer only; registration carriers need Peer + Registration when credentials arrive.
 
 **Deliverables**
 
@@ -815,11 +815,11 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Prerequisite:** Phase 1 done.
 
-**Lab status (2026-07-13):** Live on SBC. **Primary gwid 20** `sip:sipipgw.magrathea.net:5060` (Magrathea IP-auth outbound FQDN). **Failover gwid 1** `sip:ael.vcloudpbx.com:5060` (Brindley/Aelintra). Outbound rule **gwlist `20,1`**. `failure_route[DR_FAILOVER]` + `use_next_gw()` already in config. Re-seed: `SEED_MAGRATHEA_OUTBOUND=1` (default with Magrathea) in `scripts/peering-seed-lab.sh`. Note: Brindley may hand off to Magrathea upstream — lab proves SBC failover mechanics, not independent ITSP diversity.
+**Lab status (2026-07-13):** Live on SBC. **Primary gwid 20** ``UPSTREAM_OUTBOUND_ADDRESS` (lab)` (SBC IP-auth outbound FQDN). **Failover gwid 1** `sip:ael.vcloudpbx.com:5060` (Brindley/Aelintra). Outbound rule **gwlist `20,1`**. `failure_route[DR_FAILOVER]` + `use_next_gw()` already in config. Re-seed: `SEED_UPSTREAM_OUTBOUND=1` (default with SBC) in `scripts/peering-seed-lab.sh`. Note: Brindley may hand off to the SBC upstream — lab proves SBC failover mechanics, not independent ITSP diversity.
 
 **Scope**
 
-- Insert Magrathea outbound row in `dr_gateways` (gwid **20**).
+- Insert upstream carrier outbound row in `dr_gateways` (gwid **20**).
 - Update `dr_rules` gwlist to **`20,1`**. failure_route from Phase 1 already handles `use_next_gw()`.
 
 **Deliverables**
@@ -866,7 +866,7 @@ Work is split into **small, manageable phases**. Each phase has a narrow scope, 
 
 **Prerequisite:** Phase 3 done. Inbound DID→internal is resolved (gwlist → gateway in dr_gateways whose address is Asterisk; see §11.2 item 4).
 
-**Lab status (2026-07-10):** Config already in `opensips.cfg.template` (`FROM_CARRIER` + `do_routing(1)`). Live seed: **Magrathea** signaling IPs (gwid 3–9, 11) for `is_from_gw`; inbound rule prefix **`01924918076`** → gwid **10** (golden `54.236.153.81`). Outbound gwid **1** remains **ael.vcloudpbx.com**. Golden `inroutes` DID → ext **1000** (tenant duns/`dhbm8x`). Admin CRUD: pbx3sbc-admin **Peering → Gateways / Routing Rules**. Re-seed: `scripts/peering-seed-lab.sh` (`SEED_MAGRATHEA=1`, `INBOUND_DID_PREFIX`).
+**Lab status (2026-07-10):** Config already in `opensips.cfg.template` (`FROM_CARRIER` + `do_routing(1)`). Live seed: **SBC** signaling IPs (gwid 3–9, 11) for `is_from_gw`; inbound rule prefix **`01924918076`** → gwid **10** (golden `54.236.153.81`). Outbound gwid **1** remains **ael.vcloudpbx.com**. Golden `inroutes` DID → ext **1000** (tenant duns/`dhbm8x`). Admin CRUD: pbx3sbc-admin **Peering → Gateways / Routing Rules**. Re-seed: `scripts/peering-seed-lab.sh` (`SEED_UPSTREAM=1`, `INBOUND_DID_PREFIX`).
 
 **Scope**
 
@@ -1018,7 +1018,7 @@ This section answers: **what tables must be populated, and what would the data l
 **1. dr_gateways**
 
 - **CarrierAlpha outbound:** One row with **DNS** destination (`sip:sip.carrieralpha.com:5060`) in outbound **gwlist** — Route53-friendly; see **§0.1**.
-- **CarrierAlpha inbound:** Separate row(s) with **signaling IP(s)** so `is_from_gw` matches `$si` (same pattern as Magrathea gwid 3–9, 11). Do not assume the outbound FQDN’s A record is the full inbound allow list.
+- **CarrierAlpha inbound:** Separate row(s) with **signaling IP(s)** so `is_from_gw` matches `$si` (same pattern as SBC gwid 3–9, 11). Do not assume the outbound FQDN’s A record is the full inbound allow list.
 - **Asterisk backend:** One row per Asterisk we route inbound DIDs to; `address` = that Asterisk’s SIP URI. dr_rules (groupid 1) reference this gateway by `gwid`.
 
 Schema columns (see §6.4): `gwid`, `type`, `address`, `strip`, `pri_prefix`, `attrs`, `probe_mode`, `state`, `socket`, `description`. Typical 3.2/3.6 schema uses `id` (auto) and `gwid` (string, unique).

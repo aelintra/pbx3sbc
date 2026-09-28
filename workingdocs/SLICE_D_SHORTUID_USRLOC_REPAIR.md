@@ -1,7 +1,7 @@
 # Slice D — Phone history redial: shortuid usrloc repair
 
-**Status:** **Lab green** (2026-08-05). Product-locked A. Template + Magrathea live on branch **`slice-d-shortuid-usrloc-repair`**. Path 1 only (not Path 2).  
-**Magrathea:** patched + restarted; backup `/root/opensips.cfg.pre-slice-d.20260805210656`. Desk redial hit: `rU=hb64kj rd=9wvvnb…` → username-only → `RELAY` to `74.83.26.203:5060`.  
+**Status:** **Lab green** (2026-08-05). Product-locked A. Template + SBC lab on branch **`slice-d-shortuid-usrloc-repair`**. Path 1 only (not Path 2).  
+**SBC:** patched + restarted; backup `/root/opensips.cfg.pre-slice-d.20260805210656`. Desk redial hit: `rU=hb64kj rd=9wvvnb…` → username-only → `RELAY` to `74.83.26.203:5060`.  
 **Desk matrix (affcot 1101 Snom ↔ duns 1002 Yealink):** forward site dial + **BYE both ways** clear correctly; **missed-call / history dialback both ways** (Yealink→Snom and Snom→Yealink).  
 **Parent:** `pbx3/workingdocs/TENANT_SHORT_DIAL_REQUIREMENTS.md` §3.9.1  
 **Sibling:** `SLICE_B_USRLOC_MISS_DISPATCHER.md` (Asterisk → `ext@fqdn` miss→dispatcher — **do not confuse**)
@@ -17,7 +17,7 @@ INVITE sip:hb64kj@9wvvnb.pbx3.com   # caller tenant FQDN — wrong
 From: <sip:59507r@9wvvnb.pbx3.com>  # caller identity — correct
 ```
 
-Today Magrathea treats that like any phone→tenant INVITE: **no usrloc branch** (FQDN endpoint lookup is **Asterisk-only**), then `is_domain_local` → **`TO_DISPATCHER`** for **caller’s** home → Asterisk **404** (no local user `hb64kj`).
+Today SBC treats that like any phone→tenant INVITE: **no usrloc branch** (FQDN endpoint lookup is **Asterisk-only**), then `is_domain_local` → **`TO_DISPATCHER`** for **caller’s** home → Asterisk **404** (no local user `hb64kj`).
 
 Slice B does **not** help: miss→dispatcher is gated on `$var(is_from_asterisk) == 1`.
 
@@ -97,10 +97,10 @@ Industry “remap/canonicalize” literally:
 1. Username-only find registered **domain** for `$rU` (e.g. `dhbm8x.pbx3.com`).
 2. Rewrite `$rd` / `$ru` to `sip:$rU@$registered_domain`.
 3. Continue into `is_domain_local` + **`TO_DISPATCHER` for callee’s setid** (not caller’s).
-4. Callee home PrepDial / station dial → Magrathea usrloc → phone.
+4. Callee home PrepDial / station dial → SBC usrloc → phone.
 
 **Pros:** Call still hits an Asterisk (ring groups, CDR on callee home).  
-**Cons:** Must confirm Magrathea→callee-home identify trusts SBC IP with **foreign From** (caller identity); may need From rewrite similar to Slice B `sitedial` hairpin — design carefully. Prefer Path 1 unless Path 1 CDR/auth blocks ship.
+**Cons:** Must confirm SBC→callee-home identify trusts SBC IP with **foreign From** (caller identity); may need From rewrite similar to Slice B `sitedial` hairpin — design carefully. Prefer Path 1 unless Path 1 CDR/auth blocks ship.
 
 ---
 
@@ -113,11 +113,11 @@ Industry “remap/canonicalize” literally:
 
 ---
 
-## Lab smoke (after Magrathea reload)
+## Lab smoke (after SBC reload)
 
 1. Forward site dial still green (Slice B + PrefixDial).
 2. Station dial `shortuid@fqdn` still usrloc→phone (Asterisk-sourced).
-3. **D:** After inbound with CLID `suid@fqdn` (GenAst receive), Snom history redial → **Alice rings** (not 404 on Bob’s Asterisk). Capture: R-URI may still show Bob’s domain; Magrathea xlog should show username-only hit + RELAY.
+3. **D:** After inbound with CLID `suid@fqdn` (GenAst receive), Snom history redial → **Alice rings** (not 404 on Bob’s Asterisk). Capture: R-URI may still show Bob’s domain; SBC xlog should show username-only hit + RELAY.
 4. Negative: dial unknown shortuid-shaped user → still 404 / no wrong Contact.
 5. Negative: digit-only R-URI still goes to home Asterisk (no username-only).
 
@@ -125,7 +125,7 @@ Industry “remap/canonicalize” literally:
 
 ## Deploy
 
-Same as Slice B: merge **`config/opensips.cfg.template`** → Magrathea **`/etc/opensips/opensips.cfg`** (live often drifts — **diff before paste**) → `opensips-cli -x mi config_reload` (or restart per SOP). Commit template in **pbx3sbc**; do not leave Magrathea-only hot patch undocumented.
+Same as Slice B: merge **`config/opensips.cfg.template`** → SBC **`/etc/opensips/opensips.cfg`** (live often drifts — **diff before paste**) → `opensips-cli -x mi config_reload` (or restart per SOP). Commit template in **pbx3sbc**; do not leave SBC-only hot patch undocumented.
 
 GenAst receive CLID = `suid@fqdn` is in **pbx3 `main`** (`GenClass` `SbcDomainRoute`). On golden: ensure dialplan regenerated (`genAst` / site SOP) so ring-leg CLIP still carries shortuid for Snom history user-part.
 
@@ -144,11 +144,11 @@ GenAst receive CLID = `suid@fqdn` is in **pbx3 `main`** (`GenClass` `SbcDomainRo
 | DID-on-every-ext as sole fix | Cost / incomplete; not needed if A ships |
 | Opening Slice B for phone-sourced INVITEs | Wrong gate; still wrong home |
 
-### Lab fixtures (golden / Magrathea)
+### Lab fixtures (golden / SBC)
 
 | Item | Value |
 |------|--------|
-| Magrathea | `3.93.26.82` (SBC VIP / lab edge) |
+| SBC | `3.93.26.82` (SBC VIP / lab edge) |
 | Home | golden `08jzwn` |
 | Pair | affcot `9wvvnb` ↔ duns `dhbm8x` |
 | Prefix | `81` both ways (**reverse** dialalias duns→affcot is **lab DB only** — recreate if wiped) |
@@ -165,7 +165,7 @@ GenAst receive CLID = `suid@fqdn` is in **pbx3 `main`** (`GenClass` `SbcDomainRo
 | NAT Contact/`received` | same RELAY path as station dial |
 | `is_from_asterisk` | `route[CHECK_IS_FROM_ASTERISK]` |
 
-### Pre-flight SQL (Magrathea) before coding
+### Pre-flight SQL (SBC) before coding
 
 ```sql
 -- Confirm unique username Contact for lab callee
@@ -187,6 +187,6 @@ Earlier same-box site dial: **callee BYE did not always clear caller** (hairpin 
 ## Resume checklist for implementer
 
 1. ~~Product-lock **A**~~ **done** (2026-08-05).  
-2. ~~Implement Path 1 in `DOMAIN_CHECK` + auth gate~~ **done** (template + Magrathea).  
-3. ~~Diff template → Magrathea live → reload → smoke~~ **lab green** (desk redial `hb64kj@9wvvnb` → RELAY).  
+2. ~~Implement Path 1 in `DOMAIN_CHECK` + auth gate~~ **done** (template + SBC).  
+3. ~~Diff template → SBC lab → reload → smoke~~ **lab green** (desk redial `hb64kj@9wvvnb` → RELAY).  
 4. Commit/push branch `slice-d-shortuid-usrloc-repair` (pbx3sbc + pbx3 docs) when operator asks.

@@ -2,22 +2,25 @@
 #
 # Seed lab peering data (Phases 1–2 outbound, Phase 3–4 inbound).
 # Golden fleet nodes send PSTN via PJSIP Egress → this SBC; SBC relays to carrier.
-# Inbound: Magrathea (Tier-2) signaling IPs → DID prefix → Asterisk gw.
+# Inbound: upstream carrier (Tier-2) signaling IPs → DID prefix → Asterisk gw.
 #
 # Required:
 #   CARRIER_ADDRESS   sip:host:5060  (failover / legacy primary — e.g. ael.vcloudpbx.com)
 #
 # Optional:
-#   CARRIER_FAILOVER_ADDRESS     legacy second outbound (gwid 2); prefer Phase 2 Magrathea path below
-#   MAGRATHEA_OUTBOUND_ADDRESS   default sip:sipipgw.magrathea.net:5060 (gwid 20, Phase 2 primary)
-#   SEED_MAGRATHEA_OUTBOUND=0    skip Magrathea outbound gwid 20 (default: seed when SEED_MAGRATHEA=1)
+#   CARRIER_FAILOVER_ADDRESS     legacy second outbound (gwid 2); prefer Phase 2 upstream outbound path below
+#   UPSTREAM_OUTBOUND_ADDRESS    default sip:sipipgw.example-carrier.net:5060 (gwid 20, Phase 2 primary)
+#   MAGRATHEA_OUTBOUND_ADDRESS   legacy alias for UPSTREAM_OUTBOUND_ADDRESS
+#   SEED_UPSTREAM=0              skip upstream inbound source gateways (default: seed)
+#   SEED_MAGRATHEA=0             legacy alias for SEED_UPSTREAM
+#   SEED_UPSTREAM_OUTBOUND=0     skip upstream outbound gwid 20 (default: follows SEED_UPSTREAM)
+#   SEED_MAGRATHEA_OUTBOUND=0    legacy alias for SEED_UPSTREAM_OUTBOUND
 #   ASTERISK_GW_ADDRESS          default sip:54.236.153.81:5060 (golden public SIP, gwid 10)
 #   ASTERISK_GW_ADDRESS_BZY54N   default sip:98.82.174.36:5060 (bzy54n Peer, gwid 12; no DID required)
 #   SEED_ASTERISK_BZY54N=0       skip bzy54n Asterisk Peer (default: seed)
-#   INBOUND_DID_PREFIX           default 01924918076 (lab Magrathea DID → Asterisk gw)
-#   SEED_MAGRATHEA=0             skip Magrathea inbound source gateways (default: seed them)
+#   INBOUND_DID_PREFIX           default 01924918076 (lab upstream DID → Asterisk gw)
 #
-# Phase 2 lab (2026-07-13): gwlist 20,1 — Magrathea sipipgw primary, Brindley/ael failover.
+# Phase 2 lab (2026-07-13): gwlist 20,1 — upstream sipipgw primary, Brindley/ael failover.
 #
 # Usage:
 #   CARRIER_ADDRESS='sip:ael.vcloudpbx.com:5060' sudo -E ./scripts/peering-seed-lab.sh
@@ -45,9 +48,9 @@ ASTERISK_GW_ADDRESS="${ASTERISK_GW_ADDRESS:-sip:54.236.153.81:5060}"
 ASTERISK_GW_ADDRESS_BZY54N="${ASTERISK_GW_ADDRESS_BZY54N:-sip:98.82.174.36:5060}"
 SEED_ASTERISK_BZY54N="${SEED_ASTERISK_BZY54N:-1}"
 INBOUND_DID_PREFIX="${INBOUND_DID_PREFIX:-01924918076}"
-SEED_MAGRATHEA="${SEED_MAGRATHEA:-1}"
-MAGRATHEA_OUTBOUND_ADDRESS="${MAGRATHEA_OUTBOUND_ADDRESS:-sip:sipipgw.magrathea.net:5060}"
-SEED_MAGRATHEA_OUTBOUND="${SEED_MAGRATHEA_OUTBOUND:-$SEED_MAGRATHEA}"
+UPSTREAM_OUTBOUND_ADDRESS="${UPSTREAM_OUTBOUND_ADDRESS:-${MAGRATHEA_OUTBOUND_ADDRESS:-sip:sipipgw.example-carrier.net:5060}}"
+SEED_UPSTREAM="${SEED_UPSTREAM:-${SEED_MAGRATHEA:-1}}"
+SEED_UPSTREAM_OUTBOUND="${SEED_UPSTREAM_OUTBOUND:-${SEED_MAGRATHEA_OUTBOUND:-$SEED_UPSTREAM}}"
 
 if [[ -z "$DB_PASS" || "$DB_PASS" == "your-password" ]]; then
   echo "Error: set DB_PASS or configure /etc/opensips/.mysql_credentials" >&2
@@ -62,25 +65,25 @@ if [[ ! "$CARRIER_ADDRESS" =~ ^sip: ]]; then
   exit 1
 fi
 
-# Phase 2: Magrathea outbound (20) primary + Brindley/ael (1) failover when Magrathea outbound seeded
+# Phase 2: upstream outbound (20) primary + Brindley/ael (1) failover when upstream outbound seeded
 GWLIST="1"
 RULE_DESC="Default outbound — Egress path from fleet nodes"
-if [[ "$SEED_MAGRATHEA_OUTBOUND" == "1" ]]; then
+if [[ "$SEED_UPSTREAM_OUTBOUND" == "1" ]]; then
   GWLIST="20,1"
-  RULE_DESC="Outbound failover — Magrathea (20) then Brindley (1)"
+  RULE_DESC="Outbound failover — upstream (20) then Brindley (1)"
 elif [[ -n "$CARRIER_FAILOVER_ADDRESS" ]]; then
   GWLIST="1,2"
   RULE_DESC="Outbound failover — gwid 1 then 2"
 fi
 
-if [[ "$SEED_MAGRATHEA_OUTBOUND" == "1" ]]; then
+if [[ "$SEED_UPSTREAM_OUTBOUND" == "1" ]]; then
   mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<SQL
 INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
 VALUES
-  ('20', 0, '${MAGRATHEA_OUTBOUND_ADDRESS}', 0, '', 'carrier=magrathea;role=outbound', 0, 0, 'Magrathea outbound (sipipgw IP auth)')
+  ('20', 0, '${UPSTREAM_OUTBOUND_ADDRESS}', 0, '', 'carrier=magrathea;role=outbound', 0, 0, 'Upstream carrier outbound (sipipgw IP auth)')
 ON DUPLICATE KEY UPDATE address=VALUES(address), description=VALUES(description), attrs=VALUES(attrs), state=0;
 SQL
-  echo "OK: Magrathea outbound gateway (gwid 20) ${MAGRATHEA_OUTBOUND_ADDRESS}"
+  echo "OK: upstream outbound gateway (gwid 20) ${UPSTREAM_OUTBOUND_ADDRESS}"
 fi
 
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<SQL
@@ -99,7 +102,7 @@ VALUES
 ON DUPLICATE KEY UPDATE gwlist=VALUES(gwlist), description=VALUES(description);
 
 -- Asterisk backends for inbound DID delivery (group 1) — fleet node public SIP
--- gwid 10 = golden (used by inbound Magrathea DID rule); gwid 12 = bzy54n Peer (optional, may have no routes yet)
+-- gwid 10 = golden (used by inbound upstream DID rule); gwid 12 = bzy54n Peer (optional, may have no routes yet)
 INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
 VALUES
   ('10', 0, '${ASTERISK_GW_ADDRESS}', 0, '', 'carrier=asterisk;role=asterisk', 0, 0, 'Fleet node Asterisk (golden)')
@@ -121,7 +124,7 @@ SQL
   echo "OK: bzy54n Asterisk Peer (gwid 12) ${ASTERISK_GW_ADDRESS_BZY54N}"
 fi
 
-if [[ -n "$CARRIER_FAILOVER_ADDRESS" && "$SEED_MAGRATHEA_OUTBOUND" != "1" ]]; then
+if [[ -n "$CARRIER_FAILOVER_ADDRESS" && "$SEED_UPSTREAM_OUTBOUND" != "1" ]]; then
   mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<SQL
 INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
 VALUES
@@ -130,25 +133,25 @@ ON DUPLICATE KEY UPDATE address=VALUES(address), description=VALUES(description)
 SQL
 fi
 
-# Magrathea (UK Tier-2) signaling IPs — inbound is_from_gw sources only (not outbound)
-if [[ "$SEED_MAGRATHEA" == "1" ]]; then
+# Upstream carrier (UK Tier-2) signaling IPs — inbound is_from_gw sources only (not outbound)
+if [[ "$SEED_UPSTREAM" == "1" ]]; then
   mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<'SQL'
 INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, probe_mode, state, description)
 VALUES
-  ('3', 0, 'sip:87.238.72.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.72.129'),
-  ('4', 0, 'sip:87.238.72.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.72.130'),
-  ('5', 0, 'sip:87.238.73.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.73.129'),
-  ('6', 0, 'sip:87.238.73.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.73.130'),
-  ('7', 0, 'sip:87.238.74.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.74.129'),
-  ('8', 0, 'sip:87.238.74.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 87.238.74.130'),
-  ('9', 0, 'sip:213.166.3.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 213.166.3.129'),
-  ('11', 0, 'sip:213.166.3.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Magrathea inbound 213.166.3.130')
+  ('3', 0, 'sip:87.238.72.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.72.129'),
+  ('4', 0, 'sip:87.238.72.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.72.130'),
+  ('5', 0, 'sip:87.238.73.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.73.129'),
+  ('6', 0, 'sip:87.238.73.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.73.130'),
+  ('7', 0, 'sip:87.238.74.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.74.129'),
+  ('8', 0, 'sip:87.238.74.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 87.238.74.130'),
+  ('9', 0, 'sip:213.166.3.129:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 213.166.3.129'),
+  ('11', 0, 'sip:213.166.3.130:5060', 0, '', 'carrier=magrathea;role=inbound', 0, 0, 'Upstream carrier inbound 213.166.3.130')
 ON DUPLICATE KEY UPDATE address=VALUES(address), description=VALUES(description), attrs=VALUES(attrs), state=0;
 SQL
-  echo "OK: Magrathea inbound source gateways (gwid 3–9, 11) with carrier=magrathea;role=inbound"
+  echo "OK: upstream inbound source gateways (gwid 3–9, 11) with carrier=magrathea;role=inbound (legacy wire slug)"
 fi
 
-# Optional lab Brindley inbound trust Peer (REGISTER FQDN / is_from_gw); not required for Magrathea-only seeds
+# Optional lab Brindley inbound trust Peer (REGISTER FQDN / is_from_gw); not required for upstream-only seeds
 if [[ "${SEED_BRINDLEY_INBOUND:-1}" == "1" ]]; then
   BRINDLEY_INBOUND_ADDRESS="${BRINDLEY_INBOUND_ADDRESS:-sip:sip.brindleyvcloud.net:5060}"
   mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<SQL
