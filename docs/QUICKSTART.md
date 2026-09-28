@@ -6,7 +6,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/aelintra/pbx3sbc.git
+git clone https://github.com/pbx3-oss/pbx3sbc.git
 cd pbx3sbc
 
 # Run installer
