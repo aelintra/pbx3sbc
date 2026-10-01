@@ -1,0 +1,6 @@
+# PBX3 provision MAC map — placeholder until sync-provision-mac-map.sh runs.
+# Generated HoR projection: catalog/provision-mac.map (gatekeeper MacIndexStore).
+# Do not hand-edit production file; re-sync from catalog.
+map $provision_mac $provision_upstream {
+    default "";
+}

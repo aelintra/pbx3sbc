@@ -1,0 +1,33 @@
+# Derive $provision_mac from phone request (path or ?mac=).
+# Included from http{} BEFORE provision-mac.map (which maps mac → upstream).
+# Spec: PROVISIONING_SERVER_REQUIREMENTS.md §6 · #11 — no-MAC / y000000 → empty → 404.
+
+map $arg_mac $provision_mac_from_arg {
+    default "";
+    "~*^([0-9A-Fa-f]{12})$" $1;
+}
+
+map $uri $provision_mac_from_uri {
+    default "";
+    # Yealink common Y-file — never route (#11)
+    "~*^/provisioning/y000000" "";
+    "~*y000000[0-9A-Fa-f]*\.cfg$" "";
+    # Ignore list
+    "~*_Security\.enc$" "";
+    "~*\.boot$" "";
+    # Path …/{mac}.cfg or …/{mac}
+    "~*/([0-9A-Fa-f]{12})\.cfg$" $1;
+    "~*/([0-9A-Fa-f]{12})/?$" $1;
+}
+
+map "$provision_mac_from_arg:$provision_mac_from_uri" $provision_mac_raw {
+    default "";
+    "~*^([0-9A-Fa-f]{12}):" $1;
+    "~*^:([0-9A-Fa-f]{12})$" $1;
+}
+
+# Reject all-zero MAC (fail-closed)
+map $provision_mac_raw $provision_mac {
+    default $provision_mac_raw;
+    "~*^0{12}$" "";
+}
