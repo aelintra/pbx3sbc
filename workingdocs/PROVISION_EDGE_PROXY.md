@@ -8,11 +8,12 @@
 
 ```text
 Phone → https://provision.{apex}:41363/provisioning/{mac}.cfg
+     or https://provision.{apex}:41363/provisioning?mac={mac}   (Snom)
   → nginx MAC extract → local provision-mac.map → http://{home}:41363 (same URI)
 ```
 
 - Edge terminates **HTTPS**; **no** 3xx to home (topology hiding).
-- **#11:** no routable MAC / Yealink `y000000*` / ignore list → **404**.
+- **#11:** no routable MAC / Yealink `y000000*` / ignore list / bare `/provisioning` → **404**.
 - **#3:** map is a **static file** on the SBC; GET never calls gatekeeper/S3.
 
 ## Install (SBC)
@@ -37,10 +38,12 @@ sudo PBX3_ORG_BUCKET=08jzwn-pbx3 ./scripts/sync-provision-mac-map.sh
 6. Prove:
 
 ```bash
-# known MAC in index → 200 from home via edge
+# known MAC in index → 200 from home via edge (path or ?mac=)
 curl -sk -o /dev/null -w '%{http_code}\n' \
   "https://provision.pbx3.com:41363/provisioning/AABBCCDDEEFF.cfg"
-# unknown / y000000 → 404
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  "https://provision.pbx3.com:41363/provisioning?mac=AABBCCDDEEFF"
+# unknown / y000000 / bare /provisioning → 404
 curl -sk -o /dev/null -w '%{http_code}\n' \
   "https://provision.pbx3.com:41363/provisioning/y000000000028.cfg"
 ```
