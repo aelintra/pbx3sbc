@@ -67,9 +67,9 @@ Live includes: `/etc/nginx/pbx3-provision/` + `conf.d/pbx3-provision-maps.conf`.
 - Golden SG: TCP **41363** from SBC VIP + `98.80.101.240`.
 - Map sync: `PBX3_ORG_BUCKET=08jzwn-pbx3 ./scripts/sync-provision-mac-map.sh`
 
-## mTLS (C5 later)
+## mTLS (C5)
 
-Client-cert verify is commented in the vhost. Gate on **D1** CA inventory (Snom/Yealink first).
+Client-cert verify is commented in the vhost. **D1:** operator holds **Snom + Yealink** vendor CAs (2026-10-01) — enough to build `vendor-client-cas.pem` and tip-lab optional/require verify for those brands. Other brands still inventory/gap. No SPA 3pcerts panel yet (ops file on edge).
 
 ## Related
 
