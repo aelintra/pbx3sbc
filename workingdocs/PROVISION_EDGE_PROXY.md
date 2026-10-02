@@ -71,6 +71,10 @@ Live includes: `/etc/nginx/pbx3-provision/` + `conf.d/pbx3-provision-maps.conf`.
 
 Client-cert verify is commented in the vhost. **D1:** operator holds **Snom + Yealink** vendor CAs (2026-10-01) — enough to build `vendor-client-cas.pem` and tip-lab optional/require verify for those brands. Other brands still inventory/gap. No SPA 3pcerts panel yet (ops file on edge).
 
+## Provision access / IP allowlist (C10)
+
+Optional Filament lockdown for **`:41363`** (sibling to Management access). Design: **`../pbx3-directory/docs/SBC_PROVISION_ACCESS_REQUIREMENTS.md`** (path from monorepo: `pbx3/pbx3-directory/docs/…`). Default off; complements mTLS.
+
 ## Related
 
 - Home listener: `pbx3` `install-provision-listener.sh` (fleet HTTP).
