@@ -87,6 +87,17 @@ else
     MGMT_ACCESS_SCRIPT_PATH=$(find /home /opt /usr/local -name "apply-management-access-ufw.sh" 2>/dev/null | head -1 || true)
 fi
 
+PROV_ACCESS_SCRIPT_PATH=""
+if [[ -f "/home/ubuntu/pbx3sbc/scripts/apply-provision-access-ufw.sh" ]]; then
+    PROV_ACCESS_SCRIPT_PATH="/home/ubuntu/pbx3sbc/scripts/apply-provision-access-ufw.sh"
+elif [[ -f "/opt/pbx3sbc/scripts/apply-provision-access-ufw.sh" ]]; then
+    PROV_ACCESS_SCRIPT_PATH="/opt/pbx3sbc/scripts/apply-provision-access-ufw.sh"
+elif [[ -f "$(dirname "$0")/apply-provision-access-ufw.sh" ]]; then
+    PROV_ACCESS_SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/apply-provision-access-ufw.sh"
+else
+    PROV_ACCESS_SCRIPT_PATH=$(find /home /opt /usr/local -name "apply-provision-access-ufw.sh" 2>/dev/null | head -1 || true)
+fi
+
 echo -e "${GREEN}Setting up sudoers configuration for pbx3sbc-admin...${NC}"
 echo ""
 
@@ -140,11 +151,19 @@ www-data ALL=(ALL) NOPASSWD: $MGMT_ACCESS_SCRIPT_PATH *
 EOF
 fi
 
+if [[ -n "$PROV_ACCESS_SCRIPT_PATH" ]]; then
+    cat >> "$SUDOERS_FILE" <<EOF
+
+# Provision access (phone provision HTTPS :41363 UFW lockdown — C10)
+www-data ALL=(ALL) NOPASSWD: $PROV_ACCESS_SCRIPT_PATH *
+EOF
+fi
+
 # php-fpm ProtectSystem=full blocks writing /etc/ufw even after sudo —
 # install ReadWritePaths drop-in when available.
 if [[ -f "$(dirname "$0")/setup-php-fpm-ufw-write.sh" ]]; then
     echo ""
-    echo -e "${YELLOW}Note: Management access Apply needs php-fpm ReadWritePaths=/etc/ufw${NC}"
+    echo -e "${YELLOW}Note: Management / Provision access Apply needs php-fpm ReadWritePaths=/etc/ufw${NC}"
     echo -e "  ${GREEN}sudo $(cd "$(dirname "$0")" && pwd)/setup-php-fpm-ufw-write.sh${NC}"
 fi
 

@@ -97,4 +97,4 @@ Live: `/etc/nginx/pbx3-provision/` (`provision-mac.map`, `vendor-client-cas.pem`
 - Home listener: `pbx3` `install-provision-listener.sh` (fleet HTTP).
 - Catalog claim: gatekeeper `POST /api/v1/mac-index/claim` (instance hook on MAC assign).
 - Ops CA inventory: `~/GiT/pbx3-ops/devdocs/provisioning/VENDOR_CLIENT_CA_INVENTORY.md`
-- Optional later: **C10** Provision access IP allowlist (Filament) — complements mTLS.
+- Optional: **C10** Provision access IP allowlist — Filament **System → Provision access** + `scripts/apply-provision-access-ufw.sh` (complements mTLS).
