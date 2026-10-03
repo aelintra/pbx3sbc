@@ -1,0 +1,20 @@
+[Unit]
+Description=PBX3 provision MAC map sync (catalog → nginx)
+Documentation=https://github.com/pbx3-oss/pbx3sbc/blob/main/workingdocs/PROVISION_EDGE_PROXY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# PBX3_ORG_BUCKET (+ region) — same file as log-ship / SBC backup
+EnvironmentFile=-/etc/pbx3sbc/log-ship.env
+ExecStart=/usr/local/sbin/sync-provision-mac-map.sh
+Nice=10
+# Reloading nginx is fine if unchanged S3 object; avoid stacking runs
+RemainAfterExit=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
