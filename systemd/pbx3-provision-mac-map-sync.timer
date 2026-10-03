@@ -1,0 +1,14 @@
+[Unit]
+Description=PBX3 provision MAC map sync every minute
+Documentation=https://github.com/pbx3-oss/pbx3sbc/blob/main/workingdocs/PROVISION_EDGE_PROXY.md
+Requires=pbx3-provision-mac-map-sync.service
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=pbx3-provision-mac-map-sync.service
+
+[Install]
+WantedBy=timers.target

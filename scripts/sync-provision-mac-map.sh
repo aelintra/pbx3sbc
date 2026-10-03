@@ -22,6 +22,15 @@ log() { echo "sync-provision-mac-map: $*"; }
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 mkdir -p "$CONF_DST"
 
+# Timer / oneshot: load org bucket from the same env as log-ship if unset
+if [ -z "${PBX3_ORG_BUCKET:-}" ] && [ -f /etc/pbx3sbc/log-ship.env ]; then
+	# shellcheck disable=SC1091
+	set -a
+	# shellcheck source=/dev/null
+	. /etc/pbx3sbc/log-ship.env
+	set +a
+fi
+
 fetch_to_tmp() {
 	if [ -n "${PROVISION_MAC_MAP_FILE:-}" ] && [ -f "$PROVISION_MAC_MAP_FILE" ]; then
 		cp "$PROVISION_MAC_MAP_FILE" "$TMP"
@@ -66,6 +75,12 @@ grep -q 'map \$provision_mac \$provision_upstream' "$TMP" || die "artifact missi
 if grep -qiE 'password|sip_auth|secret' "$TMP"; then
 	rm -f "$TMP"
 	die "refusing map that looks like it contains secrets"
+fi
+
+if [ -f "$DEST" ] && cmp -s "$TMP" "$DEST"; then
+	rm -f "$TMP"
+	log "unchanged $DEST — skip reload"
+	exit 0
 fi
 
 mv "$TMP" "$DEST"

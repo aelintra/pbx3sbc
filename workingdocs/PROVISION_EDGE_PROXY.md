@@ -50,12 +50,21 @@ sudo VENDOR_CLIENT_CA_BUNDLE=/path/to/vendor-client-cas-snom-yealink.pem \
 | `optional` | `optional` | **Lab default when CA present** — verify if phone presents cert; allow curl / manual-URL brands without cert |
 | `require` | `on` | Hardened public edge — TLS fails without trusted client cert |
 
-6. Sync map after MAC claims (or cron):
+6. **MAC map sync (automatic):** enable the 1-minute systemd timer (also invoked from `install-provision-edge.sh` when `/etc/pbx3sbc/log-ship.env` has `PBX3_ORG_BUCKET`):
 
 ```bash
-sudo PBX3_ORG_BUCKET=08jzwn-pbx3 ./scripts/sync-provision-mac-map.sh
-# or: sudo PROVISION_MAC_MAP_FILE=/path/to/provision-mac.map ./scripts/sync-provision-mac-map.sh
+sudo ./scripts/install-provision-mac-map-sync-timer.sh
+# systemctl list-timers pbx3-provision-mac-map-sync.timer
 ```
+
+SPA Save → Gatekeeper claim publishes `catalog/provision-mac.map` to S3 immediately; the SBC picks it up within **~1 minute** (no Instance→SBC login hop). Force refresh:
+
+```bash
+sudo ./scripts/sync-provision-mac-map.sh
+# or: sudo systemctl start pbx3-provision-mac-map-sync.service
+```
+
+Tip-hot push (Gatekeeper → SBC API on claim) is a later polish — not required when the timer is running.
 
 7. Prove:
 
@@ -82,8 +91,10 @@ Snom/Yealink phones that present a vendor client cert are verified (`$ssl_client
 | `config/nginx/mac-from-request.map` | URI/`?mac=` → `$provision_mac` |
 | `config/nginx/provision-mac.map.example` | Empty map seed |
 | `config/nginx/vendor-client-cas.pem.example` | Placeholder — **do not** commit real CAs |
-| `scripts/install-provision-edge.sh` | Install maps + site + optional C5 CA + reload |
-| `scripts/sync-provision-mac-map.sh` | Pull catalog artifact → local + reload |
+| `scripts/install-provision-edge.sh` | Install maps + site + optional C5 CA + reload + MAC map timer |
+| `scripts/install-provision-mac-map-sync-timer.sh` | Install/enable 1-minute S3→nginx map sync |
+| `scripts/sync-provision-mac-map.sh` | Pull catalog artifact → local + reload (also timer ExecStart) |
+| `systemd/pbx3-provision-mac-map-sync.{service,timer}` | Auto-sync units |
 
 Live: `/etc/nginx/pbx3-provision/` (`provision-mac.map`, `vendor-client-cas.pem`) + `conf.d/pbx3-provision-maps.conf` + `conf.d/pbx3-provision-log-format.conf`.
 
@@ -91,6 +102,7 @@ Live: `/etc/nginx/pbx3-provision/` (`provision-mac.map`, `vendor-client-cas.pem`
 
 - **C2 (2026-09-30):** DNS **A** `provision.pbx3.com` → **`3.93.26.82`**; LE; known MAC **200** / unknown **404**.
 - **C5 (2026-10-02):** Yealink T31P **402** (`249ad89b435b`) — `$ssl_client_verify=SUCCESS`, **200** on `.cfg`. Bare curl under `optional` → **NONE**/200; under `require` → **400**. Snom D717 **401** reboot GET **200** (UA present). Left on **`optional`**.
+- **MAC map timer (2026-10-03):** `pbx3-provision-mac-map-sync.timer` every **1 min** — SPA claim no longer needs manual SBC sync.
 
 ## Related
 

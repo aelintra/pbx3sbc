@@ -43,7 +43,7 @@ mkdir -p "$CONF_DST" /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/ng
 cp "$CONF_SRC/mac-from-request.map" "$CONF_DST/mac-from-request.map"
 if [ ! -f "$CONF_DST/provision-mac.map" ]; then
 	cp "$CONF_SRC/provision-mac.map.example" "$CONF_DST/provision-mac.map"
-	log "seeded empty provision-mac.map — run sync-provision-mac-map.sh after MAC claims"
+	log "seeded empty provision-mac.map — timer / sync-provision-mac-map.sh will populate after MAC claims"
 fi
 
 # C5 — vendor client CA bundle (ops-supplied; never required in git)
@@ -123,7 +123,18 @@ ln -sfn "$AVAILABLE" "$ENABLED"
 nginx -t || die "nginx -t failed"
 systemctl reload nginx
 log "enabled $ENABLED for $PROVISION_FQDN:41363 (mTLS=$PROVISION_MTLS)"
-log "next: DNS A $PROVISION_FQDN → edge VIP; sync-provision-mac-map.sh; open UFW 41363/tcp public (phone-facing)"
+
+# 1-minute catalog → nginx map sync (SPA Save claim no longer needs manual SBC sync)
+if [ -x "$SCRIPTS/install-provision-mac-map-sync-timer.sh" ]; then
+	if "$SCRIPTS/install-provision-mac-map-sync-timer.sh"; then
+		log "MAC map sync timer enabled"
+	else
+		log "WARN: MAC map sync timer install failed — run install-provision-mac-map-sync-timer.sh after /etc/pbx3sbc/log-ship.env is set"
+	fi
+fi
+
+log "next: DNS A $PROVISION_FQDN → edge VIP; open UFW 41363/tcp public (phone-facing)"
+log "map sync: timer every 1 min (manual: sync-provision-mac-map.sh)"
 if [ "$PROVISION_MTLS" = "optional" ]; then
 	log "lab tip: curl without client cert still works; Snom/Yealink with vendor client certs are verified"
 elif [ "$PROVISION_MTLS" = "require" ]; then
