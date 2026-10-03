@@ -7,7 +7,7 @@ This directory contains Fail2ban configuration files for detecting and blocking 
 Fail2ban monitors OpenSIPS logs for security events and automatically blocks IP addresses that exceed configured thresholds. This implementation monitors two attack vectors:
 
 1. **Failed Registration Attempts** - Password guessing attacks (403 Forbidden and other failures)
-2. **Door-Knock Attempts** - Extension scanning, unknown domain probes, scanner activity, and **unknown-source INVITEs** to `sip:{user}@{VIP}` (not fleet Asterisk / not carrier Peer) — OpenSIPS logs `Door-knock blocked: … (unknown source INVITE)` then Fail2ban bans after `maxretry`
+2. **Door-Knock Attempts** - Extension scanning, unknown domain probes, scanner activity, and **unknown-source INVITEs** to `sip:{user}@{VIP}` (not fleet Asterisk / not carrier Peer) — OpenSIPS **silently drops** (no SIP reply) + logs `Door-knock blocked: … (unknown source INVITE)`; Fail2ban bans after `maxretry`
 
 ## Files
 

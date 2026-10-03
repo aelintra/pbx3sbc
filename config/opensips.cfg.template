@@ -1063,7 +1063,8 @@ route[DOMAIN_CHECK] {
             # Domain not found from source IP (RURI host is IP, reverse dispatcher lookup failed).
             # Scanners hit sip:{digits}@{VIP} — must not wildcard location (noise + multi-tenant risk).
             # Trusted Asterisk already passed CHECK_IS_FROM_ASTERISK; carriers exit via FROM_CARRIER.
-            # Untrusted → door-knock log (Fail2ban opensips-combined) + 403.
+            # Untrusted → door-knock log (Fail2ban) + silent drop (no SIP reply).
+            # 403 advertises a stack; scanners usually move on faster with no answer.
             if ($var(is_from_asterisk) != 1) {
                 xlog("L_NOTICE",
                      "Door-knock blocked: domain=$var(domain) src=$si (unknown source INVITE)\n");
@@ -1075,7 +1076,6 @@ route[DOMAIN_CHECK] {
                 if (sql_query($var(query))) {
                     xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp\n");
                 }
-                sl_send_reply(403, "Forbidden");
                 exit;
             }
             # From Asterisk but domain reverse-lookup failed — SQL wildcard fallback (with warning)
