@@ -1060,7 +1060,25 @@ route[DOMAIN_CHECK] {
             $ru = $var(original_ru);
             xlog("L_WARN", "INVITE: Domain-specific lookup failed for $var(endpoint_user)@$var(domain_from_source) (source IP $si)\n");
         } else {
-            # Domain not found - use SQL wildcard lookup as fallback (with warning)
+            # Domain not found from source IP (RURI host is IP, reverse dispatcher lookup failed).
+            # Scanners hit sip:{digits}@{VIP} — must not wildcard location (noise + multi-tenant risk).
+            # Trusted Asterisk already passed CHECK_IS_FROM_ASTERISK; carriers exit via FROM_CARRIER.
+            # Untrusted → door-knock log (Fail2ban opensips-combined) + 403.
+            if ($var(is_from_asterisk) != 1) {
+                xlog("L_NOTICE",
+                     "Door-knock blocked: domain=$var(domain) src=$si (unknown source INVITE)\n");
+                # (see SQL-escaping note near mf_process_maxfwd_header above)
+                $var(query) = "INSERT INTO door_knock_attempts " +
+                    "(domain, source_ip, source_port, user_agent, method, request_uri, reason, attempt_time) " +
+                    "VALUES ('" + $(var(domain){s.escape.common}) + "', '" + $si + "', " + $sp + ", " +
+                    "'" + $(ua{s.escape.common}) + "', '" + $(rm{s.escape.common}) + "', '" + $(ru{s.escape.common}) + "', 'unknown_source_invite', NOW())";
+                if (sql_query($var(query))) {
+                    xlog("Door-knock attempt logged to database - domain=$var(domain) from $si:$sp\n");
+                }
+                sl_send_reply(403, "Forbidden");
+                exit;
+            }
+            # From Asterisk but domain reverse-lookup failed — SQL wildcard fallback (with warning)
             xlog("L_WARN", "INVITE: Could not determine domain from source IP $si, using wildcard lookup (may route to wrong customer in multi-tenant)\n");
             # Use received field if available (NAT traversal), otherwise use contact field
             # SECURITY (safety-debt #11): escape free-form endpoint_user before SQL concat
